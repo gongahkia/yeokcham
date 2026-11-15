@@ -72,13 +72,13 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt and native HTTPS exchange; checkpoints below | Ordinary clone, availability/coverage, complete fault qualification and full phase criteria remain |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt, native HTTPS exchange and verified clone; checkpoints below | Known-only branch selection, missing-content inspection/coverage, complete fault qualification and full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
-| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery; checkpoints below | Native outbound acknowledgement, conflict/policy integration, complete fault matrix and formal phase acceptance remain |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange | Verified Core clone, native resolution, archive/preferences and complete multi-person journeys remain |
+| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery and actual native outbound acknowledgement; checkpoints below | Conflict/policy integration, complete fault matrix and formal phase acceptance remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone | Known-only branch selection, native resolution, archive/preferences and complete multi-person journeys remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -102,19 +102,24 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 
 ## Current-phase checkpoints
 
-- P3 latest checkpoint: native `exchange NAME` now passes a real controlled TLS
+- P3 latest checkpoint: verified native `clone URL [DIRECTORY]`, preview/request
+  binding and local resume are committed as
+  `1105c60c8e724b9e49abf9f021b890207f4844e5`. Controlled TLS clone/update and
+  interruption journeys pass; build/lint/default CI pass on stable source.
+  Known-only branch selection, native text/opaque resolution, read-only missing
+  content inspection, the error/authority/fault matrix and final acceptance audit
+  remain. P3 is active and incomplete. Detailed evidence and limitations below.
+
+- Earlier P3 native `exchange NAME` checkpoint passes a real controlled TLS
   Alice/Bob CLI journey, exact lost-acknowledgement retry and a private-cache
   provenance regression. Implementation is `10210f528ea424dd0393f3b1d6755df4817de979`.
-  Build/lint/default CI passed; details below. Ordinary clone, first selection of
-  known-only branches, native resolution, missing-content inspection and the full
-  acceptance/fault audit remain. P3 is incomplete; next work stays inside P3.
+  Build/lint/default CI passed; details below. Clone was subsequently added above.
 
-- P3 current checkpoint: public Core export and atomic metadata receipt are
+- Earlier P3 checkpoint: public Core export and atomic metadata receipt are
   committed. `9f79f9dd6d0043eea3b696f429998117fe9444e4` preserves exact private
   history, allocation, positions, files and pending operations while admitting
-  incoming public records. The next consumer is durable native outbound state
-  and real relay/clone/exchange; native resolution and the full Alice/Bob audit
-  remain required. P3 is incomplete. Detailed evidence is appended below.
+  incoming public records. Durable outbound and real relay/clone/exchange were
+  subsequently added; native resolution and the full audit remain required.
 
 - P3 recovery continuation `p3-recovery-resume-2026-11-15` resumes on main
   `480ff7adc5e1518f76456927639355de11d53f18` with the existing thirteen modified
@@ -1487,3 +1492,97 @@ pages; old binaries cannot decode new catalogue-bearing state. Source rollback
 cannot retract relay bytes/acknowledgements, restore working files or undo accepted
 history. No push/release/deployment, P4 work, native human/performance qualification
 or P03 completion report/receipt is claimed. P3 remains active and incomplete.
+
+P3 native clone checkpoint:
+`94e08c0d3ad990dd52a642ca55390bcdb397d9d0`,
+`766bc88a32bf703553746964b7abf5057d30d640`,
+`01a54f728fa4484fede320dca7cdb914cfda7ec3` and
+`37311de153d7e9fb91321c99f44ec3f5c300ec73` appeared as external `newthings`
+snapshots of this continuation's owned clone-intent, scoped-credential, fetch and
+target-check prerequisites and then-unverified service. Inspected/preserved without
+reset/amend. Final verified implementation is
+`1105c60c8e724b9e49abf9f021b890207f4844e5`.
+
+`clone https://RELAY/v1/repositories/REPOSITORY [DIRECTORY]` now verifies repository,
+root phrase, current enrolled device, unique branch/accepted/event selection and
+complete advertised public closure before initialization. Generated directory/
+private member/draft/workspace identities avoid manual internal record creation.
+Preview creates no destination/history/operation or saved credential; its source
+request ID can bind the actual command. Tokens use exact endpoint/repository custody,
+an interactive text prompt or explicit bounded standard input. Native exchange no
+longer falls back to equal remote aliases from another workspace; existing users
+with alias-only credentials must log in again. A bearer cannot enroll a device.
+
+Actual clone copies only verified public artifact IDs into fresh private empty
+history, attaches fully initialized metadata by exclusive native rename, binds an
+immutable local plan, and uses actual safe integration to select known accepted
+contents without signing another genesis/acceptance. Schema-4 private transport
+intent freezes source/root/device/branch/accepted/event selection; root update
+guards refuse erasure, retargeting of a started operation and completion reversal.
+Ordinary capture is blocked until completion or explicit recovery. Resume after
+attachment is local and uses no signing provider. Recovered operations stay closed.
+Plan cleanup now follows durable clone completion: the first TLS test exposed an
+early-release refusal after successful application, corrected without weakening
+the pending-plan guard. Late disk edits survive Materialized resume and remain
+reported as uncaptured work. CLI JSON/plain help/actions and actual APIs/schemas
+are documented in COLLABORATION.md and INTERFACES.md.
+
+Review also found that per-packet bounds alone allowed excessive accumulated
+courier metadata. Native fetch now caps total canonical courier bytes by the
+shared 16 MiB control bound and stops fetching after overflow. Clone checks the
+growing catalogue's full encoded bound before fetching package contents, before
+destination creation. Focused tests exercise exact aggregate fit, early refusal
+and skipping known IDs. Independent Python vectors cover clone schema 4 and its
+domain-separated request digest; all seven package/hash/courier/clone vectors pass.
+
+The TLS clone test runs fresh JSON/plain CLI processes on separately enrolled
+Alice/Bob test devices: accepted mixed CRLF/binary/executable/symlink/empty-directory
+contents, excluded private sentinel, wrong root, unenrolled signer, read-only
+preview, stale request, clone, exact repeat and configured-origin exchange. Forks
+stop at actual metadata attachment, before/after plan binding, Prepared, Applying,
+file mutation, Materialized, Committed, Completed and before/after clone-completion
+publication. Fresh CLI resumes without Bob's signer; checks preserve operation
+identity, one navigation, public records and a post-materialization external edit.
+The cloned workspace subsequently receives Alice's explicit immutable update
+without files/history movement, previews, accepts D while retaining Bob's private
+E, and exchanges accepted history back. This is automated main-branch evidence
+with disposable explicit capabilities, not native custody/human qualification.
+Nondefault clone selection and additional refusal/recovery combinations still
+belong in the remaining P3 audit.
+
+Focused local-core69, safe-application22, V1-store6, Core-package15, GC11 and
+service45 passed, followed by seven focused transport control cases (other cases
+intentionally skipped). Full transport25 passed before the aggregate-bound
+addition; final CI ran all26 transport cases with no reported skips. Final
+`make build`, `make lint`, `make ci` exited 0 against the exact stable source later
+committed as `1105c60`; CI took 239.855 seconds and reused matching unchanged Dune
+actions. `core-clone-stable-checks.json` in the external P3 log directory records
+commands/exits/durations/file SHA-256 and `source_stable: true`. Earlier passing
+checks were superseded by later hardening (`core-clone-final-checks.json` correctly
+records unstable source); they are not final revision evidence. Initial CLI type/
+test syntax errors, the cleanup failure and formatter promotions were corrected.
+One concurrent Dune build request refused because the active server was not in
+watch mode; serialized rebuilding passed. Documentation links and independent
+generation passed. README/P2 evidence/accepted G01 hashes still match start.json;
+no accepted measurement or external benchmark artifact was recreated.
+
+Partial original-phase coverage: G02 adds a bounded private control schema and
+documented APIs; G03 adds the clone root/enrolled-member refusal boundary; G04/G13
+reuse exact plan/application facts for first selection and real acknowledgement;
+G08/G14 add native verified clone and a cloned-peer update loop. No whole original
+phase is complete. Required P3 continuation: support first switching of known-only
+branches and stale saved branch bases, implement real conflicts/resolve with exact
+text/opaque choices/replacements/deferral, provide truthful read-only inspection
+when admitted contents are unavailable, finish malformed/signature/authority/exit
+classification and refusal/fault/GC coverage, then audit every criterion and write
+P03 report/acceptance evidence separately. Do not start P4 or full G02-G20.
+
+Rollback must preserve schema-4 transport clone intent, plans, operation/safety
+roots, working files and scoped credentials. Old transport readers refuse the new
+intent. Reverting binaries cannot undo files/history/remote acknowledgements.
+Pre-attachment interruption can leave an empty destination and sibling staging;
+rerun the original command because no workspace was activated. Cross-filesystem
+metadata attachment refuses without a replacement/copy fallback. Preserve
+unexpected staging contents. No native macOS/Windows, Docker, custody onboarding,
+human usability, managed service/backup, push/release/deployment or P3 completion
+is claimed. P3 remains active and incomplete.
