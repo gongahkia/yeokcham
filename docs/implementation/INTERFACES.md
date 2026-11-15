@@ -1067,7 +1067,8 @@ an unreadable state head. Corruption refuses replacement and blocks GC planning.
 
 This supplies the actual library planner/retained proposal. The following
 checkpoints add durable service execution and ordinary CLI integration;
-resolution, recovery choices and native exchange remain in progress.
+resolution and native exchange remain in progress. Private recovery is described
+after the integration consumer below.
 
 
 ### P3 durable integration service (in progress)
@@ -1078,8 +1079,8 @@ runs the existing `Safe_apply.check` for Ready contents. `apply ~root ~plan
 ~signing_capability` is called only after confirmation of that Plan ID. `resume
 ~root ~operation` continues an existing durable operation without another signer.
 These APIs are wired to actual storage and file application. The following CLI
-checkpoint supplies selection/confirmation/inspection/resume; recovery choices
-remain a required consumer.
+checkpoint supplies selection/confirmation/inspection/resume; the private recovery
+consumer below supplies explicit cancellation and recovery choices.
 
 Providers run after releasing the writer lock. The service reacquires the lock,
 reloads the current root and fully revalidates the exact plan after signing.
@@ -1163,8 +1164,8 @@ restart without a signer, one acceptance/history child, private D/E separation,
 late edits after Materialized, external-edit pauses, unrelated receipt retention,
 GC roots, stale confirmation, provider-time revalidation, absence of a writer
 lock during provider callbacks and bounded token collision/entropy refusal.
-Conflict resolution, user-facing recovery choices and native clone/exchange
-remain P3 requirements; these service tests do not complete P3.
+Conflict resolution and native clone/exchange remain P3 requirements; these
+service tests do not complete P3.
 
 
 ### P3 integration CLI consumer (in progress)
@@ -1210,5 +1211,105 @@ Fresh-process disposable-signer journeys cover D/E separation, exact revision an
 contextual/all selection, saved-plan confirmation, cancellation, provider-free
 preview/retry/no-op, stale inputs, text/JSON diffs, operation show/resume and
 status. They are local CLI evidence. Native relay exchange/clone, complete
-conflict resolution and user-facing recovery are still unimplemented P3 scope;
+conflict resolution are still unimplemented P3 scope;
 legacy resolution/package commands do not satisfy those criteria.
+
+### P3 private integration recovery (in progress)
+
+`Local_service.Integrate.recover ~root ~operation ~dry_run ~mode ~replan
+~expected_plan` returns `recovery_outcome` with exact recovery digest, operation,
+observed/target snapshot identities and preview/resume facts. `mode` is optional
+`Store.Local.Operation.Restore_safety` (default) or `Keep_current`. `resume`
+continues an existing recovery without a signer. `forget_recovery_roots ~root
+~operation` explicitly releases a completed recovery's extra roots and its owned
+proof; it does not erase the operation or edit files/history.
+
+Recovery can close an uncommitted integration, including Materialized, but cannot
+unaccept a Committed operation. It captures the current tree as an explicit
+recovery observation, not an ordinary partial-tree checkpoint. Preflight verifies
+the complete chosen target and destination constraints before mutation. Preview
+does not publish an intent or move refs. Confirmation occurs outside the writer
+lock. The recovery digest is SHA-256 of domain
+`yeokcham/integration-recovery-plan/v1\0` followed by canonical encoding of:
+
+```text
+[1, operation_token, integration_plan_id, branch, source_workspace,
+ source_sequence, operation_serial, mode, original_safety, observed_snapshot,
+ filesystem_observation_digest]
+mode = 0 Restore_safety | 1 Keep_current
+```
+
+This private confirmation digest uses `Core.Digest`, not registry-46 `Plan_id`.
+`Integration.observation_digest` supplies the existing filesystem-fact digest.
+An altered observation or serial refuses an old confirmation. Each actual attempt
+uses a fresh CSPRNG 128-bit execution token with three bounded collision attempts
+across publications, integration tokens and every recovery attempt. Its physical
+namespace is hex SHA-256 of `yeokcham/integration-recovery-application/v1\0` plus
+the integration token and attempt token. Before-first-root staging left by a crash
+cannot collide with a fresh attempt's physical namespace.
+
+An operation with recovery uses ordered value schema 2, with the same seventeen
+fields after the version as schema 1, followed by `recovery`. Values without
+recovery retain schema 1 exactly. No new public envelope code is allocated:
+
+```text
+[2, plan_id, plan_object, branch, source_workspace, source_sequence,
+ target_sequence, safety_snapshot, workspace_target, accepted_record,
+ staged_record_pairs, physical_digest, expected_generation, expected_root,
+ created_at, phase, serial, outbound_acknowledged, recovery]
+recovery = [1, attempt_token, recovery_digest, observed_snapshot,
+ physical_digest, started_at, progress, retained, mode, pause_reason_or_null,
+ previous_attempt_root_or_null]
+progress = 0 Prepared | 1 Applying | 2 Materialized | 3 Committed | 4 Completed
+```
+
+The existing row/page input bounds apply. Superseded attempts are canonical
+one-row metadata pages (`attempt` key), namespaced by
+`integration-recovery-history-v1\0` plus repository and integration token bytes.
+Each page is bounded to one row/8192 value bytes/8192 total value bytes; traversal
+rejects cycles/repetition and more than 100000 prior attempts. Derived
+`previous_recoveries` caches are reconstructed, not mutable independent claims.
+Unsupported versions/modes/phases, malformed IDs, negative timestamps,
+committed pauses, inconsistent completion and duplicate attempt identities refuse.
+
+Recovery facts advance the same consecutive operation serial. The original
+primary phase remains until recovery Completed closes it. `Operation.committed`
+is false for a recovered operation; `recovered` distinguishes successful private
+recovery from shared acceptance. At recovery Committed, the original provisional
+history sequence is consumed once for an actual child of the saved safety node,
+containing safety or the explicitly chosen current observation. Shared basis and
+the authoritative Core record pool stay unchanged. Retrying the old plan remains
+closed; a fresh integration can use the new cursor.
+
+P2 staging checks every changed image and all expected target paths before
+Materialized, including unchanged files, while retaining noncolliding ignored
+extras. External changes pause recovery. Explicit `--replan` freezes another
+observation and links the prior exact attempt; it cannot replace a committed
+recovery. Materialized retries finish metadata without replaying files over later
+edits. A verified owned restore proof precedes Completed when observation and
+chosen result differ.
+
+Pending operations root all required proposals/observations. Completed recovered
+operations keep their proposed target and current/prior observations until
+explicit release. Release updates the state root before deleting the matching
+proof; retries finish cleanup across that gap. A released cancelled operation
+retains signed reference/identity/input checks but no longer requires the
+discarded proposal's content composition to remain available. It cannot admit
+those staged records; authoritative public records still receive their full
+accepted-result validation. Actual GC of an unaccepted merged target followed by
+reload/resume is tested.
+
+`Service` accepts operation-protected snapshots for read-only diff and supported
+restore/copy-out. A pending copy-out journal independently owns its target even
+after operation-root release. `Gc.Recovery_contents` roots non-checkpoint journal
+and proof snapshots and verifies their complete closure before collection.
+This avoids fabricating ordinary checkpoints to retain recovery alternatives.
+
+CLI commands are `operation recover ID [--preview|--yes] [--plan DIGEST]
+[--keep-current] [--replan]` and `operation forget ID [--preview|--yes]
+[--plan DIGEST]`. Noninteractive/JSON mutation requires explicit confirmation;
+preview and terminal cancellation leave files/history unchanged. Schema-2 JSON
+includes mode, observed/chosen identities, comparisons/availability, recovery
+phase/pause, retention and prior-observation IDs. Completed historical retries
+do not claim to inspect the current tree. These local recovery journeys do not
+complete conflict resolution, Core exchange or the P3 two-person pilot.

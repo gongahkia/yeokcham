@@ -98,7 +98,8 @@ restores the selected branch's private history position and preserves the source
 position and unsaved work. Selection survives restart. Duplicate names refuse
 without retargeting; divergent names/heads require reconciliation. Shared branches,
 drafts and local undo continuations are separate objects. These local commands do
-not implement P3's shared exchange/composition/integration loop.
+not by themselves implement P3's shared exchange loop. Local shared integration
+and private recovery are described in [Collaboration](COLLABORATION.md).
 
 ## Recovery and separate copies
 
@@ -159,3 +160,27 @@ restore proofs are retention roots. Local ancestry is not exported by existing
 public package/relay operations. Existing V1 roots remain readable; a namespace is
 bound on a saved mutation without inventing ancestry. Older clients may not read
 new local wrappers/journals; preserve current data before changing versions.
+
+## Pending shared-integration recovery
+
+`operation show ID` distinguishes accepted commit from completed private
+recovery. `operation recover ID --preview` proposes restoring pre-integration
+private contents while retaining the currently observed tree separately.
+`--keep-current` explicitly keeps that observation as private work, and `--replan`
+creates another attempt without erasing previous observations. Confirm with
+`--plan RECOVERY_PLAN_ID --yes`; ordinary preview/cancellation does not navigate
+history or replace files. Recovery uses one distinct private history child and
+does not publish the cancelled shared acceptance.
+
+Inspect retained observation IDs through `diff`, or copy them out with
+`restore SNAPSHOT --to NEW_DIRECTORY --yes`. A pending copy-out owns its contents
+even if the integration's extra roots are subsequently released. Explicit
+`operation forget ID --yes` releases a completed recovery's extra roots/proof;
+ordinary history and live files remain. Historical operation metadata remains
+inspectable after GC, with unavailable comparisons reported truthfully.
+
+Resume preserves external edits after Materialized and pauses when unexpected
+edits conflict with Applying. An already committed shared acceptance cannot be
+cancelled through private recovery. Use private undo/restore instead; source
+reversion does not unaccept work or restore user files. Native clone/exchange
+and shared conflict resolution remain unfinished P3 work.

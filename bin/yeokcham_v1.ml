@@ -129,6 +129,8 @@ let native_json_command command =
          "operation";
          "operation-show";
          "operation-resume";
+         "operation-recover";
+         "operation-forget";
          "history";
          "diff";
          "changes";
@@ -179,6 +181,8 @@ let domain_command command =
          "operation";
          "operation-show";
          "operation-resume";
+         "operation-recover";
+         "operation-forget";
          "history";
          "diff";
          "changes";
@@ -489,6 +493,9 @@ let usage_text =
   \  yeokcham save [--root PATH]\n\
   \  yeokcham integrate [CHANGE...] [--all] [--preview|--yes] [--plan ID]\n\
   \  yeokcham operation show|resume ID [--root PATH]\n\
+  \  yeokcham operation recover ID [--preview|--yes] [--plan ID] \
+   [--keep-current] [--replan]\n\
+  \  yeokcham operation forget ID [--preview|--yes] [--plan ID]\n\
   \  yeokcham branch list [--root PATH]\n\
   \  yeokcham branch create NAME [--root PATH]\n\
   \  yeokcham switch NAME [--root PATH] [--preview|--yes] [--plan ID]\n\
@@ -802,6 +809,20 @@ let help_for = function
          Inspect the durable integration phase, plan, safety/target identities \
          and pending outbound work without scanning or rewriting working \
          files."
+  | [ "operation"; "recover" ] ->
+      Some
+        "usage: yeokcham operation recover ID [--root PATH] [--preview|--yes] \
+         [--plan ID] [--keep-current] [--replan]\n\n\
+         Restore pre-integration private contents, preserving the current disk \
+         tree separately. --keep-current explicitly keeps the observed tree as \
+         private work. --replan creates a new recovery attempt and retains \
+         prior observations. This cannot undo committed shared acceptance."
+  | [ "operation"; "forget" ] ->
+      Some
+        "usage: yeokcham operation forget ID [--root PATH] [--preview|--yes]\n\n\
+         Explicitly release a completed recovery's extra snapshot roots/proof. \
+         Live files, accepted records and private history are unchanged; later \
+         GC may collect unreferenced alternatives."
   | [ "operation"; "resume" ] ->
       Some
         "usage: yeokcham operation resume ID [--root PATH]\n\n\
@@ -3309,6 +3330,71 @@ let phase_name = function
   | Integration_op.Completed -> "completed"
   | Integration_op.Paused _ -> "paused"
 
+let recovery_progress_name = function
+  | Integration_op.Recovery_prepared -> "prepared"
+  | Integration_op.Recovery_applying -> "applying"
+  | Integration_op.Recovery_materialized -> "materialized"
+  | Integration_op.Recovery_committed -> "committed"
+  | Integration_op.Recovery_completed -> "completed"
+
+let recovery_mode_name = function
+  | Integration_op.Restore_safety -> "restore_safety"
+  | Integration_op.Keep_current -> "keep_current"
+
+let recovery_target_of_operation operation recovery =
+  match recovery.Integration_op.mode with
+  | Integration_op.Restore_safety -> operation.Integration_op.safety
+  | Integration_op.Keep_current -> recovery.Integration_op.observed
+
+let json_operation_recovery operation =
+  json_optional
+    (fun recovery ->
+      `Assoc
+        [
+          ( "plan_id",
+            `String (Core.Digest.to_hex recovery.Integration_op.plan_id) );
+          ( "attempt_id",
+            `String (Core.Operation_id.to_hex recovery.Integration_op.attempt)
+          );
+          ("mode", `String (recovery_mode_name recovery.Integration_op.mode));
+          ( "phase",
+            `String (recovery_progress_name recovery.Integration_op.progress) );
+          ( "observed_snapshot",
+            `String (Core.Object_id.to_hex recovery.Integration_op.observed) );
+          ( "target_snapshot",
+            `String
+              (Core.Object_id.to_hex
+                 (recovery_target_of_operation operation recovery)) );
+          ( "history_sequence",
+            `Intlit (Int64.to_string operation.Integration_op.target_sequence)
+          );
+          ( "history_allocated",
+            `Bool
+              (match recovery.Integration_op.progress with
+              | Integration_op.Recovery_committed
+              | Integration_op.Recovery_completed ->
+                  true
+              | Integration_op.Recovery_prepared
+              | Integration_op.Recovery_applying
+              | Integration_op.Recovery_materialized ->
+                  false) );
+          ("retained", `Bool recovery.Integration_op.retained);
+          ( "pause_reason",
+            json_optional
+              (fun reason -> `String reason)
+              recovery.Integration_op.pause_reason );
+          ( "previous_attempts",
+            `Int (List.length operation.Integration_op.previous_recoveries) );
+          ( "retained_observations",
+            `List
+              (List.map
+                 (fun earlier ->
+                   `String
+                     (Core.Object_id.to_hex earlier.Integration_op.observed))
+                 operation.Integration_op.previous_recoveries) );
+        ])
+    operation.Integration_op.recovery
+
 let json_integration_operation operation =
   `Assoc
     [
@@ -3317,6 +3403,8 @@ let json_integration_operation operation =
       ("plan_id", `String (Core.Plan_id.to_hex operation.Integration_op.plan));
       ("phase", `String (phase_name operation.Integration_op.phase));
       ("committed", `Bool (Integration_op.committed operation));
+      ("recovered", `Bool (Integration_op.recovered operation));
+      ("recovery", json_operation_recovery operation);
       ( "outbound_state",
         `String
           (if operation.Integration_op.acknowledged then "acknowledged"
@@ -5842,6 +5930,24 @@ let native_failure_context root () =
                 ]
                 "Resume the same confirmed integration without another \
                  acceptance.";
+              action ~root
+                [
+                  "operation";
+                  "recover";
+                  Core.Operation_id.to_hex operation.Integration_op.token;
+                  "--preview";
+                ]
+                "Inspect private recovery choices without publishing \
+                 acceptance.";
+              action ~root
+                [
+                  "operation";
+                  "recover";
+                  Core.Operation_id.to_hex operation.Integration_op.token;
+                  "--replan";
+                  "--preview";
+                ]
+                "Prepare a fresh recovery while retaining prior observations.";
             ]),
         Option.map
           (fun operation ->
@@ -5887,9 +5993,9 @@ let integration_differences ~root plan =
         |> require_local )
   | Integration.Conflicted _ | Integration.Decision _ -> ([], [])
 
-let integration_plan_json ~root plan =
+let integration_plan_json ?(historical = false) ~root plan =
   let accepted_changes, workspace_changes =
-    integration_differences ~root plan
+    if historical then ([], []) else integration_differences ~root plan
   in
   let request = Integration.request plan in
   let workspace = request.Core.workspace in
@@ -5926,6 +6032,8 @@ let integration_plan_json ~root plan =
     ([
        ("plan_id", `String (Core.Plan_id.to_hex (Integration.id plan)));
        ("readiness", `String readiness);
+       ( "comparison_state",
+         `String (if historical then "not_inspected" else "verified") );
        ("no_op", `Bool (Integration.no_op plan));
        ("branch_id", `String (Core.Branch_id.to_hex request.Core.branch));
        ("event_heads", ids (Integration.event_heads plan));
@@ -5939,13 +6047,15 @@ let integration_plan_json ~root plan =
          `String (Core.Object_id.to_hex workspace.Core.observed_snapshot) );
        ("conflicts", `List conflicts);
        ( "accepted_changes",
-         `List (List.map json_display_difference accepted_changes) );
+         if historical then `Null
+         else `List (List.map json_display_difference accepted_changes) );
        ( "workspace_changes",
-         `List (List.map json_display_difference workspace_changes) );
+         if historical then `Null
+         else `List (List.map json_display_difference workspace_changes) );
      ]
     @ outputs)
 
-let render_integration_plan ~root plan =
+let render_integration_plan ?(historical = false) ~root plan =
   let request = Integration.request plan in
   Printf.printf "integration plan %s\n"
     (Core.Plan_id.to_hex (Integration.id plan));
@@ -5960,7 +6070,11 @@ let render_integration_plan ~root plan =
       if Integration.no_op plan then
         print_endline
           "selected work is already accepted; no history change is needed";
-      let accepted, workspace = integration_differences ~root plan in
+      let accepted, workspace =
+        if historical then ([], []) else integration_differences ~root plan
+      in
+      if historical then
+        print_endline "recorded plan; contents were not inspected";
       print_endline "accepted changes:";
       List.iter render_display_difference accepted;
       print_endline "working-file changes:";
@@ -6158,7 +6272,8 @@ let run_integrate arguments =
         operation.Integration_op.phase = Integration_op.Completed)
       recorded_operation
   in
-  let data = integration_plan_json ~root plan in
+  let historical = Option.is_some recorded_operation in
+  let data = integration_plan_json ~historical ~root plan in
   let ready =
     match Integration.readiness plan with
     | Integration.Ready _ -> true
@@ -6183,7 +6298,7 @@ let run_integrate arguments =
           ]
         ()
       |> Cli_data.encode |> print_json
-    else render_integration_plan ~root plan;
+    else render_integration_plan ~historical ~root plan;
     exit 4);
   let cancelled =
     (not flags.selection_yes)
@@ -6191,7 +6306,7 @@ let run_integrate arguments =
     && (not (Integration.no_op plan))
     && not
          (confirm_local_selection ~plan_id ~data ~next_actions:actions
-            ~render:(fun () -> render_integration_plan ~root plan)
+            ~render:(fun () -> render_integration_plan ~historical ~root plan)
             ())
   in
   let result =
@@ -6243,6 +6358,10 @@ let run_integrate arguments =
       match result with
       | Some outcome when outcome.Native_integrate.no_op ->
           ("integration-unchanged", "Selected work is already accepted.")
+      | Some outcome when outcome.Native_integrate.recovered ->
+          ( "integration-recovered",
+            "This plan was closed through private recovery; prepare a fresh \
+             integration to accept shared work." )
       | Some _ when repeated ->
           ( "integration-repeated",
             "The recorded integration was reused; no acceptance or navigation \
@@ -6292,7 +6411,7 @@ let run_integrate arguments =
          else `Completed)
       ~code ~message ~data ~next_actions:actions ()
   else (
-    render_integration_plan ~root plan;
+    render_integration_plan ~historical ~root plan;
     print_endline message;
     Option.iter
       (fun operation ->
@@ -6302,7 +6421,9 @@ let run_integrate arguments =
       operation);
   match result with
   | Some result ->
-      (not result.Native_integrate.no_op) && not result.Native_integrate.resumed
+      (not result.Native_integrate.no_op)
+      && (not result.Native_integrate.resumed)
+      && not result.Native_integrate.recovered
   | None -> false
 
 let run_native_operation ~resume arguments =
@@ -6372,6 +6493,20 @@ let run_native_operation ~resume arguments =
       (phase_name operation.Integration_op.phase)
       (Core.Record_id.to_hex operation.Integration_op.accepted)
       (Core.Object_id.to_hex operation.Integration_op.target);
+    Printf.printf "acceptance %s\n"
+      (if Integration_op.committed operation then "committed"
+       else "not committed by this operation");
+    Option.iter
+      (fun recovery ->
+        Printf.printf "recovery %s mode:%s retained:%b\n"
+          (recovery_progress_name recovery.Integration_op.progress)
+          (recovery_mode_name recovery.Integration_op.mode)
+          recovery.Integration_op.retained;
+        Option.iter
+          (fun reason ->
+            Printf.printf "recovery paused: %s\n" (Output.display_value reason))
+          recovery.Integration_op.pause_reason)
+      operation.Integration_op.recovery;
     match operation.Integration_op.phase with
     | Integration_op.Paused (_, reason) ->
         Printf.printf "paused: %s\n" (Output.display_value reason)
@@ -6379,6 +6514,242 @@ let run_native_operation ~resume arguments =
     | Integration_op.Materialized | Integration_op.Committed
     | Integration_op.Completed ->
         ())
+
+let run_operation_recover ~forget arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  local_failure_context := Some (native_failure_context root);
+  let rec parse mode replan names = function
+    | [] -> (mode, replan, List.rev names)
+    | "--keep-current" :: rest when mode = None ->
+        parse (Some Integration_op.Keep_current) replan names rest
+    | "--replan" :: rest when not replan -> parse mode true names rest
+    | value :: _ when String.starts_with ~prefix:"-" value -> usage ()
+    | value :: rest -> parse mode replan (value :: names) rest
+  in
+  let mode, replan, names = parse None false [] remaining in
+  let token_text = match names with [ text ] -> text | _ -> usage () in
+  let token =
+    Core.Operation_id.of_hex token_text |> require_ok Core.error_to_string
+  in
+  let expected =
+    Option.map
+      (fun text -> Core.Digest.of_hex text |> require_ok Core.error_to_string)
+      flags.selection_plan
+  in
+  if forget && (mode <> None || replan) then usage ();
+  let _, _, local = integration_repository root in
+  let operation =
+    match
+      List.find_opt
+        (fun operation ->
+          Core.Operation_id.equal token operation.Integration_op.token)
+        (Local.operations local)
+    with
+    | Some operation -> operation
+    | None ->
+        fail_with "unknown-integration-operation"
+          "Inspect status for a durable integration operation ID."
+  in
+  let render_changes before after =
+    match Service.compare_immutable_snapshots ~root ~before ~after with
+    | Ok differences -> List.iter render_display_difference differences
+    | Error error ->
+        Printf.printf "contents unavailable: %s\n"
+          (Output.display_value (Service.error_to_string error))
+  in
+  if forget then (
+    if not (Integration_op.recovered operation) then
+      fail_with_status 3 "recovery-not-completed"
+        "Only a completed private recovery can release its extra roots.";
+    let recovery = Option.get operation.Integration_op.recovery in
+    Option.iter
+      (fun expected ->
+        if not (Core.Digest.equal expected recovery.Integration_op.plan_id) then
+          fail_with_status 3 "stale-recovery-plan"
+            "The recovery plan does not match this operation.")
+      expected;
+    let data = json_integration_operation operation in
+    let actions =
+      [
+        action ~confirmation_required:true ~root
+          [ "operation"; "forget"; token_text; "--yes" ]
+          "Release extra recovery roots; ordinary history and live files \
+           remain.";
+      ]
+    in
+    let render () =
+      Printf.printf
+        "release recovery roots for %s; live files and history stay in place\n"
+        token_text
+    in
+    let cancelled =
+      (not flags.selection_preview)
+      && (not flags.selection_yes)
+      && not (confirm_local_selection ~data ~next_actions:actions ~render ())
+    in
+    let result =
+      if flags.selection_preview || cancelled then operation
+      else
+        Native_integrate.forget_recovery_roots ~root ~operation:token
+        |> require_integration
+    in
+    if requested_format () = Json_format then
+      domain_json ~operation_id:token_text
+        ~outcome:
+          (if flags.selection_preview then `Completed
+           else if cancelled || result = operation then `Unchanged
+           else `Completed)
+        ~code:
+          (if cancelled then "recovery-release-cancelled"
+           else if flags.selection_preview then "recovery-release-preview"
+           else "recovery-roots-released")
+        ~message:
+          "Recovery retention inspected or explicitly released; files and \
+           history were not rewritten."
+        ~data:(json_integration_operation result)
+        ~next_actions:actions ()
+    else (
+      render ();
+      if cancelled then print_endline "Recovery-root release cancelled."
+      else if not flags.selection_preview then
+        print_endline "Extra recovery roots released."))
+  else
+    let preview =
+      Native_integrate.recover ~root ~operation:token ~dry_run:true ~mode
+        ~replan ~expected_plan:expected
+      |> require_integration
+    in
+    let plan_id = Core.Digest.to_hex preview.Native_integrate.recovery_plan in
+    let target = preview.Native_integrate.recovery_target in
+    let effective_mode =
+      match
+        ( preview.Native_integrate.recovery_operation.Integration_op.recovery,
+          replan,
+          mode )
+      with
+      | Some recovery, false, _ -> recovery.Integration_op.mode
+      | _, _, Some mode -> mode
+      | _, _, None -> Integration_op.Restore_safety
+    in
+    let base =
+      [ "operation"; "recover"; token_text ]
+      @ (if effective_mode = Integration_op.Keep_current then
+           [ "--keep-current" ]
+         else [])
+      @ if replan then [ "--replan" ] else []
+    in
+    let actions =
+      [
+        action ~confirmation_required:true ~root
+          (base @ [ "--plan"; plan_id; "--yes" ])
+          "Apply this exact private recovery; no shared acceptance is \
+           published.";
+        action ~root
+          [ "operation"; "show"; token_text ]
+          "Inspect current operation and retained alternatives.";
+      ]
+    in
+    let comparison =
+      Service.compare_immutable_snapshots ~root
+        ~before:preview.Native_integrate.recovery_observed ~after:target
+    in
+    let data =
+      `Assoc
+        [
+          ("recovery_plan_id", `String plan_id);
+          ( "integration_plan_id",
+            `String (Core.Plan_id.to_hex operation.Integration_op.plan) );
+          ("mode", `String (recovery_mode_name effective_mode));
+          ( "observed_snapshot",
+            `String
+              (Core.Object_id.to_hex preview.Native_integrate.recovery_observed)
+          );
+          ("target_snapshot", `String (Core.Object_id.to_hex target));
+          ( "changes",
+            match comparison with
+            | Ok values -> `List (List.map json_display_difference values)
+            | Error _ -> `Null );
+          ( "comparison_state",
+            `String
+              (if Result.is_ok comparison then "verified" else "unavailable") );
+          ( "operation",
+            json_integration_operation
+              preview.Native_integrate.recovery_operation );
+        ]
+    in
+    let render () =
+      Printf.printf
+        "private recovery plan %s\n\
+         mode %s\n\
+         current observation %s\n\
+         chosen result %s\n"
+        plan_id
+        (recovery_mode_name effective_mode)
+        (Core.Object_id.to_hex preview.Native_integrate.recovery_observed)
+        (Core.Object_id.to_hex target);
+      render_changes preview.Native_integrate.recovery_observed target;
+      print_endline
+        (match
+           preview.Native_integrate.recovery_operation.Integration_op.recovery
+         with
+        | Some recovery when not recovery.Integration_op.retained ->
+            "Extra recovery retention was released; historical contents may be \
+             unavailable."
+        | Some _ when not replan ->
+            "Recovery observations remain retained; shared acceptance is \
+             unchanged."
+        | None | Some _ ->
+            "Applying this plan retains current observations privately; shared \
+             acceptance is unchanged.")
+    in
+    let closed =
+      Integration_op.recovered preview.Native_integrate.recovery_operation
+    in
+    let cancelled =
+      (not flags.selection_preview)
+      && (not flags.selection_yes) && (not closed)
+      && not
+           (confirm_local_selection ~plan_id ~data ~next_actions:actions ~render
+              ())
+    in
+    let result =
+      if flags.selection_preview || cancelled then preview
+      else
+        Native_integrate.recover ~root ~operation:token ~dry_run:false ~mode
+          ~replan ~expected_plan:(Some preview.Native_integrate.recovery_plan)
+        |> require_integration
+    in
+    let message =
+      if cancelled then
+        "Private recovery cancelled; files and history are unchanged."
+      else if flags.selection_preview then
+        "Private recovery preview; no files or history were changed."
+      else "Private recovery completed; this operation published no acceptance."
+    in
+    if requested_format () = Json_format then
+      domain_json ~operation_id:token_text ~plan_id
+        ~outcome:(if cancelled || closed then `Unchanged else `Completed)
+        ~code:
+          (if cancelled then "recovery-cancelled"
+           else if flags.selection_preview then "recovery-preview"
+           else "operation-recovered")
+        ~message
+        ~data:
+          (match data with
+          | `Assoc fields ->
+              `Assoc
+                (List.filter (fun (key, _) -> key <> "operation") fields
+                @ [
+                    ( "operation",
+                      json_integration_operation
+                        result.Native_integrate.recovery_operation );
+                  ])
+          | _ -> assert false)
+        ~next_actions:actions ()
+    else (
+      render ();
+      print_endline message)
 
 let run_withdraw arguments =
   let root, change = parse_withdraw arguments in
@@ -7345,6 +7716,10 @@ let dispatch () =
   | _ :: "integrate" :: arguments ->
       observe_after_commit [ "integrate" ] arguments (fun () ->
           run_integrate arguments)
+  | _ :: "operation" :: "recover" :: arguments ->
+      run_operation_recover ~forget:false arguments
+  | _ :: "operation" :: "forget" :: arguments ->
+      run_operation_recover ~forget:true arguments
   | _ :: "operation" :: "show" :: arguments ->
       run_native_operation ~resume:false arguments
   | _ :: "operation" :: "resume" :: arguments ->

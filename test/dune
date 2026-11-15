@@ -64,6 +64,33 @@
    %{dep:test_native_integration_cli.py}
    %{dep:../bin/yeokcham_v1.exe})))
 
+(executable
+ (name native_recovery_fixture)
+ (modules native_recovery_fixture)
+ (libraries
+  unix
+  yeokcham_store
+  yeokcham_snapshot
+  yeokcham_v1_model
+  yeokcham_v1_store
+  yeokcham_v1_trust
+  yeokcham_v1_composition
+  yeokcham_v1_integration
+  yeokcham_v1_local_service))
+
+(rule
+ (alias runtest)
+ (deps
+  test_native_recovery_cli.py
+  native_recovery_fixture.exe
+  ../bin/yeokcham_v1.exe)
+ (action
+  (run
+   python3
+   %{dep:test_native_recovery_cli.py}
+   %{dep:../bin/yeokcham_v1.exe}
+   %{dep:native_recovery_fixture.exe})))
+
 (rule
  (alias runtest)
  (deps test_local_inspection_cli.py ../bin/yeokcham_v1.exe)

@@ -31,7 +31,7 @@ Status shows native revision identities, the private working basis and local
 publication receipts separately from accepted heads. At this checkpoint transfer
 is pending: the legacy package/relay journeys below carry the earlier V1 record
 family and do not yet export these new Core records. Native clone/exchange and
-complete conflict/recovery journeys remain required before P3 is complete. Do not substitute
+complete conflict journeys remain required before P3 is complete. Do not substitute
 the old package commands for verification of the new selected-publication loop.
 
 ## Local shared acceptance (P3 in progress)
@@ -70,10 +70,40 @@ and keeps its safety/target roots protected.
 Divergent branch histories require explicitly naming every event and accepted
 head with repeated `--reconcile ID`; `--yes` alone never selects a winner. Conflict
 plans identify shared/private paths and exact variants. Complete native conflict
-resolution and user-facing recovery choices are still P3 work; the older
+resolution is still P3 work; the older
 `resolve --decision` and package flows below are a different record family.
 Required unsupported policy refuses explicitly. These local commands do not yet
 complete the two-person native clone/exchange pilot.
+
+## Recovering a pending integration
+
+```sh
+yeokcham operation recover OPERATION_ID --preview
+yeokcham operation recover OPERATION_ID --plan RECOVERY_PLAN_ID --yes
+yeokcham operation recover OPERATION_ID --replan --keep-current --preview
+yeokcham operation show OPERATION_ID
+```
+
+Recovery restores the saved private safety tree and retains the current observed
+tree separately. It closes the uncommitted integration without accepting its
+staged shared result. `--keep-current` explicitly chooses the observed tree as
+private work instead. Neither choice needs a signing provider. Preview and
+cancellation leave files/history unchanged; automation supplies `--yes`, with
+the exact recovery plan from preview when confirmation must be bound to it.
+
+If another edit pauses recovery, inspect it before resuming. `--replan` prepares
+a new observation and choice while retaining earlier attempts. Resume never
+replays files after Materialized. Recovery cannot undo a committed shared
+acceptance; use private undo/restore for that case. A closed old integration plan
+stays closed; prepare a fresh integration to accept its shared work later.
+
+`operation show` lists observed snapshots and prior observations. Inspect them
+with `diff`, or use `restore SNAPSHOT --to NEW_DIRECTORY --yes` to recover a
+separate copy. Extra recovery alternatives remain GC roots until explicitly
+released with `operation forget OPERATION_ID --preview` followed by `--yes`.
+Release leaves live files, private history and accepted records in place;
+unreferenced alternatives can subsequently become unavailable. Do not delete
+staging or journals to clear a paused operation.
 
 ## Two people, offline package
 

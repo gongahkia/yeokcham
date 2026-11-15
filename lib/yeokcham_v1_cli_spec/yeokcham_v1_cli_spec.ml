@@ -186,6 +186,19 @@ let commands =
     command ~options:[] [ "operation" ];
     command [ "operation"; "show" ];
     command [ "operation"; "resume" ];
+    command [ "operation"; "recover" ]
+      ~options:
+        [
+          root;
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+          flag "--keep-current";
+          flag "--replan";
+        ];
+    command [ "operation"; "forget" ]
+      ~options:[ root; flag "--preview"; flag "--yes"; identifier "--plan" ];
     command ~hook:true [ "withdraw" ] ~options:[ root; identifier "--change" ];
     command ~hook:true [ "resolve" ]
       ~options:
