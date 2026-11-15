@@ -944,3 +944,42 @@ resolution and the full two-person/fault audit remain required. Current selected
 shares are recorded locally with pending transfer; legacy packages do not carry
 those Core records yet. No P03 completion report/receipt, later pilot slice,
 independent phase completion, push/release/deployment or next prompt.
+
+
+P3 exact-plan checkpoint: `57e0c2abd9d2f7058336ca0b4688db410c3826eb`
+adds shared causal-change heads and bounded metadata reconstruction.
+`41538b820676653f81b5e0faa3670d21c2d6ab18` adds `Yeokcham_v1_integration`, private scoped preservation and the
+canonical bounded registry-46 plan. Preparation binds exact selections, every
+causal event/accepted head, authority, private cursor/basis, captured filesystem
+facts and separate accepted/private outputs. Unrelated receipts preserve plans;
+changed relevant inputs require fresh confirmation. Decoding a declared Ready
+output is insufficient: revalidation recomputes composition before execution.
+Explicit reconciliation includes equal-content histories. Required policy and
+unsupported resolution still refuse rather than supplying placeholder success.
+
+Retained proposal aliases use create-only/fsynced files under the existing
+retention lock. They pin complete source/output closures for GC without advancing
+history or accepted refs. Fresh-process load, actual GC, explicit release, missing
+contents, corrupt-alias refusal and proposal-specific health diagnostics passed.
+Private preservation covers shared D/later private E, nonancestor refusal and
+already represented revisions without backdating their accepted basis. The latest
+signed local-core suite passed 47 cases. The bounded-pages suite passed 7; focused
+model/composition/graph/GC/health checks passed in the recorded planner states.
+
+For the complete pending planner tree on parent `57e0c2a`, focused local-core,
+`make build`, `make lint` and `make ci` exited 0; the tree was then committed as
+`41538b8`. Logs and exact commands are in `plan-checkpoint-checks.json` under
+`/home/gongahkia/.cache/yeokcham-p3-20261115/`; earlier focused evidence is
+`plan-retention-focused-checks.json`. Build, lint and CI also exited 0 on the
+committed planner with only current documentation changes pending
+(`plan-committed-checks.json`). Matching Dune results may be cached. The
+initial formatter invocation exited 2 while promoting the expected source/test
+formatting; subsequent lint passed. No G01 measurement was rerun.
+
+P3 remains in progress. Confirmed CLI integration, durable plan/operation facts,
+actual safe application with atomic accepted/history/outbound publication,
+conflict resolution and Core native export/clone/exchange still require delivery
+and end-to-end/fault evidence. P4 remains unstarted; no P03 completion report or
+acceptance receipt is claimed. Preserve all current recovery roots and verify
+this checkpoint before continuing. The planner's alias alone is not an operation
+journal, outbound acknowledgement or completed integration.

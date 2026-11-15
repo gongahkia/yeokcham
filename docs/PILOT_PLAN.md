@@ -14,8 +14,9 @@ P0 evaluation and P1 core foundation are complete. The
 `06b662a8bab5c783117e5fcf45e36b7d942cfc64`, actual checks and
 [interfaces](implementation/INTERFACES.md). P2 local work is complete; see its
 [report](implementation/reports/P02-attempt-01.md) and
-[acceptance receipt](implementation/results/P02-acceptance.json). P3/P4 are
-pending and unstarted. G01 remains complete; G02 has partial P1 coverage and is not
+[acceptance receipt](implementation/results/P02-acceptance.json). P3 is in progress
+under its [scoped task](implementation/goals/P03-shared-workflow.md); P4 is unstarted.
+G01 remains complete; G02 has partial P1 coverage and is not
 complete. G01-G20 remain the full-design backlog.
 This pilot changes delivery order and the first milestone; it does not mark
 original criteria complete or relax privacy, authority, fidelity or recovery.
@@ -130,7 +131,7 @@ development ranges including tests/integration; host/participant waits add time.
 | P0: evaluate | This walkthrough, evidence and essential-operation inventory. | Current V1, G01 and existing designs/guides. | complete |
 | P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | complete; [report](implementation/reports/P01-attempt-01.md) |
 | P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | complete; [report](implementation/reports/P02-attempt-01.md) |
-| P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | pending; 5-10 days |
+| P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | in progress; scoped acceptance remains incomplete |
 | P4: harden/handoff | Two-person/source/document/binary journeys, branches/offline cases, fault/retry/private-work tests, native onboarding, pilot responsiveness, concise instructions and actual user feedback; fix blockers. | Focused G18/G20 checks and affected domain tests. | pending; 3-7 days |
 
 P2/P3 share P1 and have real domain dependencies. Branch switching consumes
@@ -189,11 +190,13 @@ for these documentation-only changes.
 
 ## Next handoff
 
-P1 is complete under the [scoped task](implementation/goals/P01-core-workflow-foundation.md).
-Verify its [report](implementation/reports/P01-attempt-01.md),
-[acceptance receipt](implementation/results/P01-acceptance.json) and actual
-interfaces before starting P2 local work. Preserve the original G02 remainder.
-P2 was separately invoked through the [scoped local-workflow task](implementation/goals/P02-local-workflow.md); P3/P4 remain unstarted.
+P1 and P2 are complete under their scoped tasks and reports. Continue the
+[scoped P3 shared-workflow task](implementation/goals/P03-shared-workflow.md)
+from the latest [ledger checkpoint](IMPLEMENTATION_PROGRESS.md) and actual
+[interfaces](implementation/INTERFACES.md). Selected sharing is connected to
+durable local state; native exchange/clone, confirmed recoverable integration,
+resolution and full P3 acceptance remain required. Preserve the original phase
+remainders. P4 remains unstarted.
 The user requires one writer on main for this handoff. Future orchestration
 preferences must be reconciled separately before changing that workflow.
 
