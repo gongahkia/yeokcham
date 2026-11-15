@@ -72,13 +72,13 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt, native HTTPS exchange and verified clone; checkpoints below | Known-only branch selection, missing-content inspection/coverage, complete fault qualification and full phase criteria remain |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt, native HTTPS exchange/clone and received-branch selection; checkpoints below | Missing-content inspection/coverage, complete fault qualification and full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
 | [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery and actual native outbound acknowledgement; checkpoints below | Conflict/policy integration, complete fault matrix and formal phase acceptance remain |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone | Known-only branch selection, native resolution, archive/preferences and complete multi-person journeys remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone/branch selection | Native resolution, archive/preferences and complete multi-person journeys remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -102,13 +102,19 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 
 ## Current-phase checkpoints
 
-- P3 latest checkpoint: verified native `clone URL [DIRECTORY]`, preview/request
+- P3 latest checkpoint: received-branch selection, saved-private restoration across
+  newer shared heads, working-basis forks and unlocked/revalidated branch signing
+  are committed as `bc75d492af15bb8e83bd863d7aceaef370a54c35`. Full build/lint/CI,
+  real TLS named-branch/nondefault-clone journey and recovery/GC tests pass.
+  Native text/opaque resolution, read-only missing-content inspection, remaining
+  error/authority/fault coverage and final criterion audit remain. P3 is active and
+  incomplete; details below.
+
+- Earlier P3 verified native `clone URL [DIRECTORY]` checkpoint: preview/request
   binding and local resume are committed as
   `1105c60c8e724b9e49abf9f021b890207f4844e5`. Controlled TLS clone/update and
   interruption journeys pass; build/lint/default CI pass on stable source.
-  Known-only branch selection, native text/opaque resolution, read-only missing
-  content inspection, the error/authority/fault matrix and final acceptance audit
-  remain. P3 is active and incomplete. Detailed evidence and limitations below.
+  Received-branch selection and nondefault clone are subsequently verified above.
 
 - Earlier P3 native `exchange NAME` checkpoint passes a real controlled TLS
   Alice/Bob CLI journey, exact lost-acknowledgement retry and a private-cache
@@ -1586,3 +1592,72 @@ metadata attachment refuses without a replacement/copy fallback. Preserve
 unexpected staging contents. No native macOS/Windows, Docker, custody onboarding,
 human usability, managed service/backup, push/release/deployment or P3 completion
 is claimed. P3 remains active and incomplete.
+
+P3 received-branch checkpoint:
+`bc75d492af15bb8e83bd863d7aceaef370a54c35`, parent ledger
+`a27ded4e47ea438c5bf54a419bc129c23818d839`, completes supported first selection
+of a received branch through the existing private history/state root and
+schema-5 local selection journal. `Local.selection_target` distinguishes a saved
+private position from a verified accepted target. `register_position` validates
+the exact accepted result against its staged history node. Source safety capture,
+target retention, history allocation and new position publish together before
+ordinary-file mutation; selection moves only after materialization. Preview marks
+unallocated identities provisional and changes no history/position. No schema,
+envelope code, parallel mutable store or second shared genesis is added.
+
+Saved positions retain their historical working basis when newer shared heads
+arrive; switch restores the private alternative before explicit integration.
+JSON/plain output distinguishes that basis, known heads, new private registration
+and provisional history. Frozen journal resume keeps the original basis even when
+equal-content accepted history arrives later. Fresh ambiguous names/divergent heads
+still refuse. Branch creation now forks the working basis, not a newer received
+head that has not been selected into this private lineage. Signing providers run
+outside the writer lock; publication rechecks the state head and complete source
+contents. A new regression first reproduced the old held-lock behavior, then
+verified lock availability and refusal/preservation for provider-time edits/saves.
+
+Tests exercise actual first-selection safety publication, Prepared/Applying/file/
+Materialized/metadata/Published boundaries, exact retry, stale preview, ignored
+obstructions, pure/idempotent position staging, equal-content different-node refusal,
+GC, late external edits and restoration of both private alternatives. Newer shared
+contents catch up through ordinary verified integration without another signature
+or duplicate acceptance. The controlled TLS CLI journey uses separately enrolled
+Alice/Bob fixtures, sends a real named branch, receives without private history movement, previews
+and selects it without Bob's signer, restores main's private work, explicitly catches
+up and exchanges. A third workspace clones the nondefault branch with a different
+workspace namespace and no Alice/Bob private sentinel. The earlier clone test's
+namespace assertion now compares actual workspace IDs, not unequal history sequences.
+
+Final focused local-core77, Core-package15, safe-application22, GC11, Python
+branch-CLI17, real TLS branch case and all seven independent vectors passed.
+The targeted TLS/provider runs intentionally skipped other cases; final CI ran all
+27 transport cases with no reported skips. `make build`, `make lint`, `make ci`
+exited 0 on the exact stable source committed as `bc75d49`; CI took 230.871 seconds
+and reused matching unchanged Dune actions. Exact commands, exits, timings and
+owned-file hashes are in `shared-switch-checkpoint-checks.json` in the external P3
+log directory, with `source_stable: true`. Initial strict docstring/fragile-match,
+test syntax/shadowing failures and formatter promotions were corrected before
+complete verification. Documentation links pass (247 local references). README,
+P2 evidence and accepted G01 hashes remain unchanged; no measurements were rerun.
+
+The local tracking reflog advanced origin/main from `37311de` to `a27ded4` with
+`update by push` while this continuation worked. This writer issued no push and
+preserved the refs; no source edits from another writer were observed in this
+checkpoint. The implementation commit followed on main with explicitly staged
+owned files. No agents/worktrees/branches, release or deployment were used.
+
+This adds partial G03/G08/G14 branch/workspace coverage and G04/G13 exact private
+selection/recovery coverage; all original full-phase remainders remain. P3 still
+requires real text/opaque conflicts/resolve with exact choices/replacements and
+deferral, truthful read-only metadata inspection when admitted contents are missing,
+the remaining signature/authority/exit/refusal/fault matrix, and full criterion audit
+with P03 report/compact acceptance receipt. Keep unsupported required policy and
+adoption explicit. Do not start P4 or generate a new goal prompt.
+
+Rollback must preserve registered private positions, source/target history nodes,
+journals, proofs, physical staging and working files. A safety-root interruption
+before Prepared can leave an unselected saved target with no file replacement;
+fresh retry reuses it. Old binaries may refuse saved branches behind their known
+head; rolling back code is not recovery of files/history or remote state. Native
+custody/human/cross-OS qualification and broad performance evaluation remain
+unclaimed. P3 remains active and incomplete.
