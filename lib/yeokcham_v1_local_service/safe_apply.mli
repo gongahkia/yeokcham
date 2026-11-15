@@ -5,6 +5,11 @@ type error =
 
 val error_to_string : error -> string
 
+val check_target :
+  store:Yeokcham_store.repository -> target:Yeokcham_snapshot.Snapshot.id -> (unit, error) result
+(** Complete target closure, symlink representation and mandatory-path checks;
+    actual destination/native observation checks still precede application. *)
+
 val check :
   root:string ->
   store:Yeokcham_store.repository ->
