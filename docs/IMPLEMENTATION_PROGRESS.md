@@ -983,3 +983,56 @@ and end-to-end/fault evidence. P4 remains unstarted; no P03 completion report or
 acceptance receipt is claimed. Preserve all current recovery roots and verify
 this checkpoint before continuing. The planner's alias alone is not an operation
 journal, outbound acknowledgement or completed integration.
+
+
+P3 durable-execution checkpoint: `5f6039a8c4d85a86d8b5214910e67dd5579a6a36`
+adds caller-bounded native object reads before input allocation, with the existing
+global limit retained. `c9da48551a0fa7e30b5b55adf6add7998e703502` connects the exact planner to actual
+`Local_service.Integrate` prepare/apply/resume, P2 safe file application and the
+same authoritative state root. Local-core schema 3 carries private paged operation
+facts; old schema 1/2 remains canonical without operations. Plan-to-token identity,
+staged signed acceptance/event references, safety/target roots, physical digest,
+provisional sequence and Prepared/Applying/Materialized/Committed/Completed/Paused
+facts persist across fresh processes. Staged records are not authoritative heads
+before commit. Accepted records, exact private history/basis and pending outbound
+obligation publish atomically. No native transfer acknowledgement is claimed.
+
+A dirty safety capture is retained before mutation; the target history sequence is
+consumed only at actual commit, even for equal contents. Relevant shared inputs
+are rechecked without scanning a partially applied tree. Materialized/Committed
+retries never replay files. Provider callbacks execute outside writer locks, then
+the service reloads/revalidates before preparation. External edits during Applying
+pause without rollback; edits after Materialized survive completion. Unrelated
+received metadata is preserved. Ordinary save/undo/switch refuse while integration
+is incomplete; status reports unavailable observation rather than a complete
+partial tree. GC independently protects operation roots through the Committed
+cleanup gap; verified restore proofs precede Completed where safety differs.
+
+The signed local-core suite passed 56 cases, including nine new native execution
+scenarios, eight phase/file-boundary interruptions and ten before/after root-CAS
+interruptions. Tests cover one acceptance/navigation on retry without signer,
+D/E separation, actual GC during Materialized, independent receipts, pending-root
+erasure/capture refusal, provider lock probes and provider-time edits, bounded
+cross-kind token collisions and entropy failure. Store-safety8, history identity,
+safe apply, existing local-service45/store/GC11/health suites passed. `make build`,
+`make lint`, `make ci` exited 0 for the exact pending tree on parent `5f6039a8`,
+then committed unchanged as `c9da48551a0fa7e30b5b55adf6add7998e703502`. Commands/exits/logs are
+`native-integration-checkpoint-checks.json` under the P3 external log directory;
+matching Dune results may be cached. Early compile/strict-warning errors, a raw
+versus hex physical-digest mismatch and expected formatter promotions were fixed
+before these final checks. The tiny harness regressions do not rerun G01 accepted
+measurements. README remains unchanged.
+
+Rollback of this checkpoint requires preserving current schema-3 repositories,
+operation staging and recovery proofs: older binaries cannot read operation-bearing
+local state, and reverting source never restores user files or removes an accepted
+record. Do not erase pending operations, reuse their sequence/token or drop roots
+to make a revert appear successful. No migration or recovery-data deletion ran.
+
+P3 remains incomplete. Next consume the actual integration service through normal
+CLI selection, preview/confirmation, JSON/plain results and operation inspection/
+resume/recovery; implement explicit conflict resolution and Core public native
+export/clone/exchange. Full two-person relay, privacy, concurrent-head/policy,
+transfer/outbox and complete recovery/fault acceptance evidence remains required.
+These service tests are not ordinary CLI, native custody onboarding or human pilot
+evidence. No P03 completion report/receipt or P4 start is claimed.
