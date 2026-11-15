@@ -172,6 +172,20 @@ let commands =
           identifier "--revision";
           identifier "--authority";
         ];
+    command ~hook:true [ "integrate" ]
+      ~options:
+        [
+          root;
+          flag "--all";
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+          repeated "--reconcile" Identifier;
+        ];
+    command ~options:[] [ "operation" ];
+    command [ "operation"; "show" ];
+    command [ "operation"; "resume" ];
     command ~hook:true [ "withdraw" ] ~options:[ root; identifier "--change" ];
     command ~hook:true [ "resolve" ]
       ~options:

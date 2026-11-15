@@ -778,6 +778,7 @@ type local_status = {
     * Yeokcham_v1_model.Core.shared_revision)
     list;
   status_publications : Yeokcham_v1_store.Local.publication list;
+  status_integrations : Yeokcham_v1_store.Local.Operation.t list;
   status_branch : branch_listing option;
   status_cursor : state_view;
   status_head : string;
@@ -816,6 +817,14 @@ val compare_local_states :
   (state_comparison, error) result
 
 val inspect_local_status : root:string -> (local_status, error) result
+
+val compare_immutable_snapshots :
+  root:string ->
+  before:Yeokcham_v1_model.Core.Object_id.t ->
+  after:Yeokcham_v1_model.Core.Object_id.t ->
+  (display_difference list, error) result
+(** Verified read-only display of staged/retained immutable plan snapshots. Does
+    not require a private history checkpoint or scan the live tree. *)
 
 val inspect_local_history :
   root:string ->

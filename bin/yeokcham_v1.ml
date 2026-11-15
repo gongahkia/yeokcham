@@ -125,6 +125,10 @@ let native_json_command command =
   || List.mem command
        [
          "status";
+         "integrate";
+         "operation";
+         "operation-show";
+         "operation-resume";
          "history";
          "diff";
          "changes";
@@ -171,6 +175,10 @@ let domain_command command =
   || List.mem command
        [
          "status";
+         "integrate";
+         "operation";
+         "operation-show";
+         "operation-resume";
          "history";
          "diff";
          "changes";
@@ -479,6 +487,8 @@ let usage_text =
   \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
   \  yeokcham save [--root PATH]\n\
+  \  yeokcham integrate [CHANGE...] [--all] [--preview|--yes] [--plan ID]\n\
+  \  yeokcham operation show|resume ID [--root PATH]\n\
   \  yeokcham branch list [--root PATH]\n\
   \  yeokcham branch create NAME [--root PATH]\n\
   \  yeokcham switch NAME [--root PATH] [--preview|--yes] [--plan ID]\n\
@@ -775,6 +785,29 @@ let help_for = function
          change; --preview signs and publishes nothing. Local recording and \
          pending transfer are separate from acceptance. Advanced V1 sharing \
          with --change ID --revision ID [--authority EPOCH] remains available."
+  | [ "integrate" ] ->
+      Some
+        "usage: yeokcham integrate [CHANGE...] [--all] [--root PATH] \
+         [--preview|--yes] [--plan ID] [--reconcile HEAD]...\n\n\
+         Prepare an exact accepted/private result, then confirm before \
+         applying it. Change IDs select a sole current revision; exact \
+         revision IDs are also accepted. With no IDs, select a sole eligible \
+         change or explain the choice. --all selects all eligible changes. \
+         Divergent branches require every event and accepted head explicitly \
+         named with --reconcile. Receipt and local acceptance remain separate; \
+         outbound transfer can remain pending."
+  | [ "operation" ] | [ "operation"; "show" ] ->
+      Some
+        "usage: yeokcham operation show ID [--root PATH]\n\n\
+         Inspect the durable integration phase, plan, safety/target identities \
+         and pending outbound work without scanning or rewriting working \
+         files."
+  | [ "operation"; "resume" ] ->
+      Some
+        "usage: yeokcham operation resume ID [--root PATH]\n\n\
+         Resume the same previously confirmed integration. No new acceptance \
+         or navigation is created on retry. Unexpected external edits pause \
+         application; Materialized/Committed retries never replay files."
   | [ "withdraw" ] ->
       Some
         "usage: yeokcham withdraw [--root PATH] --change ID\n\n\
@@ -3264,6 +3297,52 @@ let json_history_identity id =
           ^ Int64.to_string (Core.History_id.sequence id)) );
     ]
 
+module Native_integrate = Service.Integrate
+module Integration = Service.Integration
+module Integration_op = Local.Operation
+
+let phase_name = function
+  | Integration_op.Prepared -> "prepared"
+  | Integration_op.Applying -> "applying"
+  | Integration_op.Materialized -> "materialized"
+  | Integration_op.Committed -> "committed"
+  | Integration_op.Completed -> "completed"
+  | Integration_op.Paused _ -> "paused"
+
+let json_integration_operation operation =
+  `Assoc
+    [
+      ( "operation_id",
+        `String (Core.Operation_id.to_hex operation.Integration_op.token) );
+      ("plan_id", `String (Core.Plan_id.to_hex operation.Integration_op.plan));
+      ("phase", `String (phase_name operation.Integration_op.phase));
+      ("committed", `Bool (Integration_op.committed operation));
+      ( "outbound_state",
+        `String
+          (if operation.Integration_op.acknowledged then "acknowledged"
+           else if Integration_op.committed operation then "pending"
+           else "not_committed") );
+      ( "branch_id",
+        `String (Core.Branch_id.to_hex operation.Integration_op.branch) );
+      ("source_history", json_history_identity operation.Integration_op.source);
+      ( "target_sequence",
+        `Intlit (Int64.to_string operation.Integration_op.target_sequence) );
+      ("target_sequence_allocated", `Bool (Integration_op.committed operation));
+      ( "safety_snapshot",
+        `String (Core.Object_id.to_hex operation.Integration_op.safety) );
+      ( "workspace_snapshot",
+        `String (Core.Object_id.to_hex operation.Integration_op.target) );
+      ( "accepted_record",
+        `String (Core.Record_id.to_hex operation.Integration_op.accepted) );
+      ( "pause_reason",
+        match operation.Integration_op.phase with
+        | Integration_op.Paused (_, reason) -> `String reason
+        | Integration_op.Prepared | Integration_op.Applying
+        | Integration_op.Materialized | Integration_op.Committed
+        | Integration_op.Completed ->
+            `Null );
+    ]
+
 let json_state state =
   `Assoc
     [
@@ -3960,6 +4039,10 @@ let run_status arguments =
                      ("transfer_state", `String "pending");
                    ])
                status.Service.status_publications) );
+        ( "integration_operations",
+          `List
+            (List.map json_integration_operation
+               status.Service.status_integrations) );
         ("capture", capture);
         ("uncaptured", uncaptured);
         ("changes", changed_paths);
@@ -4059,6 +4142,17 @@ let run_status arguments =
             (Core.Record_id.to_hex p.Local.revision)
             (Output.display_value p.Local.title))
         status.Service.status_publications;
+      List.iter
+        (fun operation ->
+          Printf.printf "integration %s phase:%s acceptance:%s transfer:%s\n"
+            (Core.Operation_id.to_hex operation.Integration_op.token)
+            (phase_name operation.Integration_op.phase)
+            (if Integration_op.committed operation then "committed"
+             else "not_committed")
+            (if operation.Integration_op.acknowledged then "acknowledged"
+             else if Integration_op.committed operation then "pending"
+             else "not_committed"))
+        status.Service.status_integrations;
       Printf.printf "cursor %s\n"
         status.Service.status_cursor.Service.state_name;
       (match status.Service.status_branch with
@@ -5689,6 +5783,598 @@ let run_package_adopt arguments =
   |> require_ok Service.error_to_string
   |> render_status
 
+let integration_repository root =
+  let repository =
+    Yeokcham_v1_store.open_repository ~root
+    |> require_ok Yeokcham_v1_store.error_to_string
+  in
+  let loaded =
+    Yeokcham_v1_store.load repository
+    |> require_ok Yeokcham_v1_store.error_to_string
+  in
+  let local =
+    match loaded.Yeokcham_v1_store.local with
+    | Some value -> value
+    | None ->
+        fail_with_status 5 "integration-state-unavailable"
+          "This workspace has no authenticated Core state."
+  in
+  (repository, loaded, local)
+
+let native_failure_context root () =
+  let loaded =
+    match Yeokcham_v1_store.open_repository ~root with
+    | Error _ -> None
+    | Ok repository -> (
+        match Yeokcham_v1_store.load repository with
+        | Ok loaded -> Some loaded
+        | Error _ -> None)
+  in
+  match Option.bind loaded (fun loaded -> loaded.Yeokcham_v1_store.local) with
+  | None -> (`Assoc [ ("integration_state", `String "unavailable") ], [], None)
+  | Some local ->
+      let pending = Local.pending_operation local in
+      ( `Assoc
+          [
+            ( "operations",
+              `List
+                (List.map json_integration_operation (Local.operations local))
+            );
+          ],
+        (match pending with
+        | None -> []
+        | Some operation ->
+            [
+              action ~root
+                [
+                  "operation";
+                  "show";
+                  Core.Operation_id.to_hex operation.Integration_op.token;
+                ]
+                "Inspect the exact preserved operation before resuming.";
+              action ~root
+                [
+                  "operation";
+                  "resume";
+                  Core.Operation_id.to_hex operation.Integration_op.token;
+                ]
+                "Resume the same confirmed integration without another \
+                 acceptance.";
+            ]),
+        Option.map
+          (fun operation ->
+            Core.Operation_id.to_hex operation.Integration_op.token)
+          pending )
+
+let[@warning "-4"] require_integration = function
+  | Ok value -> value
+  | Error error -> (
+      let message = Native_integrate.error_to_string error in
+      match error with
+      | Native_integrate.Plan_error (Integration.Invalid _) ->
+          fail_with_status 2 "invalid-integration" message
+      | Native_integrate.Plan_error (Integration.Choice _ | Integration.Stale _)
+        ->
+          fail_with_status 3 "integration-choice-required" message
+      | Native_integrate.Plan_error (Integration.Policy _) ->
+          fail_with_status 7 "integration-policy-blocked" message
+      | Native_integrate.Plan_error
+          ( Integration.Integrity _
+          | Integration.Content (Yeokcham_v1_composition.Integrity _) ) ->
+          fail_with_status 6 "integration-integrity-failure" message
+      | Native_integrate.Application_error (Service.Safe_apply.Conflict _) ->
+          fail_with_status 8 "integration-paused" message
+      | Native_integrate.Application_error (Service.Safe_apply.Invalid_plan _)
+        ->
+          fail_with_status 6 "integration-physical-integrity" message
+      | _ -> fail_with_status 5 "integration-unavailable" message)
+
+let integration_differences ~root plan =
+  let workspace = (Integration.request plan).Core.workspace in
+  match Integration.readiness plan with
+  | Integration.Ready outputs ->
+      ( Service.compare_immutable_snapshots ~root
+          ~before:workspace.Core.basis_snapshot
+          ~after:outputs.Core.accepted_snapshot
+        |> require_local,
+        Service.compare_immutable_snapshots ~root
+          ~before:workspace.Core.observed_snapshot
+          ~after:outputs.Core.workspace_snapshot
+        |> require_local )
+  | Integration.Conflicted _ | Integration.Decision _ -> ([], [])
+
+let integration_plan_json ~root plan =
+  let accepted_changes, workspace_changes =
+    integration_differences ~root plan
+  in
+  let request = Integration.request plan in
+  let workspace = request.Core.workspace in
+  let ids values =
+    `List (List.map (fun id -> `String (Core.Record_id.to_hex id)) values)
+  in
+  let readiness, conflicts, outputs =
+    match Integration.readiness plan with
+    | Integration.Ready result ->
+        ( "ready",
+          [],
+          [
+            ( "accepted_snapshot",
+              `String (Core.Object_id.to_hex result.Core.accepted_snapshot) );
+            ( "workspace_snapshot",
+              `String (Core.Object_id.to_hex result.Core.workspace_snapshot) );
+          ] )
+    | Integration.Decision reason ->
+        ("decision", [], [ ("decision", `String reason) ])
+    | Integration.Conflicted conflicts ->
+        ( "conflicted",
+          List.map
+            (fun conflict ->
+              `Assoc
+                [
+                  ("path", json_byte_path (String.concat "/" conflict.Core.path));
+                  ("versions", ids conflict.Core.versions);
+                  ("private_workspace", `Bool conflict.Core.private_workspace);
+                ])
+            conflicts,
+          [] )
+  in
+  `Assoc
+    ([
+       ("plan_id", `String (Core.Plan_id.to_hex (Integration.id plan)));
+       ("readiness", `String readiness);
+       ("no_op", `Bool (Integration.no_op plan));
+       ("branch_id", `String (Core.Branch_id.to_hex request.Core.branch));
+       ("event_heads", ids (Integration.event_heads plan));
+       ("accepted_heads", ids request.Core.accepted_heads);
+       ("exact_revisions", ids request.Core.selected_revisions);
+       ("composition_profile", `String request.Core.composition_profile);
+       ("cursor", json_history_identity workspace.Core.cursor);
+       ( "working_basis",
+         `String (Core.Record_id.to_hex workspace.Core.working_basis) );
+       ( "observed_snapshot",
+         `String (Core.Object_id.to_hex workspace.Core.observed_snapshot) );
+       ("conflicts", `List conflicts);
+       ( "accepted_changes",
+         `List (List.map json_display_difference accepted_changes) );
+       ( "workspace_changes",
+         `List (List.map json_display_difference workspace_changes) );
+     ]
+    @ outputs)
+
+let render_integration_plan ~root plan =
+  let request = Integration.request plan in
+  Printf.printf "integration plan %s\n"
+    (Core.Plan_id.to_hex (Integration.id plan));
+  Printf.printf "branch %s; %d exact revision(s)\n"
+    (Core.Branch_id.to_hex request.Core.branch)
+    (List.length request.Core.selected_revisions);
+  match Integration.readiness plan with
+  | Integration.Ready outputs ->
+      Printf.printf "accepted result %s\nprivate workspace result %s\n"
+        (Core.Object_id.to_hex outputs.Core.accepted_snapshot)
+        (Core.Object_id.to_hex outputs.Core.workspace_snapshot);
+      if Integration.no_op plan then
+        print_endline
+          "selected work is already accepted; no history change is needed";
+      let accepted, workspace = integration_differences ~root plan in
+      print_endline "accepted changes:";
+      List.iter render_display_difference accepted;
+      print_endline "working-file changes:";
+      List.iter render_display_difference workspace
+  | Integration.Decision detail ->
+      Printf.printf "decision required: %s\n" (Output.display_value detail)
+  | Integration.Conflicted conflicts ->
+      List.iter
+        (fun conflict ->
+          Printf.printf "conflict %s (%s)\n"
+            (Output.display_value (String.concat "/" conflict.Core.path))
+            (if conflict.Core.private_workspace then "private workspace"
+             else "shared result"))
+        conflicts
+
+let integration_selection root ~all selectors =
+  let _, _, local = integration_repository root in
+  let pool = Local.pool local in
+  let selected = Local.selected local in
+  let branch =
+    Local.branches local
+    |> List.find (fun row ->
+        Core.Branch_id.equal row.Core.branch_id selected.Local.branch)
+  in
+  let represented =
+    Yeokcham_v1_composition.Graph.represented pool branch.Core.accepted_heads
+    |> require_ok Yeokcham_v1_composition.Graph.error_to_string
+  in
+  let changes =
+    Core.records pool
+    |> List.filter_map (fun (_, body) ->
+        match body.Core.payload with
+        | Core.Shared_revision value -> Some value.Core.change
+        | Core.Accepted_version _ | Core.Branch_event _ -> None)
+    |> List.sort_uniq Core.Change_id.compare
+  in
+  let eligible =
+    List.filter_map
+      (fun change ->
+        let heads = Core.change_heads pool change in
+        if
+          List.for_all
+            (fun id -> List.exists (Core.Record_id.equal id) represented)
+            heads
+        then None
+        else Some (change, heads))
+      changes
+  in
+  let resolve text =
+    if String.length text = 32 then
+      let change =
+        Core.Change_id.of_hex text |> require_ok Core.error_to_string
+      in
+      match Core.change_heads pool change with
+      | [ id ] -> id
+      | [] ->
+          fail_with "unknown-change"
+            "Inspect status for known shared change identities."
+      | _ ->
+          fail_with_status 3 "concurrent-change-versions"
+            "This change has incomparable revisions; resolve its exact \
+             variants first."
+    else
+      let id = Core.Record_id.of_hex text |> require_ok Core.error_to_string in
+      match Core.find pool id with
+      | Some { Core.payload = Core.Shared_revision _; _ } -> id
+      | None
+      | Some { Core.payload = Core.Accepted_version _ | Core.Branch_event _; _ }
+        ->
+          fail_with "invalid-shared-revision"
+            "Integration selections must name retained shared revisions."
+  in
+  if selectors <> [] then
+    List.map resolve selectors |> List.sort_uniq Core.Record_id.compare
+  else if all || List.length eligible <= 1 then
+    List.map
+      (fun (change, _) -> resolve (Core.Change_id.to_hex change))
+      eligible
+    |> List.sort Core.Record_id.compare
+  else
+    let title change heads =
+      match
+        List.find_opt
+          (fun publication ->
+            List.exists (Core.Record_id.equal publication.Local.revision) heads)
+          (Local.publications local)
+      with
+      | Some publication -> publication.Local.title
+      | None ->
+          "Shared change " ^ String.sub (Core.Change_id.to_hex change) 0 12
+    in
+    if requested_format () = Text_format then
+      List.iter
+        (fun (change, heads) ->
+          Printf.printf "eligible %s %s\n"
+            (Core.Change_id.to_hex change)
+            (Output.display_value (title change heads)))
+        eligible;
+    selection_choice
+      ~data:
+        (`Assoc
+           [
+             ( "choices",
+               `List
+                 (List.map
+                    (fun (change, heads) ->
+                      `Assoc
+                        [
+                          ("change_id", `String (Core.Change_id.to_hex change));
+                          ("title", `String (title change heads));
+                        ])
+                    eligible) );
+             ( "eligible_changes",
+               `List
+                 (List.map
+                    (fun (change, _) -> `String (Core.Change_id.to_hex change))
+                    eligible) );
+           ])
+      ~next_actions:
+        [
+          action ~root
+            [ "integrate"; "--all"; "--preview" ]
+            "Preview every eligible change before choosing acceptance.";
+        ]
+      ~message:
+        "Several shared changes are eligible. Name changes explicitly or \
+         preview --all."
+      ()
+
+let run_integrate arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  local_failure_context := Some (native_failure_context root);
+  let rec parse all heads names = function
+    | [] -> (all, List.rev heads, List.rev names)
+    | "--all" :: rest when not all -> parse true heads names rest
+    | "--reconcile" :: id :: rest ->
+        let id = Core.Record_id.of_hex id |> require_ok Core.error_to_string in
+        parse all (id :: heads) names rest
+    | value :: _ when String.starts_with ~prefix:"-" value -> usage ()
+    | value :: rest -> parse all heads (value :: names) rest
+  in
+  let all, heads, names = parse false [] [] remaining in
+  if
+    (all && names <> [])
+    || (flags.selection_plan <> None && (all || heads <> [] || names <> []))
+  then
+    fail_with "invalid-integration-selection"
+      "Use --plan by itself, or select changes with optional --all/--reconcile.";
+  let plan =
+    match flags.selection_plan with
+    | None ->
+        Native_integrate.prepare ~root
+          ~selected_revisions:(integration_selection root ~all names)
+          ~reconcile_heads:(if heads = [] then None else Some heads)
+        |> require_integration
+    | Some text -> (
+        let id = Core.Plan_id.of_hex text |> require_ok Core.error_to_string in
+        let repository, loaded, local = integration_repository root in
+        let store = Yeokcham_v1_store.underlying_store repository in
+        match Local.find_operation local ~plan:id with
+        | None ->
+            Integration.load ~store ~loaded id
+            |> Result.map_error (fun e -> Native_integrate.Plan_error e)
+            |> require_integration
+        | Some operation ->
+            let envelope =
+              Yeokcham_store.get
+                ~max_bytes:(8 * 1024 * 1024)
+                store operation.Integration_op.plan_object
+              |> require_ok Yeokcham_store.error_to_string
+            in
+            Integration.decode ~store ~loaded
+              (Yeokcham_envelope.encode envelope)
+            |> Result.map_error (fun e -> Native_integrate.Plan_error e)
+            |> require_integration)
+  in
+  let plan_id = Core.Plan_id.to_hex (Integration.id plan) in
+  let actions =
+    [
+      action ~confirmation_required:true ~root
+        [ "integrate"; "--plan"; plan_id; "--yes" ]
+        "Apply this exact plan after revalidation.";
+      action ~root [ "status" ]
+        "Inspect capture, accepted heads and pending transfer.";
+    ]
+  in
+  let _, _, current_local = integration_repository root in
+  let recorded_operation =
+    Local.find_operation current_local ~plan:(Integration.id plan)
+  in
+  let repeated =
+    Option.fold ~none:false
+      ~some:(fun operation ->
+        operation.Integration_op.phase = Integration_op.Completed)
+      recorded_operation
+  in
+  let data = integration_plan_json ~root plan in
+  let ready =
+    match Integration.readiness plan with
+    | Integration.Ready _ -> true
+    | Integration.Conflicted _ | Integration.Decision _ -> false
+  in
+  if (not ready) && not flags.selection_preview then (
+    if requested_format () = Json_format then
+      Cli_data.domain_failure ~command:(command_name ()) ~plan_id
+        ~outcome:`Conflict
+        ~error:
+          Cli_data.
+            {
+              code = "integration-conflicts";
+              message = "Resolve or defer the named variants before acceptance.";
+            }
+        ~data ~warnings:[]
+        ~next_actions:
+          [
+            action ~root
+              [ "integrate"; "--plan"; plan_id; "--preview" ]
+              "Inspect this immutable proposal without changing files.";
+          ]
+        ()
+      |> Cli_data.encode |> print_json
+    else render_integration_plan ~root plan;
+    exit 4);
+  let cancelled =
+    (not flags.selection_yes)
+    && (not flags.selection_preview)
+    && (not (Integration.no_op plan))
+    && not
+         (confirm_local_selection ~plan_id ~data ~next_actions:actions
+            ~render:(fun () -> render_integration_plan ~root plan)
+            ())
+  in
+  let result =
+    if flags.selection_preview || cancelled then None
+    else
+      let _, _, local = integration_repository root in
+      let request = Integration.request plan in
+      let represented =
+        Yeokcham_v1_composition.Graph.represented (Local.pool local)
+          request.Core.accepted_heads
+        |> require_ok Yeokcham_v1_composition.Graph.error_to_string
+      in
+      let needs_signer =
+        Local.find_operation local ~plan:(Integration.id plan) = None
+        && (not (Integration.no_op plan))
+        && not
+             (List.length (Integration.event_heads plan) = 1
+             && List.length request.Core.accepted_heads = 1
+             && List.for_all
+                  (fun id -> List.exists (Core.Record_id.equal id) represented)
+                  request.Core.selected_revisions)
+      in
+      let signing_capability =
+        if not needs_signer then None
+        else
+          let identity = Service.identity ~root |> require_local in
+          match
+            V1_signer.load ~root (Trust.device_id identity.Service.device)
+          with
+          | Ok capability -> Some capability
+          | Error e ->
+              fail_with_status 5 "signing-provider-unavailable"
+                (V1_signer.error_to_string e)
+      in
+      Some
+        (Native_integrate.apply ~root ~plan:(Integration.id plan)
+           ~signing_capability
+        |> require_integration)
+  in
+  let code, message =
+    if cancelled then
+      ( "integration-cancelled",
+        "Integration cancelled; files and history were preserved." )
+    else if flags.selection_preview then
+      ( "integration-preview",
+        "Exact shared/private proposal prepared; acceptance and files are \
+         unchanged." )
+    else
+      match result with
+      | Some outcome when outcome.Native_integrate.no_op ->
+          ("integration-unchanged", "Selected work is already accepted.")
+      | Some _ when repeated ->
+          ( "integration-repeated",
+            "The recorded integration was reused; no acceptance or navigation \
+             was added." )
+      | Some outcome when outcome.Native_integrate.resumed ->
+          ( "integration-resumed",
+            "The same confirmed operation completed; outbound transfer may \
+             remain pending." )
+      | Some _ ->
+          ( "integration-completed",
+            "Integration committed locally; outbound transfer may remain \
+             pending." )
+      | None -> assert false
+  in
+  let operation =
+    Option.bind result (fun result -> result.Native_integrate.operation)
+  in
+  let data =
+    match data with
+    | `Assoc fields ->
+        `Assoc
+          (fields
+          @ [
+              ("preview", `Bool flags.selection_preview);
+              ("cancelled", `Bool cancelled);
+              ("repeated", `Bool repeated);
+              ( "recorded_operation",
+                json_optional json_integration_operation recorded_operation );
+              ("operation", json_optional json_integration_operation operation);
+            ])
+    | _ -> assert false
+  in
+  if requested_format () = Json_format then
+    domain_json ~plan_id
+      ?operation_id:
+        (Option.map
+           (fun operation ->
+             Core.Operation_id.to_hex operation.Integration_op.token)
+           operation)
+      ~outcome:
+        (if
+           cancelled
+           || (repeated && not flags.selection_preview)
+           || Integration.no_op plan
+         then `Unchanged
+         else `Completed)
+      ~code ~message ~data ~next_actions:actions ()
+  else (
+    render_integration_plan ~root plan;
+    print_endline message;
+    Option.iter
+      (fun operation ->
+        Printf.printf "operation %s; %s\n"
+          (Core.Operation_id.to_hex operation.Integration_op.token)
+          (phase_name operation.Integration_op.phase))
+      operation);
+  match result with
+  | Some result ->
+      (not result.Native_integrate.no_op) && not result.Native_integrate.resumed
+  | None -> false
+
+let run_native_operation ~resume arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  if
+    flags.selection_preview || flags.selection_yes
+    || flags.selection_plan <> None
+  then usage ();
+  let text = match remaining with [ text ] -> text | _ -> usage () in
+  let token =
+    Core.Operation_id.of_hex text |> require_ok Core.error_to_string
+  in
+  local_failure_context := Some (native_failure_context root);
+  let _, _, local = integration_repository root in
+  let operation =
+    match
+      List.find_opt
+        (fun operation ->
+          Core.Operation_id.equal token operation.Integration_op.token)
+        (Local.operations local)
+    with
+    | Some operation -> operation
+    | None ->
+        fail_with "unknown-integration-operation"
+          "Inspect status for durable integration operation IDs."
+  in
+  let was_completed =
+    operation.Integration_op.phase = Integration_op.Completed
+  in
+  let operation =
+    if resume then
+      Native_integrate.resume ~root ~operation:token |> require_integration
+      |> fun outcome -> Option.get outcome.Native_integrate.operation
+    else operation
+  in
+  let actions =
+    if Integration_op.pending operation then
+      [
+        action ~root
+          [ "operation"; "resume"; text ]
+          "Resume this exact confirmed operation; external edits remain \
+           protected.";
+      ]
+    else
+      [
+        action ~root [ "status" ] "Inspect accepted and private working state.";
+      ]
+  in
+  if requested_format () = Json_format then
+    domain_json ~operation_id:text
+      ~plan_id:(Core.Plan_id.to_hex operation.Integration_op.plan)
+      ~outcome:
+        (if resume && was_completed then `Unchanged
+         else if Integration_op.pending operation then `Incomplete
+         else `Completed)
+      ~code:(if resume then "operation-resumed" else "operation-inspected")
+      ~message:
+        (if resume then "The same integration operation was resumed."
+         else "Durable integration facts inspected without file changes.")
+      ~data:(json_integration_operation operation)
+      ~next_actions:actions ()
+  else (
+    Printf.printf
+      "operation %s\nplan %s\nphase %s\naccepted %s\nprivate target %s\n" text
+      (Core.Plan_id.to_hex operation.Integration_op.plan)
+      (phase_name operation.Integration_op.phase)
+      (Core.Record_id.to_hex operation.Integration_op.accepted)
+      (Core.Object_id.to_hex operation.Integration_op.target);
+    match operation.Integration_op.phase with
+    | Integration_op.Paused (_, reason) ->
+        Printf.printf "paused: %s\n" (Output.display_value reason)
+    | Integration_op.Prepared | Integration_op.Applying
+    | Integration_op.Materialized | Integration_op.Committed
+    | Integration_op.Completed ->
+        ())
+
 let run_withdraw arguments =
   let root, change = parse_withdraw arguments in
   let change =
@@ -6651,6 +7337,13 @@ let dispatch () =
   | _ :: "draft" :: "new" :: arguments ->
       observe_after_success [ "draft"; "new" ] arguments (fun () ->
           run_new_draft arguments)
+  | _ :: "integrate" :: arguments ->
+      observe_after_commit [ "integrate" ] arguments (fun () ->
+          run_integrate arguments)
+  | _ :: "operation" :: "show" :: arguments ->
+      run_native_operation ~resume:false arguments
+  | _ :: "operation" :: "resume" :: arguments ->
+      run_native_operation ~resume:true arguments
   | _ :: "share" :: arguments ->
       observe_after_commit [ "share" ] arguments (fun () -> run_share arguments)
   | _ :: "withdraw" :: arguments ->

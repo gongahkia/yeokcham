@@ -31,8 +31,49 @@ Status shows native revision identities, the private working basis and local
 publication receipts separately from accepted heads. At this checkpoint transfer
 is pending: the legacy package/relay journeys below carry the earlier V1 record
 family and do not yet export these new Core records. Native clone/exchange and
-journaled integration remain required before P3 is complete. Do not substitute
+complete conflict/recovery journeys remain required before P3 is complete. Do not substitute
 the old package commands for verification of the new selected-publication loop.
+
+## Local shared acceptance (P3 in progress)
+
+The selected Core work recorded above can now be accepted locally:
+
+```sh
+yeokcham integrate CHANGE_ID --preview
+yeokcham integrate CHANGE_ID --yes
+yeokcham integrate --all --preview
+yeokcham integrate --plan PLAN_ID --yes
+yeokcham operation show OPERATION_ID
+yeokcham operation resume OPERATION_ID
+```
+
+With no selection, a sole eligible change is selected; multiple choices are
+listed and require explicit selection or `--all`. IDs come from `share`, `status`
+and preview. Accepted and private workspace results are shown separately, with
+readable text differences and explicit opaque/type/mode changes. Compatible
+private edits after sharing remain private: accepting shared D retains later E
+without publishing E. Integration creates its accepted record and local history
+atomically and records pending outbound work; it needs no separate `deliver`.
+It does not claim transfer acknowledgement or managed background exchange.
+
+Preview requires no signer and leaves accepted/history refs and ordinary files
+unchanged. Confirmation defaults to cancel; noninteractive or JSON application
+requires `--yes`. A saved `--plan` binds exact inputs and refuses stale work.
+Repeating a completed plan reuses the operation; already accepted selections
+report no-op. `operation show` inspects durable facts, and `operation resume`
+continues the previously confirmed operation without another signer or identity.
+After Materialized, resume publishes the verified result without replaying files,
+so later external edits survive. Unexpected edits during Applying pause instead
+of triggering rollback. Incomplete integration blocks ordinary capture/navigation
+and keeps its safety/target roots protected.
+
+Divergent branch histories require explicitly naming every event and accepted
+head with repeated `--reconcile ID`; `--yes` alone never selects a winner. Conflict
+plans identify shared/private paths and exact variants. Complete native conflict
+resolution and user-facing recovery choices are still P3 work; the older
+`resolve --decision` and package flows below are a different record family.
+Required unsupported policy refuses explicitly. These local commands do not yet
+complete the two-person native clone/exchange pilot.
 
 ## Two people, offline package
 

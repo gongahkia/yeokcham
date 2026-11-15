@@ -57,6 +57,15 @@
 
 (rule
  (alias runtest)
+ (deps test_native_integration_cli.py ../bin/yeokcham_v1.exe)
+ (action
+  (run
+   python3
+   %{dep:test_native_integration_cli.py}
+   %{dep:../bin/yeokcham_v1.exe})))
+
+(rule
+ (alias runtest)
  (deps test_local_inspection_cli.py ../bin/yeokcham_v1.exe)
  (action
   (run

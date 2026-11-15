@@ -8,7 +8,8 @@ verified local selection/recovery. Read actual signatures in
 [trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli) and the local
 adapters below. P1 left V1 CLI/wrappers unchanged; P2 extends the existing local
 state root while preserving public package/transport formats. P3 composition/accepted-result verification is now in progress below; clone,
-exchange and integration execution are not yet delivered. See the
+exchange and complete conflict/recovery journeys remain in progress. Local
+integration execution and its CLI are described below. See the
 [P2 report](reports/P02-attempt-01.md). TC01/TC02/TC06 remain the authority in
 [Technical contracts](../TECHNICAL_CONTRACTS.md).
 
@@ -1065,8 +1066,8 @@ is `Integration_plan_record`, so corrupt proposals are diagnosed separately from
 an unreadable state head. Corruption refuses replacement and blocks GC planning.
 
 This supplies the actual library planner/retained proposal. The following
-checkpoint adds durable service execution; ordinary CLI integration, resolution
-and native exchange still require delivery and verification.
+checkpoints add durable service execution and ordinary CLI integration;
+resolution, recovery choices and native exchange remain in progress.
 
 
 ### P3 durable integration service (in progress)
@@ -1076,8 +1077,9 @@ and native exchange still require delivery and verification.
 runs the existing `Safe_apply.check` for Ready contents. `apply ~root ~plan
 ~signing_capability` is called only after confirmation of that Plan ID. `resume
 ~root ~operation` continues an existing durable operation without another signer.
-These APIs are wired to actual storage and file application; ordinary CLI
-selection/confirmation/inspection/recovery remains a subsequent consumer.
+These APIs are wired to actual storage and file application. The following CLI
+checkpoint supplies selection/confirmation/inspection/resume; recovery choices
+remain a required consumer.
 
 Providers run after releasing the writer lock. The service reacquires the lock,
 reloads the current root and fully revalidates the exact plan after signing.
@@ -1161,5 +1163,52 @@ restart without a signer, one acceptance/history child, private D/E separation,
 late edits after Materialized, external-edit pauses, unrelated receipt retention,
 GC roots, stale confirmation, provider-time revalidation, absence of a writer
 lock during provider callbacks and bounded token collision/entropy refusal.
-Conflict resolution, user-facing recovery choices, full ordinary CLI and native
-clone/exchange remain P3 requirements; these service tests do not complete P3.
+Conflict resolution, user-facing recovery choices and native clone/exchange
+remain P3 requirements; these service tests do not complete P3.
+
+
+### P3 integration CLI consumer (in progress)
+
+`integrate [CHANGE...]` resolves generated change IDs to their sole causal revision
+or accepts explicit retained revision IDs. Omitted selection uses a sole eligible
+change; multiple choices are listed with generated IDs/titles and require named
+selection or `--all`. Already represented work is excluded from automatic
+selection; an empty selection can follow a received accepted head. Concurrent
+change revisions refuse, and divergent branch reconciliation requires explicit
+`--reconcile ID` for the complete event/accepted head union. `--yes` never chooses
+a divergent head. Dependencies and exact selected inputs pass through the actual
+planner/graph/trust boundary.
+
+`--preview`/`--dry-run` requires no signing provider and does not advance the root,
+accepted history or ordinary files. `--plan ID` reviews or applies a retained
+proposal, while completed operations can reload their immutable control without
+an alias. Text output shows separate accepted and workspace changes, with the
+same bounded text/opaque display as ordinary diff. `compare_immutable_snapshots`
+verifies staged immutable snapshots without requiring a private checkpoint or
+scanning live files; display remains separate from composition proof.
+
+Confirmation defaults to cancel. JSON/noninteractive writes require `--yes` and
+otherwise return choice-required exit 3 with the exact plan and next invocation.
+The service revalidates after confirmation/provider interaction. Resumed and
+repeated operations preserve tokens; already completed retries are schema-2
+Unchanged rather than implying another acceptance. Fresh already-accepted
+selection also reports no-op. Required new acceptance uses the enrolled signer;
+no-op, catch-up to existing acceptance and recorded operation resume need no
+additional signer. Outbound state is reported pending after offline local commit.
+
+`operation show ID` reads the exact plan/phase, source/provisional target identity,
+accepted-record intent, committed fact, pause reason and outbound state without a
+live scan. `operation resume ID` continues the previously confirmed operation.
+Status includes `integration_operations` separately from shared revisions and
+publication receipts; partial application reports incomplete observation.
+Plan/result JSON carries exact IDs, profile, conflicts, accepted/private snapshots,
+separate path/text differences, operation facts and actionable next commands.
+Exit categories reuse selection conventions: invalid 2, choice/stale 3, conflicts
+4, unavailable 5, integrity 6, unsupported authority/policy 7, paused application 8.
+
+Fresh-process disposable-signer journeys cover D/E separation, exact revision and
+contextual/all selection, saved-plan confirmation, cancellation, provider-free
+preview/retry/no-op, stale inputs, text/JSON diffs, operation show/resume and
+status. They are local CLI evidence. Native relay exchange/clone, complete
+conflict resolution and user-facing recovery are still unimplemented P3 scope;
+legacy resolution/package commands do not satisfy those criteria.

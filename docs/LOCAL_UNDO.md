@@ -4,9 +4,13 @@ Yeokcham records complete saved working states and their continuations. Return
 to an earlier state, edit again, and both continuations remain inspectable after
 restart. This covers disk bytes, empty directories, symlink targets and the
 regular/executable distinction. Unsaved editor buffers and edits between captures
-are outside this history. Capture requires `save`, foreground `watch`, or the
-existing explicitly started Linux runtime; managed scheduling and private backup
-are not configured by initialization.
+are outside this history. Initialization, `save`, selected `share` and confirmed
+integration record the relevant complete private states; foreground `watch` or an
+explicitly started Linux runtime can also capture edits. Managed scheduling and
+private backup are not configured by initialization. Shared acceptance remains
+separate: undo/redo/restore select private alternatives without undoing an accepted
+Core version. An incomplete integration blocks competing in-place navigation;
+inspect its `operation show ID` before resuming the same confirmed operation.
 
 ## Inspect and select
 

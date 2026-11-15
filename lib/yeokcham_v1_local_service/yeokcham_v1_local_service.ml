@@ -4930,6 +4930,7 @@ type local_status = {
   status_shared_revisions :
     (Model.Core.Record_id.t * Model.Core.shared_revision) list;
   status_publications : Store.Local.publication list;
+  status_integrations : Store.Local.Operation.t list;
   status_branch : branch_listing option;
   status_cursor : state_view;
   status_head : string;
@@ -5084,6 +5085,7 @@ let compare_local_states ~root ~before ~after =
         let* observed =
           if observe then
             let* () = require_no_pending_restore ~root in
+            let* () = require_no_native_integration loaded in
             capture ~root store |> Result.map Option.some
           else Ok None
         in
@@ -5113,6 +5115,24 @@ let compare_local_states ~root ~before ~after =
         Ok { before_state; after_state; display_differences })
   in
   if observe then with_worktree_lock ~root action else action ()
+
+let compare_immutable_snapshots ~root ~before ~after =
+  with_repository ~root (fun repository _ ->
+      let convert id =
+        Model.Snapshot_id.of_string (Model.Core.Object_id.to_hex id)
+        |> Result.map_error (fun e -> History_error (Model.error_to_string e))
+      in
+      let* before = convert before in
+      let* after = convert after in
+      let store = Store.underlying_store repository in
+      let* differences = comparison_differences store ~before ~after in
+      List.fold_left
+        (fun result difference ->
+          let* values = result in
+          let* value = display_difference store difference in
+          Ok (value :: values))
+        (Ok []) differences
+      |> Result.map List.rev)
 
 let[@warning "-4"] inspect_local_status ~root =
   let inspect observation_failure =
@@ -5190,6 +5210,10 @@ let[@warning "-4"] inspect_local_status ~root =
               (match loaded.Store.local with
               | None -> []
               | Some local -> Store.Local.publications local);
+            status_integrations =
+              (match loaded.Store.local with
+              | None -> []
+              | Some local -> Store.Local.operations local);
             status_branch;
             status_cursor =
               view_of_node loaded.Store.history
