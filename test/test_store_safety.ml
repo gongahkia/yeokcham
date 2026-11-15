@@ -256,6 +256,32 @@ let oversized_records_refuse () =
   reject "oversized journal" (J.decode (String.make 8193 '\000'));
   reject "oversized proof" (P.decode (String.make 8193 '\000'))
 
+let[@warning "-4"] bounded_object_reads () =
+  with_root (fun _ store ->
+      let content =
+        Snapshot.Content.store store "bounded object input"
+        |> ok Snapshot.error_to_string
+      in
+      let id = Snapshot.Content.stored_object_id content in
+      let path = S.object_path store id in
+      let size = (Unix.stat path).Unix.st_size in
+      S.get ~max_bytes:size store id |> ok S.error_to_string |> ignore;
+      (match S.get ~max_bytes:(size - 1) store id with
+      | Error (S.Object_too_large { limit; _ }) ->
+          Alcotest.(check int)
+            "bound checked on native file size" (size - 1) limit
+      | Error error -> Alcotest.fail (S.error_to_string error)
+      | Ok _ -> Alcotest.fail "oversized object input was allocated/decoded");
+      reject "negative object input bound" (S.get ~max_bytes:(-1) store id);
+      Unix.LargeFile.truncate path
+        (Int64.succ (Int64.of_int S.max_object_bytes));
+      match S.get ~max_bytes:max_int store id with
+      | Error (S.Object_too_large { limit; _ }) ->
+          Alcotest.(check int)
+            "caller cannot raise global object bound" S.max_object_bytes limit
+      | Error error -> Alcotest.fail (S.error_to_string error)
+      | Ok _ -> Alcotest.fail "caller raised global object bound")
+
 let () =
   Alcotest.run "Durable local metadata safety"
     [
@@ -263,6 +289,8 @@ let () =
         List.map
           (fun (name, test) -> Alcotest.test_case name `Quick test)
           [
+            ( "object reads check requested/native global bounds",
+              bounded_object_reads );
             ( "journal/proof publication at ten crash boundaries",
               staged_publication_crashes );
             ( "create-only publication preserves collisions",

@@ -101,7 +101,13 @@ val put :
     temporary file for later inspection. *)
 
 val get :
-  repository -> Stored_object_id.t -> (Yeokcham_envelope.t, error) result
+  ?max_bytes:int ->
+  repository ->
+  Stored_object_id.t ->
+  (Yeokcham_envelope.t, error) result
+(** Limits native file size before allocating its input buffer, then verifies
+    object identity and the envelope. A supplied bound cannot raise the store's
+    global maximum. *)
 
 val list_objects : repository -> (object_info list, error) result
 (** Lists every canonical object file in lexicographic object-ID order. Each

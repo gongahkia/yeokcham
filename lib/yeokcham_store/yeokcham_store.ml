@@ -764,9 +764,11 @@ let ensure_object_shard repository id =
   in
   ensure_directory (object_directory repository id)
 
-let get repository id =
+let get ?(max_bytes = max_object_bytes) repository id =
   let path = object_path repository id in
-  let* bytes = read_regular_file path in
+  let* bytes =
+    read_file_bounded ~path ~max_bytes:(min max_object_bytes max_bytes)
+  in
   let actual = stored_object_id_of_bytes bytes in
   if not (Stored_object_id.equal id actual) then
     Error (Object_identity_mismatch { expected = id; actual })
