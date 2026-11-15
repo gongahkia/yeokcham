@@ -900,3 +900,47 @@ then exact private-preserving integration, native exchange/clone, conflicts and
 the complete fault/CLI audit. Receipt staging is not an implemented transfer
 acknowledgement or a complete service operation. README/G01 measurements remain
 unchanged; no later pilot slice started.
+
+P3 native selected-share checkpoint: ordinary `share [PATH...]`, `--title`,
+`--preview` and `--update CHANGE` now use generated Core identities and the
+existing writer/root system. Current disk capture/history, signed public revision
+and scoped receipt/outbound obligation commit atomically; sharing does not accept
+or replace working files. Preview requires no signing provider. Captured native
+ignore decisions are reused rather than rereading changing live rules. Updates
+retain unselected public fields; changed explicit requests can create distinct
+same-content versions, while identical recorded requests reuse their operation.
+Status exposes native shared revisions, private working basis and publication
+receipts separately from accepted heads. Ordinary full-tree verification now
+uses bounded content verification instead of allocating whole large files.
+
+Native signed-local34 passed, including five actual service scenarios and
+process exits before/after root publication; fresh-process native-share CLI8,
+existing branch CLI17, capture7, ignore5, service45, inspection7, CLI28,
+content-verification and snapshot-materialization3 passed. Preview and recorded
+retry do not reexecute an explicitly configured share hook. Plain/JSON checks
+include generated IDs/titles, pending transfer, literal paths, same-content
+updates, ignored/malformed captures, unavailable signing provider and mixed large
+binary/executable/directory/symlink work. Existing legacy `--change/--revision`
+sharing and its package/transport regressions remain available.
+
+Implementation was externally committed as
+`9b119996ccb5f6445c324ecfc8b65dd664d38fca` (`snapshotted`) during verification;
+its sixteen paths are exactly the owned source/tests/current guides. Inspected
+and preserved. First native-share full CI exited 2 because the existing GC
+corruption fixture unconditionally created an object shard already present from
+random workspace metadata. The test now checks/reuses real existing directories;
+its corruption refusal assertion is unchanged. A following lint invocation
+required formatting that fixture hunk. Final focused GC11, `make build`,
+`make lint`, `make ci` exited 0 (`native-share-verified-checks.json`); the exact
+earlier focused/broad outcomes are in `native-share-*-checks.json` in the P3
+external log directory. Matching unchanged Dune results may be cached. One
+initial CLI expectation omitted the renderer's correct quoting and was corrected;
+no runtime behavior was weakened. Tiny harness regressions ran, not G01 accepted
+measurements. README remains unchanged.
+
+P3 is still incomplete: new Core public export/native clone/exchange, exact
+private-preserving integration plans, recoverable execution/accepted outbox,
+resolution and the full two-person/fault audit remain required. Current selected
+shares are recorded locally with pending transfer; legacy packages do not carry
+those Core records yet. No P03 completion report/receipt, later pilot slice,
+independent phase completion, push/release/deployment or next prompt.
