@@ -1,4 +1,5 @@
 module Safe_apply = Safe_apply
+module Integrate = Native_integration
 module Text_diff = Text_diff
 module Share = Native_share
 module Integration = Yeokcham_v1_integration
@@ -650,6 +651,16 @@ let with_worktree_lock ~root action =
       (History_error
          ("workspace operation unavailable: " ^ Unix.error_message error))
 
+let require_no_native_integration loaded =
+  match Option.bind loaded.Store.local Store.Local.pending_operation with
+  | None -> Ok ()
+  | Some operation ->
+      Error
+        (History_error
+           ("an integration is incomplete; resume operation "
+           ^ Model.Core.Operation_id.to_hex
+               operation.Store.Local.Operation.token))
+
 let require_no_pending_restore ~root =
   let* pending =
     Journal.latest_pending ~root
@@ -666,7 +677,9 @@ let require_no_pending_restore ~root =
 let with_writable_repository ~root action =
   with_worktree_lock ~root (fun () ->
       let* () = require_no_pending_restore ~root in
-      with_repository ~root action)
+      with_repository ~root (fun repository loaded ->
+          let* () = require_no_native_integration loaded in
+          action repository loaded))
 
 let tree_id snapshot =
   Snapshot.Snapshot.root snapshot
@@ -1682,6 +1695,7 @@ let perform_in_place ~observe ~root repository loaded journal ~resumed =
 
 let recover_in_place_unlocked ~observe ~root =
   with_repository ~root (fun repository loaded ->
+      let* () = require_no_native_integration loaded in
       let* pending =
         Journal.latest_pending ~root
         |> Result.map_error (fun error -> Restore_journal_error error)
@@ -3201,6 +3215,10 @@ let selection_plan_id loaded ~observed ~target ~branch =
 
 let navigate_history_with ~observe ~expected_plan ~root ~direction ~dry_run =
   with_worktree_lock ~root (fun () ->
+      let* () =
+        with_repository ~root (fun _ loaded ->
+            require_no_native_integration loaded)
+      in
       let* initial = local_history ~root in
       let* pending =
         Journal.latest_pending ~root
@@ -4678,6 +4696,7 @@ type branch_switch = {
 let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
   with_worktree_lock ~root (fun () ->
       with_repository ~root (fun repository loaded ->
+          let* () = require_no_native_integration loaded in
           let* () =
             match expected with
             | Some preview
@@ -5128,6 +5147,7 @@ let[@warning "-4"] inspect_local_status ~root =
                      ^ Journal.operation_id journal))
             | Error e -> Error (Restore_journal_error e)
           in
+          let* () = require_no_native_integration loaded in
           let saved_checkpoint =
             (Model.active_draft loaded.Store.project).Model.latest_checkpoint
           in

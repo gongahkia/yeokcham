@@ -14,6 +14,7 @@ type root_reason =
   | Shared_history of Yeokcham_v1_model.Snapshot_id.t
   | Publication_witness of Model.Core.Operation_id.t
   | Integration_proposal of Model.Core.Plan_id.t
+  | Integration_operation of Model.Core.Operation_id.t
   | Checkpoint of {
       snapshot : Model.Snapshot_id.t;
       reasons : Model.protection_reason list;
@@ -85,6 +86,8 @@ let root_reason_to_string = function
       "publication-witness " ^ Model.Core.Operation_id.to_hex operation
   | Integration_proposal plan ->
       "integration-proposal " ^ Model.Core.Plan_id.to_hex plan
+  | Integration_operation token ->
+      "integration-operation " ^ Model.Core.Operation_id.to_hex token
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
@@ -652,6 +655,36 @@ let plan_from_loaded ~root store loaded =
           (Ok reachable)
           (Integration.retention_roots proposal))
       (Ok reachable) proposals
+  in
+  let* reachable =
+    match loaded.V1_store.local with
+    | None -> Ok reachable
+    | Some local ->
+        List.fold_left
+          (fun result operation ->
+            let* reachable = result in
+            List.fold_left
+              (fun result identity ->
+                let* reachable = result in
+                let* id =
+                  Store.Stored_object_id.of_raw_bytes
+                    (Model.Core.Object_id.to_raw identity)
+                  |> Option.to_result
+                       ~none:
+                         (Invalid_schema
+                            "invalid integration operation snapshot")
+                in
+                traverse_snapshot store
+                  [
+                    Integration_operation
+                      operation.V1_store.Local.Operation.token;
+                  ]
+                  (Snapshot.Snapshot.of_stored_object_id id)
+                  reachable)
+              (Ok reachable)
+              (V1_store.Local.Operation.retention_roots operation))
+          (Ok reachable)
+          (V1_store.Local.operations local)
   in
   let reachable =
     List.fold_left

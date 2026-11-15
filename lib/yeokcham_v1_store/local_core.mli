@@ -1,4 +1,6 @@
 module Core = Yeokcham_v1_model.Core
+
+module Operation = Integration_operation
 (** Authenticated local branch metadata for the P2 adapter. Stored in the
     existing project-state root, never a separate mutable ref. *)
 
@@ -25,6 +27,25 @@ type publication = private {
 
 val publications : t -> publication list
 val find_publication : t -> intent:Core.Digest.t -> publication option
+val operations : t -> Operation.t list
+val pending_operation : t -> Operation.t option
+val find_operation : t -> plan:Core.Plan_id.t -> Operation.t option
+
+val put_operation :
+  store:Yeokcham_store.repository -> Operation.t -> t -> (t, string) result
+(** Stages the operation collection under the same local root. New operations
+    begin Prepared and cannot replace another pending operation or reuse a plan.
+    Publish with the exact safety history before any ordinary-file mutation. *)
+
+val commit_operation :
+  store:Yeokcham_store.repository ->
+  authority:Yeokcham_v1_trust.authority ->
+  Operation.t ->
+  t ->
+  (t, string) result
+(** Admits the exact staged records, updates the private basis/position and
+    transitions Materialized to Committed in one candidate root. The caller must
+    atomically publish the matching exact history child and checkpoint. *)
 
 val record_publication :
   store:Yeokcham_store.repository ->

@@ -117,6 +117,15 @@ let record history ~snapshot ~draft ~created_at =
     in
     select history node.id
 
+let record_exact history ~expected ~snapshot ~draft ~created_at =
+  if history.next <> Some expected then
+    Error "reserved integration history sequence changed"
+  else
+    let* history, node =
+      append history ~parent:(Some history.cursor) ~snapshot ~draft ~created_at
+    in
+    select history node.id
+
 let target_snapshot history ~snapshot ~draft ~created_at =
   let matches node = Model.Snapshot_id.equal node.snapshot snapshot in
   let rec ancestor node =

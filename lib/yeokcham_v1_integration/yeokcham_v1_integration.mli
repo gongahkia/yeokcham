@@ -78,8 +78,19 @@ val scan :
 
 val retention_roots : t -> Core.Object_id.t list
 
+val revalidate_shared :
+  store:Yeokcham_store.repository ->
+  loaded:Yeokcham_v1_store.loaded ->
+  cursor:Core.History_id.t ->
+  t ->
+  (unit, error) result
+(** Recheck relevant shared inputs and the durable operation's safety cursor
+    during resume. Does not inspect a possibly partially materialized live tree.
+    Only use after full revalidation and durable operation preparation; this
+    narrower check alone never authorizes starting a decoded proposal. *)
+
 val forget :
   store:Yeokcham_store.repository -> Core.Plan_id.t -> (unit, error) result
-(** Releases only this immutable proposal alias. Service callers must not retire
-    a plan referenced by an incomplete operation; that operation owns its roots.
-*)
+(** Releases only this immutable proposal alias. Refuses retirement while an
+    incomplete durable operation references the plan. Operation roots are also
+    protected independently of this alias. *)

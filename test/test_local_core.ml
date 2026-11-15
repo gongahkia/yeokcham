@@ -2904,11 +2904,562 @@ let[@warning "-4"] equal_content_causal_heads_require_explicit_full_reconciliati
         "preparation does not merge or erase either head" true
         (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head))
 
+module Native_integrate = Service.Integrate
+module Op = L.Operation
+
+let integrate_ok r = ok Native_integrate.error_to_string r
+
+let write_file root name bytes =
+  Out_channel.with_open_bin
+    (root ^ "/" ^ name)
+    (fun out -> output_string out bytes)
+
+let read_file root name =
+  In_channel.with_open_bin (root ^ "/" ^ name) In_channel.input_all
+
+let add_incoming_revision repository capability certificate authority name bytes
+    =
+  let loaded = load repository in
+  let store = S.underlying_store repository in
+  let content =
+    Snapshot.Content.store store bytes |> ok Snapshot.error_to_string
+  in
+  let result =
+    Composition.tree
+      [ ([ name ], Composition.File { mode = Snapshot.Regular; content }) ]
+    |> ok Composition.error_to_string
+    |> Composition.store store
+    |> ok Composition.error_to_string
+  in
+  let scope =
+    Composition.Scope.store store [ [ name ] ] |> ok Composition.error_to_string
+  in
+  let next, revision =
+    L.prepare_revision ~store ~authority ~certificate
+      ~signing_capability:capability ~change:None ~previous_revisions:[]
+      ~base_snapshot:(L.empty_snapshot (local loaded))
+      ~result_snapshot:result ~edit_scope_root:scope ~dependencies:[]
+      (local loaded)
+    |> ok Fun.id
+  in
+  S.save_collaborative ~local:next repository ~expected:loaded.S.head
+    ~project:loaded.S.project
+    ~collaboration:(Option.get loaded.S.collaboration)
+  |> ok S.error_to_string |> ignore;
+  (revision, result)
+
+let native_plan root chosen =
+  Native_integrate.prepare ~root ~selected_revisions:chosen
+    ~reconcile_heads:None
+  |> integrate_ok
+
+let native_apply root plan capability =
+  Native_integrate.apply ~root ~plan:(I.id plan) ~signing_capability:capability
+  |> integrate_ok
+
+let native_integration_preserves_private_work_and_retries () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      write_file root "note.txt" "shared D\n";
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let chosen = [ Option.get shared.Service.Share.revision ] in
+      write_file root "note.txt" "shared D\nprivate E\n";
+      let before = load repository in
+      let plan = native_plan root chosen in
+      Alcotest.(check bool)
+        "preview does not move root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let result = native_apply root plan (Some capability) in
+      let operation = Option.get result.Native_integrate.operation in
+      let committed = load repository in
+      Alcotest.(check bool)
+        "completed durable fact" true
+        (operation.Op.phase = Op.Completed);
+      Alcotest.(check bool)
+        "offline outbound work is pending" false operation.Op.acknowledged;
+      Alcotest.(check int)
+        "one unsaved safety plus distinct integration history"
+        (List.length (H.nodes before.S.history) + 2)
+        (List.length (H.nodes committed.S.history));
+      Alcotest.(check string)
+        "private E survives" "shared D\nprivate E\n"
+        (read_file root "note.txt");
+      Alcotest.(check string)
+        "unselected private sentinel survives" "private\000bytes\255"
+        (read_private root);
+      let accepted =
+        Composition.Graph.accepted
+          (L.pool (local committed))
+          (L.selected (local committed)).L.basis
+        |> ok Composition.Graph.error_to_string
+      in
+      Alcotest.(check bool)
+        "accepted only D" true
+        (C.Object_id.equal accepted.C.result_snapshot
+           shared.Service.Share.public_snapshot);
+      let same = native_apply root plan None in
+      Alcotest.(check bool)
+        "same durable operation without signer" true
+        ((Option.get same.Native_integrate.operation).Op.token
+       = operation.Op.token);
+      Alcotest.(check bool)
+        "lost acknowledgement never republishes root" true
+        (Raw.Mutable_ref.equal committed.S.head (load repository).S.head);
+      let fresh = native_plan root chosen in
+      let noop = native_apply root fresh None in
+      Alcotest.(check bool)
+        "already represented work is honest no-op" true
+        noop.Native_integrate.no_op;
+      Alcotest.(check bool)
+        "no-op creates no operation" true
+        (noop.Native_integrate.operation = None);
+      Alcotest.(check bool)
+        "no duplicate navigation" true
+        (Raw.Mutable_ref.equal committed.S.head (load repository).S.head))
+
+let[@warning "-4"] interrupt_native root plan capability boundary =
+  let child = Unix.fork () in
+  if child = 0 then (
+    let observe seen =
+      match (seen, boundary) with
+      | Native_integrate.Mutation (a, _), Native_integrate.Mutation (b, _)
+        when a = b ->
+          Unix._exit 73
+      | a, b when a = b -> Unix._exit 73
+      | _ -> ()
+    in
+    ignore
+      (Native_integrate.For_test.apply ~observe ~root ~plan:(I.id plan)
+         ~signing_capability:(Some capability));
+    Unix._exit 74);
+  let _, status = Unix.waitpid [] child in
+  Alcotest.(check bool)
+    "interrupted at actual requested boundary" true (status = Unix.WEXITED 73)
+
+let native_integration_resumes_real_file_and_root_boundaries () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let revision, _ =
+            add_incoming_revision repository capability certificate authority
+              "remote.txt" "received shared D\n"
+          in
+          let plan = native_plan root [ revision ] in
+          let before = load repository in
+          interrupt_native root plan capability boundary;
+          let interrupted = load repository in
+          let operation = List.hd (L.operations (local interrupted)) in
+          if not (Op.committed operation) then (
+            Alcotest.(check int)
+              "no target history before actual commit"
+              (List.length (H.nodes before.S.history))
+              (List.length (H.nodes interrupted.S.history));
+            reject "pending plan alias was forgotten"
+              (I.forget ~store:(S.underlying_store repository) (I.id plan));
+            reject "capture accepted a partial integration tree"
+              (Service.save ~root));
+          let resumed = native_apply root plan None in
+          let after = load repository in
+          Alcotest.(check bool)
+            "resumed same token" true
+            ((Option.get resumed.Native_integrate.operation).Op.token
+           = operation.Op.token);
+          Alcotest.(check string)
+            "actual received file installed" "received shared D\n"
+            (read_file root "remote.txt");
+          Alcotest.(check string)
+            "original private data retained" "private\000bytes\255"
+            (read_private root);
+          Alcotest.(check int)
+            "one exact target history child"
+            (List.length (H.nodes before.S.history) + 1)
+            (List.length (H.nodes after.S.history));
+          Alcotest.(check int)
+            "one accepted/event pair"
+            (List.length (L.record_objects (local before)) + 2)
+            (List.length (L.record_objects (local after)));
+          let acknowledged =
+            Op.acknowledge (Option.get resumed.Native_integrate.operation)
+            |> ok Fun.id
+          in
+          let acknowledged_local =
+            L.put_operation
+              ~store:(S.underlying_store repository)
+              acknowledged (local after)
+            |> ok Fun.id
+          in
+          S.save_collaborative ~local:acknowledged_local repository
+            ~expected:after.S.head ~project:after.S.project
+            ~collaboration:(Option.get after.S.collaboration)
+          |> ok S.error_to_string |> ignore;
+          Alcotest.(check bool)
+            "acknowledgement durable without another acceptance" true
+            (List.hd (L.operations (local (load repository)))).Op.acknowledged))
+    [
+      Native_integrate.Prepared_root;
+      Native_integrate.Applying_root;
+      Native_integrate.Mutation (Service.Safe_apply.Before_mutation, []);
+      Native_integrate.Mutation (Service.Safe_apply.After_mutation, []);
+      Native_integrate.Mutation (Service.Safe_apply.After_sync, []);
+      Native_integrate.Materialized_root;
+      Native_integrate.Committed_root;
+      Native_integrate.Completed_root;
+    ]
+
+let[@warning "-4"] native_integration_materialized_retry_preserves_external_edits_and_receipts
+    () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, _ =
+        add_incoming_revision repository capability certificate authority
+          "remote.txt" "accepted D\n"
+      in
+      let plan = native_plan root [ revision ] in
+      interrupt_native root plan capability Native_integrate.Materialized_root;
+      write_file root "remote.txt" "late external E\n";
+      let unrelated, _ =
+        add_incoming_revision repository capability certificate authority
+          "other.txt" "independent receipt\n"
+      in
+      let gc = Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string in
+      Alcotest.(check bool)
+        "operation roots are explicit in actual GC" true
+        (List.exists
+           (fun object_ ->
+             match object_.Yeokcham_v1_gc.disposition with
+             | Yeokcham_v1_gc.Collect -> false
+             | Yeokcham_v1_gc.Retain reasons ->
+                 List.exists
+                   (function
+                     | Yeokcham_v1_gc.Integration_operation _ -> true
+                     | _ -> false)
+                   reasons)
+           gc.Yeokcham_v1_gc.objects);
+      Snapshot.Content.store
+        (S.underlying_store repository)
+        "unreferenced GC exercise"
+      |> ok Snapshot.error_to_string
+      |> ignore;
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      let result = native_apply root plan None in
+      let loaded = load repository in
+      Alcotest.(check string)
+        "no replay after Materialized" "late external E\n"
+        (read_file root "remote.txt");
+      Alcotest.(check bool)
+        "unrelated received record retained" true
+        (Option.is_some (C.find (L.pool (local loaded)) unrelated));
+      let operation = Option.get result.Native_integrate.operation in
+      let target =
+        H.find loaded.S.history operation.Op.target_sequence |> ok Fun.id
+      in
+      let object_id =
+        C.Object_id.of_hex (M.Snapshot_id.to_string target.H.snapshot) |> model
+      in
+      Alcotest.(check string)
+        "history records verified target, not later disk edits" "accepted D\n"
+        (preserved_entry
+           (S.underlying_store repository)
+           object_id [ "remote.txt" ]))
+
+let[@warning "-4"] native_integration_pauses_on_external_edit_during_application
+    () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, _ =
+        add_incoming_revision repository capability certificate authority
+          "remote.txt" "target D\n"
+      in
+      let plan = native_plan root [ revision ] in
+      interrupt_native root plan capability
+        (Native_integrate.Mutation (Service.Safe_apply.After_sync, []));
+      write_file root "remote.txt" "unexpected external bytes\n";
+      reject "integration overwrote an unexplained postimage"
+        (Native_integrate.apply ~root ~plan:(I.id plan) ~signing_capability:None);
+      let loaded = load repository in
+      let operation = Option.get (L.pending_operation (local loaded)) in
+      Alcotest.(check bool)
+        "durable Paused fact retains Applying stage" true
+        (match operation.Op.phase with
+        | Op.Paused (Op.During_apply, _) -> true
+        | _ -> false);
+      Alcotest.(check string)
+        "unexpected bytes preserved" "unexpected external bytes\n"
+        (read_file root "remote.txt");
+      Alcotest.(check int)
+        "no partial-tree history" 1
+        (List.length (H.nodes loaded.S.history));
+      reject "save captured partial tree" (Service.save ~root);
+      reject "undo competed with active integration"
+        (Service.navigate_history ~root ~direction:Service.Undo ~dry_run:false);
+      reject "switch competed with active integration"
+        (Service.branch_switch ~root ~name:"main" ~dry_run:false);
+      let status = Service.inspect_local_status ~root |> service in
+      Alcotest.(check bool)
+        "status reports no complete observation of a partial tree" true
+        (Result.is_error status.Service.capture_observation);
+      reject "phase jump bypassed application"
+        (Op.advance operation Op.Committed))
+
+let native_integration_stale_plan_refuses_before_reservation () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, _ =
+        add_incoming_revision repository capability certificate authority
+          "remote.txt" "D\n"
+      in
+      let plan = native_plan root [ revision ] in
+      write_private root "changed after confirmation\000";
+      let before = load repository in
+      reject "stale plan began application"
+        (Native_integrate.apply ~root ~plan:(I.id plan)
+           ~signing_capability:(Some capability));
+      let after = load repository in
+      Alcotest.(check bool)
+        "stale plan creates no operation" true
+        (L.operations (local after) = []);
+      Alcotest.(check bool)
+        "stale plan does not move root" true
+        (Raw.Mutable_ref.equal before.S.head after.S.head);
+      Alcotest.(check bool)
+        "stale plan does not install target" false
+        (Sys.file_exists (root ^ "/remote.txt")))
+
+let native_integration_metadata_cas_faults_are_idempotent () =
+  List.iter
+    (fun stop_before ->
+      List.iter
+        (fun root_number ->
+          with_root (fun root ->
+              let repository, capability, certificate, authority, _ =
+                initialize root
+              in
+              let revision, _ =
+                add_incoming_revision repository capability certificate
+                  authority "remote.txt" "D\n"
+              in
+              let plan = native_plan root [ revision ] in
+              let before = load repository in
+              let child = Unix.fork () in
+              if child = 0 then (
+                let count = ref 0 in
+                let observe seen =
+                  if seen = Native_integrate.Before_root then (
+                    incr count;
+                    if stop_before && !count = root_number then Unix._exit 73);
+                  if
+                    seen = Native_integrate.After_root
+                    && (not stop_before) && !count = root_number
+                  then Unix._exit 73
+                in
+                ignore
+                  (Native_integrate.For_test.apply ~observe ~root
+                     ~plan:(I.id plan) ~signing_capability:(Some capability));
+                Unix._exit 74);
+              let _, status = Unix.waitpid [] child in
+              Alcotest.(check bool)
+                "actual metadata publication boundary reached" true
+                (status = Unix.WEXITED 73);
+              let saved =
+                L.find_operation (local (load repository)) ~plan:(I.id plan)
+              in
+              let resumed =
+                native_apply root plan
+                  (if saved = None then Some capability else None)
+              in
+              let after = load repository in
+              Option.iter
+                (fun old ->
+                  Alcotest.(check bool)
+                    "durable token reused after lost acknowledgement" true
+                    (old.Op.token
+                   = (Option.get resumed.Native_integrate.operation).Op.token))
+                saved;
+              Alcotest.(check int)
+                "CAS fault yields one accepted/event pair"
+                (List.length (L.record_objects (local before)) + 2)
+                (List.length (L.record_objects (local after)));
+              Alcotest.(check int)
+                "CAS fault yields one navigation"
+                (List.length (H.nodes before.S.history) + 1)
+                (List.length (H.nodes after.S.history));
+              Alcotest.(check string)
+                "exact target installed" "D\n"
+                (read_file root "remote.txt")))
+        [ 1; 2; 3; 4; 5 ])
+    [ true; false ]
+
+let native_integration_root_refuses_operation_erasure_and_partial_capture () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, _ =
+        add_incoming_revision repository capability certificate authority
+          "remote.txt" "D\n"
+      in
+      let plan = native_plan root [ revision ] in
+      let before = load repository in
+      interrupt_native root plan capability Native_integrate.Prepared_root;
+      let prepared = load repository in
+      let operation = Option.get (L.pending_operation (local prepared)) in
+      reject "erased durable plan/token association"
+        (S.save_collaborative ~local:(local before) repository
+           ~expected:prepared.S.head ~project:prepared.S.project
+           ~collaboration:(Option.get prepared.S.collaboration));
+      let snapshot = (H.current prepared.S.history).H.snapshot in
+      let history =
+        H.record_exact prepared.S.history ~expected:operation.Op.target_sequence
+          ~snapshot ~draft ~created_at:operation.Op.created_at
+        |> ok Fun.id
+      in
+      reject "allocated the target sequence to a partial-tree capture"
+        (S.save_collaborative ~history repository ~expected:prepared.S.head
+           ~project:prepared.S.project
+           ~collaboration:(Option.get prepared.S.collaboration));
+      let pending = Op.advance operation Op.Applying |> ok Fun.id in
+      let replay = Op.advance operation Op.Prepared |> ok Fun.id in
+      Alcotest.(check bool)
+        "identical phase retry does not advance serial" true (replay = operation);
+      reject "operation rewound its phase"
+        (Op.validate_update ~previous:pending operation);
+      reject "uncommitted operation claimed outbound acknowledgement"
+        (Op.acknowledge operation);
+      Alcotest.(check bool)
+        "refusals do not mutate root" true
+        (Raw.Mutable_ref.equal prepared.S.head (load repository).S.head);
+      native_apply root plan None |> ignore)
+
+let native_integration_signer_runs_without_writer_lock_and_revalidates () =
+  List.iter
+    (fun edit_during_signing ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let revision, _ =
+            add_incoming_revision repository capability certificate authority
+              "remote.txt" "D\n"
+          in
+          let plan = native_plan root [ revision ] in
+          let before = load repository in
+          let calls = ref 0 in
+          let external_signer =
+            T.signing_capability_of_external_signer
+              ~public_key:(T.signing_public_key capability)
+              ~sign:(fun ~domain bytes ->
+                incr calls;
+                let child = Unix.fork () in
+                (if child = 0 then
+                   let fd =
+                     Unix.openfile
+                       (root ^ "/.yeokcham/local-worktree.lock")
+                       [ Unix.O_RDWR; Unix.O_CLOEXEC ]
+                       0
+                   in
+                   try
+                     Unix.lockf fd Unix.F_TLOCK 0;
+                     Unix.close fd;
+                     Unix._exit 0
+                   with Unix.Unix_error _ -> Unix._exit 1);
+                let _, status = Unix.waitpid [] child in
+                Alcotest.(check bool)
+                  "external provider has no held writer lock" true
+                  (status = Unix.WEXITED 0);
+                if edit_during_signing then
+                  write_private root "changed while provider was active";
+                T.sign_detached capability ~domain bytes
+                |> Result.map_error T.error_to_string)
+            |> trust
+          in
+          let result =
+            Native_integrate.apply ~root ~plan:(I.id plan)
+              ~signing_capability:(Some external_signer)
+          in
+          Alcotest.(check int) "exact acceptance and event signed" 2 !calls;
+          if edit_during_signing then (
+            reject "provider-time disk edits bypassed revalidation" result;
+            Alcotest.(check bool)
+              "provider-time stale result did not reserve operation" true
+              (L.operations (local (load repository)) = []);
+            Alcotest.(check bool)
+              "provider-time stale result did not publish metadata" true
+              (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+            Alcotest.(check bool)
+              "provider-time stale result did not replace files" false
+              (Sys.file_exists (root ^ "/remote.txt")))
+          else integrate_ok result |> ignore))
+    [ false; true ]
+
+let native_integration_entropy_and_collision_refuse_before_files () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      write_file root "note.txt" "D\n";
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let plan =
+        native_plan root [ Option.get shared.Service.Share.revision ]
+      in
+      let before = load repository in
+      let receipt = List.hd (L.publications (local before)) in
+      let calls = ref 0 in
+      reject "operation token collided with publication"
+        (Native_integrate.For_test.apply_with_entropy
+           ~random_bytes:(fun _ ->
+             incr calls;
+             Ok (C.Operation_id.to_raw receipt.L.operation))
+           ~observe:(fun _ -> ())
+           ~root ~plan:(I.id plan) ~signing_capability:(Some capability));
+      Alcotest.(check int) "collision retries bounded" 3 !calls;
+      reject "entropy failure produced durable operation"
+        (Native_integrate.For_test.apply_with_entropy
+           ~random_bytes:(fun _ -> Error "entropy unavailable")
+           ~observe:(fun _ -> ())
+           ~root ~plan:(I.id plan) ~signing_capability:(Some capability));
+      Alcotest.(check bool)
+        "failure did not reserve history/root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check bool)
+        "failure did not persist operation" true
+        (L.operations (local (load repository)) = []))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "native integration provider never holds writer lock and \
+             revalidates"
+            `Quick
+            native_integration_signer_runs_without_writer_lock_and_revalidates;
+          Alcotest.test_case
+            "native integration entropy/collision refusal is bounded" `Quick
+            native_integration_entropy_and_collision_refuse_before_files;
+          Alcotest.test_case
+            "native integration CAS faults preserve exactly one acceptance"
+            `Quick native_integration_metadata_cas_faults_are_idempotent;
+          Alcotest.test_case
+            "native integration root refuses erasure and partial capture" `Quick
+            native_integration_root_refuses_operation_erasure_and_partial_capture;
+          Alcotest.test_case
+            "native integration preserves private work and idempotent \
+             acceptance"
+            `Quick native_integration_preserves_private_work_and_retries;
+          Alcotest.test_case
+            "native integration resumes real file/root boundaries" `Quick
+            native_integration_resumes_real_file_and_root_boundaries;
+          Alcotest.test_case
+            "native integration Materialized retry preserves external \
+             edits/receipts"
+            `Quick
+            native_integration_materialized_retry_preserves_external_edits_and_receipts;
+          Alcotest.test_case
+            "native integration pauses on unexpected Applying edit" `Quick
+            native_integration_pauses_on_external_edit_during_application;
+          Alcotest.test_case
+            "native integration stale plan refuses before reservation" `Quick
+            native_integration_stale_plan_refuses_before_reservation;
           Alcotest.test_case
             "equal-content causal heads require explicit full reconciliation"
             `Quick

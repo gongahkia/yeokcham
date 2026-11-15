@@ -1,4 +1,5 @@
 module Safe_apply = Safe_apply
+module Integrate = Native_integration
 module Text_diff = Text_diff
 module Share = Native_share
 module Integration = Yeokcham_v1_integration
@@ -6,10 +7,11 @@ module Preservation = Integration.Preservation
 
 (** Local V1 saved-work transitions and verified offline-package receive.
 
-    This adapter has no network transport or semantic merge behaviour. Command
-    `status`, `changes`, and `save` scan exact snapshots when invoked. Linux
-    `watch` lives in the CLI and only calls `save` after debounce; it is not
-    part of this module. *)
+    This adapter has no network transport. [Integrate] supplies deterministic
+    composition and durable local execution; ordinary integration CLI remains a
+    separate consumer. Commands `status`, `changes`, and `save` scan exact
+    snapshots when invoked. Linux `watch` lives in the CLI and only calls `save`
+    after debounce; it is not part of this module. *)
 
 type error =
   | Share_error of Share.error

@@ -1059,11 +1059,107 @@ filename identity. No accepted/history ref is added. `Gc.Integration_proposal`
 roots observed, basis, known-present, accepted and private output snapshots until
 the alias is released. Actual GC/reload and fresh-process tests verify retention;
 `forget` releases only the proposal alias, allowing uncommitted staging to be
-collected while leaving live files unchanged. Incomplete operation ownership must
-be checked by the future service before retirement. Health durable-record kind 5
+collected while leaving live files unchanged. `forget` now refuses an alias
+owned by an incomplete durable operation. Health durable-record kind 5
 is `Integration_plan_record`, so corrupt proposals are diagnosed separately from
 an unreadable state head. Corruption refuses replacement and blocks GC planning.
 
-This supplies the actual library planner/retained proposal. Confirmed CLI
-execution, plan-to-operation identity, journal phases, accepted/history/outbound
-commit and resolution remain required; no integration success is claimed yet.
+This supplies the actual library planner/retained proposal. The following
+checkpoint adds durable service execution; ordinary CLI integration, resolution
+and native exchange still require delivery and verification.
+
+
+### P3 durable integration service (in progress)
+
+`Local_service.Integrate` is `Native_integration`. Its `prepare ~root
+~selected_revisions ~reconcile_heads` captures and retains an exact proposal and
+runs the existing `Safe_apply.check` for Ready contents. `apply ~root ~plan
+~signing_capability` is called only after confirmation of that Plan ID. `resume
+~root ~operation` continues an existing durable operation without another signer.
+These APIs are wired to actual storage and file application; ordinary CLI
+selection/confirmation/inspection/recovery remains a subsequent consumer.
+
+Providers run after releasing the writer lock. The service reacquires the lock,
+reloads the current root and fully revalidates the exact plan after signing.
+Changes during provider interaction refuse before operation reservation or file
+replacement. Relevant shared inputs are checked again during resume and before
+commit via `Integration.revalidate_shared ~store ~loaded ~cursor`. That narrower
+check binds the durable safety cursor, selected branch/basis, event/accepted
+heads, floating selections and active authority. It deliberately avoids scanning
+a partially applied tree; it cannot authorize starting a decoded proposal alone.
+
+`Store.Local.Operation` owns private integration facts in the same authoritative
+root. Nonempty operations select local-core schema 3:
+
+```text
+[3, empty_snapshot, selected_branch, record_pairs, positions,
+ publication_root_or_null, operation_root]
+```
+
+Schemas 1/2 remain canonical when there are no operations. Operation pages use
+namespace `local-integration-operations-v1\0` plus repository bytes, keyed by
+128-bit operation token. Ordered value fields are:
+
+```text
+[1, plan_id, plan_object, branch, source_workspace, source_sequence,
+ target_sequence, safety_snapshot, workspace_target, accepted_record,
+ staged_record_pairs, physical_digest, expected_generation, expected_root,
+ created_at, phase, serial, outbound_acknowledged]
+phase = [0] Prepared | [1] Applying | [2] Materialized | [3] Committed
+      | [4] Completed | [5, resumable_stage, reason] Paused
+resumable_stage = 0 Prepared | 1 Applying | 2 Materialized
+```
+
+Identities/digests are raw bytes; pairs are logical-record/raw-object IDs sorted
+by logical identity. Reasons are UTF-8 text, at most 4096 bytes. Each value is at
+most 8192 bytes; page reconstruction allows at most 100000 rows and 64 MiB total
+value bytes. The plan and signed-object readers additionally bound file input at
+8 MiB before allocation through `Raw.get ?max_bytes`; callers cannot increase the
+raw store's existing global bound. Plan cursor, working basis and protected
+snapshots are derived/checked against the immutable plan, not separate mutable
+claims in the operation row.
+
+Tokens use the OS CSPRNG with three collision attempts across publication and
+integration operations. A Plan ID has one immutable token association. Existing
+intent cannot be changed or erased; phase facts/acknowledgements advance a
+consecutive serial, while an identical repeat is unchanged. New operations begin
+Prepared. Signed acceptance/event objects remain staged private references until
+Committed; their historical signatures, exact parents/selections/event targets
+and actual accepted-result semantics verify on reload. Reusing a known sole
+accepted head for private catch-up stages no duplicate acceptance.
+
+Prepared atomically retains an unsaved safety capture when needed and reserves
+only the next sequence value in the operation. It does not allocate a target
+history node or advance the monotonic counter. Incomplete application owns its
+safety cursor/branch and blocks ordinary service writers. Store validation also
+refuses allocating its reserved sequence to an intervening capture.
+`History.record_exact ~expected` creates a distinct child even when bytes match,
+consuming that sequence only in the actual commit root. Pure construction is not
+durable allocation.
+
+Physical IDs are SHA-256 of domain `yeokcham/integration-application/v1\0` plus
+the operation token, rendered as lowercase hex for the P2 `Safe_apply` namespace.
+Its raw 32-byte physical digest binds the staged pre/post images. Actual file
+mutation reuses P2 identity checks and displaced-entry preservation. Unexpected
+edits cause Paused; there is no automatic rollback. Materialized never reapplies
+files. Accepted records, branch/basis, exact history child, operation Committed
+fact and its pending outbound obligation publish in one state-root CAS. Unrelated
+received records survive; remote acknowledgement is not required for local
+success. Committed/Completed retries never create another acceptance/navigation.
+
+`Gc.Integration_operation` independently protects observed, basis, known-present,
+accepted and workspace output closures until Completed, including the Committed
+cleanup gap. The service writes the existing verified restore proof when safety
+and target differ before closing the journal; ordinary proof roots then protect
+recovery contents. Completed metadata alone does not pin private history forever.
+Staging/proofs remain private. Outbound acknowledgement is a separate monotonic
+fact; automated transition tests are not native relay delivery evidence.
+
+Forked tests exercise every operation phase, before/after all five root CAS
+boundaries and actual before/after mutation/sync boundaries. They verify same-token
+restart without a signer, one acceptance/history child, private D/E separation,
+late edits after Materialized, external-edit pauses, unrelated receipt retention,
+GC roots, stale confirmation, provider-time revalidation, absence of a writer
+lock during provider callbacks and bounded token collision/entropy refusal.
+Conflict resolution, user-facing recovery choices, full ordinary CLI and native
+clone/exchange remain P3 requirements; these service tests do not complete P3.

@@ -6,6 +6,7 @@ module Snapshot = Yeokcham_snapshot
 module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Composition = Yeokcham_v1_composition
+module Operation = Integration_operation
 
 [@@@warning "-42"]
 
@@ -45,6 +46,8 @@ type t = {
   positions : position list;
   publications : publication list;
   publication_root : Store.Stored_object_id.t option;
+  operations : Operation.t list;
+  operation_root : Store.Stored_object_id.t option;
 }
 
 let positions state = state.positions
@@ -53,6 +56,58 @@ let empty_snapshot state = state.empty
 let pool state = state.pool
 let record_objects state = state.records
 let publications state = state.publications
+let operations state = state.operations
+let pending_operation state = List.find_opt Operation.pending state.operations
+
+let find_operation state ~plan =
+  List.find_opt
+    (fun operation -> Core.Plan_id.equal plan operation.Operation.plan)
+    state.operations
+
+let put_operation ~store operation state =
+  let* () =
+    match
+      List.find_opt
+        (fun previous ->
+          Core.Operation_id.equal previous.Operation.token
+            operation.Operation.token)
+        state.operations
+    with
+    | Some previous -> Operation.validate_update ~previous operation
+    | None ->
+        if
+          operation.Operation.phase <> Operation.Prepared
+          || operation.Operation.serial <> 0L
+          || operation.Operation.acknowledged
+        then Error "a new integration operation must begin Prepared"
+        else if Option.is_some (pending_operation state) then
+          Error "another integration operation is incomplete"
+        else if
+          List.exists
+            (fun p ->
+              Core.Operation_id.equal p.operation operation.Operation.token)
+            state.publications
+        then Error "integration operation token collides with a publication"
+        else if
+          Option.is_some (find_operation state ~plan:operation.Operation.plan)
+        then Error "this plan already has a durable integration operation"
+        else Ok ()
+  in
+  let operations =
+    operation
+    :: List.filter
+         (fun previous ->
+           not
+             (Core.Operation_id.equal previous.Operation.token
+                operation.Operation.token))
+         state.operations
+    |> List.sort (fun a b ->
+        Core.Operation_id.compare a.Operation.token b.Operation.token)
+  in
+  let* root =
+    Operation.store store ~scope:(Core.pool_repository state.pool) operations
+  in
+  Ok { state with operations; operation_root = Some root }
 
 let find_publication state ~intent =
   List.find_opt (fun p -> Core.Digest.equal p.intent intent) state.publications
@@ -63,6 +118,15 @@ let record_publication_using ~random_bytes ~store ~intent ~revision ~source
     Publication_receipt.add ~random_bytes store state.pool
       ~branch:state.selected_branch ~intent ~revision ~source ~observed
       ~contributed_scope ~title state.publications
+  in
+  let* () =
+    if
+      List.exists
+        (fun operation ->
+          Core.Operation_id.equal operation.Operation.token receipt.operation)
+        state.operations
+    then Error "publication token collides with an integration operation"
+    else Ok ()
   in
   let* root =
     Publication_receipt.store store
@@ -75,7 +139,22 @@ let record_publication =
   record_publication_using ~random_bytes:Trust.random_bytes
 
 let validate_history history state =
-  Publication_receipt.validate_history history state.publications
+  let* () = Publication_receipt.validate_history history state.publications in
+  let* () = Operation.validate_history history state.operations in
+  match pending_operation state with
+  | None -> Ok ()
+  | Some operation
+    when Core.Branch_id.equal operation.Operation.branch state.selected_branch
+         && (Operation.committed operation
+            || List.exists
+                 (fun position ->
+                   Core.Branch_id.equal position.branch
+                     operation.Operation.branch
+                   && Core.Record_id.equal position.basis
+                        operation.Operation.working_basis)
+                 state.positions) ->
+      Ok ()
+  | Some _ -> Error "pending integration owns the selected branch"
 
 let selected state =
   List.find
@@ -292,6 +371,8 @@ let initialize ~store ~authority ~certificate ~signing_capability ~cursor =
       positions = [];
       publications = [];
       publication_root = None;
+      operations = [];
+      operation_root = None;
     }
   in
   let* state, branch =
@@ -373,14 +454,33 @@ let encode state =
       positions;
     ]
   in
-  let* value =
+  let* publication_fields =
     match (state.publication_root, state.publications) with
-    | None, [] -> array (Encoding.integer 1L :: fields)
+    | None, [] -> Ok Encoding.null
     | Some root, _ :: _ ->
+        Ok (Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
+    | _ -> Error "publication root and receipts disagree"
+  in
+  let* value =
+    match
+      ( state.operation_root,
+        state.operations,
+        state.publication_root,
+        state.publications )
+    with
+    | Some root, _ :: _, _, _ ->
+        array
+          ((Encoding.integer 3L :: fields)
+          @ [
+              publication_fields;
+              Encoding.bytes (Store.Stored_object_id.to_raw_bytes root);
+            ])
+    | None, [], None, [] -> array (Encoding.integer 1L :: fields)
+    | None, [], Some root, _ :: _ ->
         array
           ((Encoding.integer 2L :: fields)
           @ [ Encoding.bytes (Store.Stored_object_id.to_raw_bytes root) ])
-    | _ -> Error "publication root and receipts disagree"
+    | _ -> Error "operation root and operations disagree"
   in
   Ok (Encoding.encode value)
 
@@ -388,8 +488,35 @@ let[@warning "-4"] decode ~store ~authority bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string
   in
-  let* value, publication_root =
+  let* value, publication_root, operation_root =
     match value with
+    | Encoding.Array
+        [
+          Encoding.Integer 3L;
+          empty;
+          selected;
+          ids;
+          positions;
+          publication;
+          Encoding.Bytes root;
+        ] ->
+        let* operation_root =
+          Store.Stored_object_id.of_raw_bytes root
+          |> Option.to_result ~none:"invalid integration operation root"
+        in
+        let* publication_root =
+          match publication with
+          | Encoding.Null -> Ok None
+          | Encoding.Bytes bytes ->
+              Store.Stored_object_id.of_raw_bytes bytes
+              |> Option.to_result ~none:"invalid publication root"
+              |> Result.map Option.some
+          | _ -> Error "invalid publication root"
+        in
+        let* value =
+          array [ Encoding.integer 1L; empty; selected; ids; positions ]
+        in
+        Ok (value, publication_root, Some operation_root)
     | Encoding.Array
         [
           Encoding.Integer 2L;
@@ -406,8 +533,8 @@ let[@warning "-4"] decode ~store ~authority bytes =
         let* value =
           array [ Encoding.integer 1L; empty; selected; ids; positions ]
         in
-        Ok (value, Some root)
-    | value -> Ok (value, None)
+        Ok (value, Some root, None)
+    | value -> Ok (value, None, None)
   in
   let* empty, selected_branch, ids, positions =
     match value with
@@ -517,6 +644,25 @@ let[@warning "-4"] decode ~store ~authority bytes =
       | Some root -> Publication_receipt.load store ~scope:repository root
     in
     let* () = Publication_receipt.validate store pool publications in
+    let* operations =
+      match operation_root with
+      | None -> Ok []
+      | Some root -> Operation.load store ~scope:repository root
+    in
+    let* () = Operation.validate ~store ~authority pool operations in
+    let* () =
+      if
+        List.exists
+          (fun operation ->
+            List.exists
+              (fun publication ->
+                Core.Operation_id.equal operation.Operation.token
+                  publication.operation)
+              publications)
+          operations
+      then Error "duplicate operation token across publication/integration"
+      else Ok ()
+    in
     let state =
       {
         pool;
@@ -526,6 +672,8 @@ let[@warning "-4"] decode ~store ~authority bytes =
         positions;
         publications;
         publication_root;
+        operations;
+        operation_root;
       }
     in
     let branch_ids =
@@ -604,7 +752,43 @@ let validate_update ~previous state =
       List.for_all
         (fun receipt -> List.exists (( = ) receipt) state.publications)
         previous.publications
-    then Ok ()
+    then
+      let* () =
+        List.fold_left
+          (fun result operation ->
+            let* () = result in
+            if
+              List.exists
+                (fun previous ->
+                  Core.Operation_id.equal previous.Operation.token
+                    operation.Operation.token)
+                previous.operations
+            then Ok ()
+            else if
+              operation.Operation.phase = Operation.Prepared
+              && operation.Operation.serial = 0L
+              && not operation.Operation.acknowledged
+            then Ok ()
+            else
+              Error
+                "new integration operation must begin with its durable \
+                 Prepared fact")
+          (Ok ()) state.operations
+      in
+      List.fold_left
+        (fun result operation ->
+          let* () = result in
+          let* current =
+            List.find_opt
+              (fun current ->
+                Core.Operation_id.equal current.Operation.token
+                  operation.Operation.token)
+              state.operations
+            |> Option.to_result
+                 ~none:"cannot erase a durable integration operation"
+          in
+          Operation.validate_update ~previous:operation current)
+        (Ok ()) previous.operations
     else Error "cannot erase or alter durable publication receipts"
   else Error "cannot erase authenticated branch records"
 
@@ -759,6 +943,69 @@ let prepare_acceptance ~store ~authority ~certificate ~signing_capability
         |> Result.map_error Composition.Graph.error_to_string
       in
       Ok (state, id)
+
+let[@warning "-4"] commit_operation ~store ~authority operation state =
+  let* current =
+    find_operation state ~plan:operation.Operation.plan
+    |> Option.to_result ~none:"integration operation is not durable"
+  in
+  if current <> operation || operation.Operation.phase <> Operation.Materialized
+  then Error "only the exact durable Materialized operation can commit"
+  else
+    let* pending =
+      List.fold_left
+        (fun acc (id, obj) ->
+          let* pending = acc in
+          let* envelope = Store.get store obj |> stored in
+          Ok ((id, Envelope.encode envelope) :: pending))
+        (Ok []) operation.Operation.staged
+    in
+    let rec receive pool pending =
+      match pending with
+      | [] -> Ok pool
+      | _ ->
+          let* pool, remaining =
+            List.fold_left
+              (fun acc (id, bytes) ->
+                let* pool, remaining = acc in
+                match Trust.Core.receive authority pool bytes with
+                | Ok (pool, _) -> Ok (pool, remaining)
+                | Error (Trust.Core.Model_error (Core.Missing_reference _)) ->
+                    Ok (pool, (id, bytes) :: remaining)
+                | Error e -> Error (Trust.Core.error_to_string e))
+              (Ok (pool, []))
+              pending
+          in
+          if List.length remaining = List.length pending then
+            Error "missing integration signed dependency"
+          else receive pool remaining
+    in
+    let* pool = receive state.pool pending in
+    let records =
+      List.sort_uniq
+        (fun (a, _) (b, _) -> Core.Record_id.compare a b)
+        (operation.Operation.staged @ state.records)
+    in
+    let state =
+      {
+        state with
+        pool;
+        records;
+        positions =
+          List.map
+            (fun p ->
+              if Core.Branch_id.equal p.branch operation.Operation.branch then
+                {
+                  p with
+                  cursor = operation.Operation.target_sequence;
+                  basis = operation.Operation.accepted;
+                }
+              else p)
+            state.positions;
+      }
+    in
+    let* committed = Operation.advance operation Operation.Committed in
+    put_operation ~store committed state
 
 module For_test = struct
   let create_branch = create_branch_using

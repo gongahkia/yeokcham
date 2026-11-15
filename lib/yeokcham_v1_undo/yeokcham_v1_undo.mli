@@ -45,6 +45,17 @@ val target_snapshot :
     legacy/imported checkpoint without history becomes a separate root. The
     current position is not changed. *)
 
+val record_exact :
+  t ->
+  expected:int64 ->
+  snapshot:Yeokcham_v1_model.Snapshot_id.t ->
+  draft:Yeokcham_v1_model.Draft_id.t ->
+  created_at:int64 ->
+  (t, string) result
+(** Consumes the exact next sequence and selects a new child even when bytes are
+    unchanged. Pure staging only; the state-root commit owns durable allocation.
+*)
+
 val encode : t -> (string, string) result
 val decode : string -> (t, string) result
 val workspace : t -> Yeokcham_v1_model.Core.Workspace_id.t option

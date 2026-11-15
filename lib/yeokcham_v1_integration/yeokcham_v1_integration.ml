@@ -993,6 +993,90 @@ let retention_roots plan =
    :: plan.known_present
     :: (Option.to_list plan.accepted_snapshot @ outputs))
 
+let[@warning "-4"] revalidate_shared ~store ~loaded ~cursor plan =
+  let* local =
+    loaded.Store.local
+    |> Option.to_result ~none:(Stale "integration local state is unavailable")
+  in
+  let selected = Local.selected local in
+  let* current_cursor =
+    History.identity loaded.Store.history (History.current loaded.Store.history)
+    |> metadata
+  in
+  let* branch =
+    Local.branches local
+    |> List.find_opt (fun b ->
+        Core.Branch_id.equal b.Core.branch_id plan.request.Core.branch)
+    |> Option.to_result ~none:(Stale "integration branch is unavailable")
+  in
+  let* () =
+    if
+      Core.History_id.equal cursor current_cursor
+      && Core.Branch_id.equal selected.Local.branch plan.request.Core.branch
+      && Core.Record_id.equal selected.Local.basis
+           plan.request.Core.workspace.Core.working_basis
+      && branch.Core.event_heads = plan.event_heads
+      && branch.Core.accepted_heads = plan.request.Core.accepted_heads
+    then Ok ()
+    else Error (Stale "integration branch, heads or safety cursor changed")
+  in
+  let* collaboration =
+    loaded.Store.collaboration
+    |> Option.to_result ~none:(Policy "integration authority is unavailable")
+  in
+  let* authority =
+    Store.authority collaboration
+    |> Option.to_result ~none:(Policy "integration authority is unavailable")
+  in
+  let* heads =
+    traverse
+      (fun head -> Core.Digest.of_hex head |> model)
+      (Trust.authority_heads authority)
+  in
+  let* certificate =
+    Trust.certificates (Store.membership collaboration)
+    |> List.find_opt (fun c ->
+        Trust.certificate_id c = Store.local_certificate collaboration)
+    |> Option.to_result ~none:(Policy "integration local author is unavailable")
+  in
+  let* () =
+    if
+      heads = plan.request.Core.authority_heads
+      && List.for_all
+           (fun epoch ->
+             Trust.authority_device_active authority ~epoch
+               (Trust.certificate_subject certificate))
+           (Trust.authority_heads authority)
+    then Ok ()
+    else
+      Error
+        (Policy "integration authority changed or the local device is inactive")
+  in
+  let* current_selection =
+    selection_root store (Local.pool local) plan.request.Core.selected_revisions
+    |> Result.map_error (function Choice detail -> Stale detail | e -> e)
+  in
+  let* envelope =
+    Envelope.decode plan.bytes
+    |> Result.map_error (fun e -> Integrity (Envelope.decode_error_to_string e))
+  in
+  match Envelope.payload envelope with
+  | E.Array
+      [
+        _schema;
+        _request;
+        selection;
+        _observation;
+        _known;
+        _accepted;
+        _readiness;
+        _no_op;
+      ] ->
+      let* selection = decoded_store selection in
+      if Raw.Stored_object_id.equal current_selection selection then Ok ()
+      else Error (Stale "integration selected change heads changed")
+  | _ -> Error (Integrity "malformed prepared integration control")
+
 let plan_directory store =
   Filename.concat
     (Filename.concat (Raw.root store) ".yeokcham")
@@ -1132,6 +1216,27 @@ let scan ~store ~loaded =
 
 let forget ~store identity =
   with_retention store (fun () ->
+      let* repository =
+        Store.open_repository ~root:(Raw.root store)
+        |> Result.map_error (fun e -> Metadata (Store.error_to_string e))
+      in
+      let* loaded =
+        Store.load repository
+        |> Result.map_error (fun e -> Metadata (Store.error_to_string e))
+      in
+      let* () =
+        match loaded.Store.local with
+        | Some local
+          when List.exists
+                 (fun operation ->
+                   Local.Operation.pending operation
+                   && Core.Plan_id.equal identity operation.Local.Operation.plan)
+                 (Local.operations local) ->
+            Error
+              (Invalid
+                 "an incomplete integration operation still owns this plan")
+        | None | Some _ -> Ok ()
+      in
       let* exists = inspect_plan_directory store in
       if not exists then Ok ()
       else
