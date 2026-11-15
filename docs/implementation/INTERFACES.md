@@ -941,10 +941,18 @@ integration success follows from this checkpoint.
 `preview` exposes its domain result. `stage ~store ~signing_capability` returns
 project/history/local state plus the result, without publishing the mutable root.
 `Local_service.share_selected ~root ~paths ~update ~title ~dry_run
-~signing_capability` holds the existing workspace writer boundary and publishes
-capture/history, signed revision and private receipt atomically. Preview needs
+~signing_capability` captures/prepares under the existing workspace writer
+boundary, releases it for provider-backed immutable staging, then reacquires it
+and reloads/revalidates the state head and filesystem facts before publishing
+capture/history, signed revision and private receipt atomically. Changed inputs
+refuse with a fresh-preview choice; unrelated state is preserved. Concurrent GC
+may discard unrooted immutable staging while a provider waits; verification then
+refuses without publishing and a fresh attempt recaptures it. Preview needs
 no signing capability. Fresh change/operation identities are generated only
 when recording; source history identity in a dirty preview is provisional.
+Publication entropy retries exclude all integration/recovery attempt tokens,
+including superseded attempts, as well as existing publication tokens; the
+existing three-attempt bound and identical-request identity reuse remain.
 
 New changes use the recorded private accepted basis; explicit updates select
 one causal change head and preserve unselected prior public fields. Concurrent

@@ -30,6 +30,7 @@ val validate :
 
 val add :
   random_bytes:(int -> (string, string) result) ->
+  reserved:(Core.Operation_id.t -> bool) ->
   Yeokcham_store.repository ->
   Core.pool ->
   branch:Core.Branch_id.t ->

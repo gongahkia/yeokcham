@@ -234,8 +234,8 @@ let validate repository pool receipts =
         else Ok ()))
     (Ok ()) receipts
 
-let add ~random_bytes repository pool ~branch ~intent ~revision ~source
-    ~observed ~contributed_scope ~title receipts =
+let add ~random_bytes ~reserved repository pool ~branch ~intent ~revision
+    ~source ~observed ~contributed_scope ~title receipts =
   let same_request receipt =
     Core.Digest.equal receipt.intent intent
     && Core.Record_id.equal receipt.revision revision
@@ -256,9 +256,10 @@ let add ~random_bytes repository pool ~branch ~intent ~revision ~source
       let rec fresh attempts =
         let* operation = Core.Operation_id.generate ~random_bytes () |> model in
         if
-          List.exists
-            (fun r -> Core.Operation_id.equal r.operation operation)
-            receipts
+          reserved operation
+          || List.exists
+               (fun r -> Core.Operation_id.equal r.operation operation)
+               receipts
         then
           if attempts = 1 then
             Error

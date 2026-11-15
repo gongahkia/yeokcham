@@ -26,6 +26,9 @@ contents stay in private local capture/history. Sharing does not accept work or
 change ordinary files. A recorded identical request reuses its revision and
 operation identities. An explicit update with changed inputs creates another
 immutable version, including equal contents with a changed title.
+Signing-provider interaction occurs outside the workspace writer lock. If files
+or saved state change while the provider is active, sharing refuses and asks for
+a fresh preview/retry instead of publishing the older capture.
 
 Status shows native revision identities, the private working basis and local
 publication receipts separately from accepted heads. At this checkpoint transfer

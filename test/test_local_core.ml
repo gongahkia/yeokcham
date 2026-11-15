@@ -4042,11 +4042,139 @@ let native_recovery_can_cancel_materialized_but_not_committed_acceptance () =
               (Sys.file_exists (root ^ "/remote.txt")))))
     [ false; true ]
 
+let native_publication_reserves_integration_and_recovery_tokens () =
+  with_root (fun root ->
+      let repository, capability, _, _, operation = recovery_fixture root in
+      let recovered =
+        recover_native root operation.Op.token ~preview:false ~mode:None
+          ~replan:false ~expected:None
+      in
+      let attempt =
+        (Option.get recovered.Native_integrate.recovery_operation.Op.recovery)
+          .Op.attempt
+      in
+      write_file root "note.txt" "selected D\n";
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let receipt = Option.get shared.Service.Share.publication in
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let add random_bytes =
+        L.For_test.record_publication ~random_bytes ~store
+          ~intent:(C.Digest.of_raw (String.make 32 'z') |> model)
+          ~revision:receipt.L.revision ~source:receipt.L.source
+          ~observed:receipt.L.observed
+          ~contributed_scope:receipt.L.contributed_scope ~title:receipt.L.title
+          (local before)
+      in
+      List.iter
+        (fun reserved ->
+          let calls = ref 0 in
+          reject "publication reused a reserved integration/recovery token"
+            (add (fun _ ->
+                 incr calls;
+                 Ok (C.Operation_id.to_raw reserved)));
+          Alcotest.(check int)
+            "cross-kind collisions retry exactly three times" 3 !calls)
+        [ operation.Op.token; attempt ];
+      let calls = ref 0 in
+      let _, fresh =
+        add (fun _ ->
+            incr calls;
+            Ok
+              (if !calls = 1 then C.Operation_id.to_raw attempt
+               else String.make 16 'z'))
+        |> ok Fun.id
+      in
+      Alcotest.(check int)
+        "reserved recovery token skipped before success" 2 !calls;
+      Alcotest.(check bool)
+        "fresh publication has its own identity" false
+        (C.Operation_id.equal fresh.L.operation attempt);
+      Alcotest.(check bool)
+        "reservation checks did not publish a root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+
+let native_share_provider_is_unlocked_and_revalidated () =
+  List.iter
+    (fun provider_change ->
+      with_root (fun root ->
+          let repository, capability, _, _, _ = initialize root in
+          write_file root "note.txt" "selected D\n";
+          let before = load repository in
+          let provider_head = ref before.S.head in
+          let calls = ref 0 in
+          let signer =
+            T.signing_capability_of_external_signer
+              ~public_key:(T.signing_public_key capability)
+              ~sign:(fun ~domain bytes ->
+                incr calls;
+                let child = Unix.fork () in
+                (if child = 0 then
+                   let fd =
+                     Unix.openfile
+                       (root ^ "/.yeokcham/local-worktree.lock")
+                       [ Unix.O_RDWR; Unix.O_CLOEXEC ]
+                       0
+                   in
+                   try
+                     Unix.lockf fd Unix.F_TLOCK 0;
+                     Unix.close fd;
+                     Unix._exit 0
+                   with Unix.Unix_error _ -> Unix._exit 1);
+                let _, status = Unix.waitpid [] child in
+                Alcotest.(check bool)
+                  "share provider holds no writer lock" true
+                  (status = Unix.WEXITED 0);
+                if provider_change = 1 || provider_change = 2 then
+                  write_private root "provider-time private E";
+                if provider_change = 2 then (
+                  Service.save ~root |> service |> ignore;
+                  provider_head := (load repository).S.head);
+                if provider_change = 3 then
+                  Yeokcham_v1_gc.apply ~root
+                  |> ok Yeokcham_v1_gc.error_to_string
+                  |> ignore;
+                T.sign_detached capability ~domain bytes
+                |> Result.map_error T.error_to_string)
+            |> trust
+          in
+          let result =
+            Service.share_selected ~root ~paths:[ [ "note.txt" ] ] ~update:None
+              ~title:None ~dry_run:false ~signing_capability:(Some signer)
+          in
+          Alcotest.(check int) "one provider invocation" 1 !calls;
+          if provider_change = 0 then
+            let shared = result |> service in
+            Alcotest.(check bool)
+              "unchanged inputs publish selected work" true
+              (Option.is_some shared.Service.Share.publication)
+          else (
+            reject "provider-time changes published obsolete capture" result;
+            let current = load repository in
+            Alcotest.(check bool)
+              "provider-time committed state preserved" true
+              (Raw.Mutable_ref.equal !provider_head current.S.head);
+            Alcotest.(check bool)
+              "stale share leaves no publication receipt" true
+              (L.publications (local current) = []);
+            Alcotest.(check string)
+              "provider-time private edits survive"
+              (if provider_change = 3 then "private\000bytes\255"
+               else "provider-time private E")
+              (read_private root);
+            selected_share root capability [ [ "note.txt" ] ] |> ignore)))
+    [ 0; 1; 2; 3 ]
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case "publication skips integration and recovery tokens"
+            `Quick native_publication_reserves_integration_and_recovery_tokens;
+          Alcotest.test_case
+            "native share provider releases lock and revalidates" `Quick
+            native_share_provider_is_unlocked_and_revalidated;
           Alcotest.test_case
             "native recovery root CAS faults preserve intent and cleanup" `Quick
             native_recovery_root_cas_faults_and_cleanup_are_idempotent;

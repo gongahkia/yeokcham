@@ -5377,31 +5377,60 @@ let inspect_local_history ~root ~before ~limit =
 
 let share_selected_with ~observe ~root ~paths ~update ~title ~dry_run
     ~signing_capability =
-  with_writable_repository ~root (fun repository loaded ->
-      let store = Store.underlying_store repository in
-      let* identity, _, observation =
-        Snapshot.Observation.scan ~root ~store
-        |> Result.map_error (fun e -> Snapshot_error e)
-      in
-      let* observed = snapshot_id identity in
-      let* prepared =
-        Share.prepare ~store ~loaded ~observed ~observation ~paths ~update
-          ~title
-        |> Result.map_error (fun e -> Share_error e)
-      in
-      if dry_run then Ok (Share.preview prepared)
-      else
-        let* signing_capability =
-          signing_capability
-          |> Option.to_result
-               ~none:
-                 (Share_error
-                    (Share.Policy
-                       "sharing requires the enrolled local signing capability"))
+  let facts observation =
+    Yeokcham_v1_integration.observation_digest observation
+    |> Result.map_error (fun e ->
+        Share_error (Share.Metadata (Yeokcham_v1_integration.error_to_string e)))
+  in
+  let* store, expected_head, expected_facts, prepared =
+    with_writable_repository ~root (fun repository loaded ->
+        let store = Store.underlying_store repository in
+        let* identity, _, observation =
+          Snapshot.Observation.scan ~root ~store
+          |> Result.map_error (fun e -> Snapshot_error e)
         in
-        let* project, history, local, result =
-          Share.stage ~store ~signing_capability prepared
+        let* observed = snapshot_id identity in
+        let* prepared =
+          Share.prepare ~store ~loaded ~observed ~observation ~paths ~update
+            ~title
           |> Result.map_error (fun e -> Share_error e)
+        in
+        let* captured_facts = facts observation in
+        Ok (store, loaded.Store.head, captured_facts, prepared))
+  in
+  if dry_run then Ok (Share.preview prepared)
+  else
+    let* signing_capability =
+      signing_capability
+      |> Option.to_result
+           ~none:
+             (Share_error
+                (Share.Policy
+                   "sharing requires the enrolled local signing capability"))
+    in
+    (* staging can prompt a provider; only immutable objects are written here. *)
+    let* project, history, local, result =
+      Share.stage ~store ~signing_capability prepared
+      |> Result.map_error (fun e -> Share_error e)
+    in
+    with_writable_repository ~root (fun repository loaded ->
+        let* _, _, observation =
+          Snapshot.Observation.scan ~root
+            ~store:(Store.underlying_store repository)
+          |> Result.map_error (fun e -> Snapshot_error e)
+        in
+        let* current_facts = facts observation in
+        let* () =
+          if
+            Yeokcham_store.Mutable_ref.equal loaded.Store.head expected_head
+            && Model.Core.Digest.equal expected_facts current_facts
+          then Ok ()
+          else
+            Error
+              (Share_error
+                 (Share.Choice
+                    "sharing inputs changed while signing; inspect a fresh \
+                     preview and retry"))
         in
         if
           result.Share.captures_unsaved

@@ -114,18 +114,25 @@ let find_publication state ~intent =
 
 let record_publication_using ~random_bytes ~store ~intent ~revision ~source
     ~observed ~contributed_scope ~title state =
+  let reserved token =
+    List.exists
+      (fun operation ->
+        Core.Operation_id.equal operation.Operation.token token
+        || List.exists
+             (fun recovery ->
+               Core.Operation_id.equal recovery.Operation.attempt token)
+             (Option.to_list operation.Operation.recovery
+             @ operation.Operation.previous_recoveries))
+      state.operations
+  in
   let* publications, receipt =
-    Publication_receipt.add ~random_bytes store state.pool
+    Publication_receipt.add ~random_bytes ~reserved store state.pool
       ~branch:state.selected_branch ~intent ~revision ~source ~observed
       ~contributed_scope ~title state.publications
   in
   let* () =
-    if
-      List.exists
-        (fun operation ->
-          Core.Operation_id.equal operation.Operation.token receipt.operation)
-        state.operations
-    then Error "publication token collides with an integration operation"
+    if reserved receipt.operation then
+      Error "publication token collides with an integration operation"
     else Ok ()
   in
   let* root =

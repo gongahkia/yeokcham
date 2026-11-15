@@ -49,6 +49,7 @@ val stage :
     * result,
     error )
   Stdlib.result
-(** Stages a signed revision and its scoped private receipt. The service must
-    publish these together with history/project under its current writer lock.
+(** Stages immutable signed work and its scoped private receipt. Provider calls
+    must occur outside writer locks. Before publishing history/project/receipt
+    together, the service must reload and revalidate the captured state/files.
 *)
