@@ -1036,3 +1036,38 @@ export/clone/exchange. Full two-person relay, privacy, concurrent-head/policy,
 transfer/outbox and complete recovery/fault acceptance evidence remains required.
 These service tests are not ordinary CLI, native custody onboarding or human pilot
 evidence. No P03 completion report/receipt or P4 start is claimed.
+
+
+P3 ordinary-integration CLI checkpoint:
+`7d32acd8a548e3c7d53dd69b39a7dc44a0e489d5` adds `integrate CHANGE...`,
+contextual/explicit-all selection, exact revision IDs, retained `--plan` previews,
+default cancellation/noninteractive confirmation, explicit all-head reconciliation
+and actual apply through the durable service. Preview displays separate accepted
+and private path/text/opaque differences. `operation show/resume` inspects/resumes
+an existing operation, including provider-free completed retries; status exposes
+integration facts separately from publications and accepted/private basis.
+Already completed retries and fresh represented selections report Unchanged.
+`compare_immutable_snapshots` reuses verified bounded diff display for staged
+proposals; working-tree comparisons also refuse during incomplete application.
+Current collaboration/undo guides and actual interfaces were reconciled.
+
+Fresh-process native-integration CLI6, selected-share CLI8, local-branch CLI17 and
+signed local-core56 passed. `make build`, `make lint`, `make ci` exited 0 on parent
+`f3cbf8925991e10c81874c24b638f4227bcb4ac8` with the exact pending tree later
+committed unchanged as `7d32acd8`. Evidence is
+`integration-cli-checkpoint-checks.json` in the P3 external log directory;
+unchanged Dune results can be cached. Initial declaration-order compile failures
+and expected formatter promotions were corrected before the verified checks.
+CLI cases include actual PTY cancellation, provider-free preview/repeat/no-op,
+stale confirmation without reservation, D/E separation, JSON/plain differences,
+contextual/all selection, operation inspection/resume and malformed/missing-root
+failures without recursive error handling. Disposable signer/native-local evidence
+is not custody onboarding or native Core relay delivery evidence.
+
+P3 is still incomplete: ordinary conflict listing/resolution, user-facing recovery
+choices/cancellation after writes, Core public export/clone/exchange and the full
+two-person/concurrency/policy/outbox/fault audit remain required. Existing V1
+transport regression success does not establish the new Core exchange loop.
+No P03 completion report/receipt, original-phase completion, P4, push/release or
+deployment is claimed. Preserve schema-3 operation data and all recovery roots;
+source rollback cannot undo acceptance or restore user files.
