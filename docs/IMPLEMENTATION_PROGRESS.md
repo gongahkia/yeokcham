@@ -845,3 +845,18 @@ changes before consumers proceed. P3 remains incomplete: correspondence/outbox,
 actual selected publication, plans/private-work preservation, journaled execution,
 native clone/exchange, resolution commands and full end-to-end/fault evidence
 remain required. No README/G01 measurement changes or later pilot work.
+
+Accepted-graph checkpoint CI initially exited 2: watch/runtime status polling
+hit the workspace writer lock and returned an inspection error. Status now
+reads the atomic saved metadata without scanning live files when another writer
+owns that lock; capture is explicitly incomplete/unknown. A real fork holding the
+lock verifies no partial-tree observation. With the current binary rebuilt,
+inspection7, watch3, runtime4, `make build`, `make lint`, and full `make ci` exited
+0 (`accepted-graph-final-checks.json`; matching unchanged Dune results may be
+cached). Tiny benchmark harness regressions ran; accepted G01 measurements did
+not. During this checkpoint an external commit appeared:
+`869a328ef9c8bd3020c56cd84892814ad6294bab` (`reworked`). Its 16 paths contain
+only the owned graph/store/GC/status/test/documentation changes; inspected and
+preserved without reset/amend. Worktree was clean afterward. P3 remains
+incomplete; next implement durable publication correspondence and operation/outbox
+bookkeeping in the existing root before the actual share/integrate consumers.

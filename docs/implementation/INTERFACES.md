@@ -1,4 +1,4 @@
-# Core-workflow interfaces (P1 and P2)
+# Core-workflow interfaces (P1/P2, P3 in progress)
 
 P1 supplies the pure canonical model/record/trust interfaces. P2 connects them
 to durable local branches, workspace/history identities, capture, inspection and
@@ -854,3 +854,10 @@ loss and unrecorded private bases. Native signed local-state suite has 25 cases,
 including a valid signature over an existing wrong snapshot that still fails
 composition proof, and a bounded typed change-ID collision test. This does not
 complete P3 or authorize unsupported resolution/policy behavior.
+
+
+Status inspection has a writer-busy outcome: if the workspace process lock is
+held, it reads the atomic saved metadata while marking capture incomplete and
+uncaptured/changes unknown. It does not scan partial live files or claim clean
+contents. The forked writer test plus foreground-watch and runtime journeys
+exercise this boundary; status remains useful while capture/application runs.
