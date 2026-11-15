@@ -13,6 +13,9 @@ module Composition = Yeokcham_v1_composition
 module Pages = Yeokcham_v1_pages
 module E = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
+module Transport = Yeokcham_v1_transport
+module Outbox = Transport.Core_outbox
+module Outbound = Service.Core_outbound
 
 [@@@warning "-42"]
 
@@ -896,11 +899,358 @@ let native_hash_stream_offsets_and_context_forks () =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     (Hash.get Hash.empty |> hex)
 
+let endpoint = Transport.sha256 "https://relay.invalid"
+let outbound result = ok Outbound.error_to_string result
+
+let frozen repository =
+  let loaded = load repository in
+  Outbox.find
+    (S.transport (Option.get loaded.S.collaboration))
+    ~remote:"origin" ~endpoint
+  |> ok Transport.error_to_string
+
+let prepare_outbound root capability =
+  Outbound.prepare ~root ~remote:"origin" ~endpoint
+    ~signing_capability:capability
+  |> outbound
+
+let acknowledge_outbound root batch =
+  Outbound.acknowledge ~root ~remote:"origin" ~endpoint
+    ~publication:(Transport.publication_id (Outbox.publication batch))
+  |> outbound
+
+let[@warning "-4"] native_outbound_freezes_retries_and_preserves_later_work () =
+  temporary (fun parent ->
+      let root = parent ^ "/alice" in
+      let repository, capability, _ = initialize root 'k' in
+      let shared = share root capability [ [ "note.txt" ] ] in
+      let before = load repository in
+      let first = prepare_outbound root (Some capability) |> Option.get in
+      Fun.protect
+        ~finally:(fun () -> Package.dispose_artifact first.Outbound.artifact)
+        (fun () ->
+          let id =
+            Transport.publication_id (Outbox.publication first.Outbound.batch)
+          in
+          let snapshot = Outbox.manifest first.Outbound.batch in
+          let after_freeze = load repository in
+          Alcotest.(check bool)
+            "freeze is durable before a relay request" true
+            (Option.is_some (frozen repository));
+          Alcotest.(check string)
+            "freeze does not allocate or navigate history"
+            (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+            (Yeokcham_v1_undo.encode after_freeze.S.history |> ok Fun.id);
+          let head = after_freeze.S.head in
+          let second = prepare_outbound root None |> Option.get in
+          Alcotest.(check bool)
+            "retry requires no signer" true second.Outbound.reused;
+          Alcotest.(check string)
+            "same signed courier after retry" id
+            (Transport.publication_id
+               (Outbox.publication second.Outbound.batch));
+          Alcotest.(check bool)
+            "retry publishes no root" true
+            (Raw.Mutable_ref.equal head (load repository).S.head);
+          Package.dispose_artifact second.Outbound.artifact;
+          let manifest =
+            P.decode_manifest
+              ~repository:(C.pool_repository (L.pool (local before)))
+              snapshot
+            |> package
+          in
+          let first_records =
+            P.record_inventory (S.underlying_store repository) manifest
+            |> package
+          in
+          Alcotest.(check bool)
+            "frozen inventory contains the original exact revision" true
+            (List.exists
+               (fun (id, _) ->
+                 C.Record_id.equal id (Option.get shared.Service.Share.revision))
+               first_records);
+          write (root ^ "/note.txt") "later explicit public update\n";
+          let later =
+            Service.share_selected ~root ~paths:[ [ "note.txt" ] ]
+              ~update:shared.Service.Share.change ~title:(Some "later work")
+              ~dry_run:false ~signing_capability:(Some capability)
+            |> service
+          in
+          let later_id = Option.get later.Service.Share.revision in
+          write (root ^ "/private.txt") "UNSAVED LATER PRIVATE EDIT";
+          let history =
+            (load repository).S.history |> Yeokcham_v1_undo.encode |> ok Fun.id
+          in
+          let third = prepare_outbound root None |> Option.get in
+          Alcotest.(check string)
+            "new work cannot retarget frozen manifest" snapshot
+            (Package.artifact_manifest third.Outbound.artifact);
+          Package.dispose_artifact third.Outbound.artifact;
+          Yeokcham_v1_gc.apply ~root
+          |> ok Yeokcham_v1_gc.error_to_string
+          |> ignore;
+          let retry = prepare_outbound root None |> Option.get in
+          Alcotest.(check string)
+            "actual GC retains frozen public closure" snapshot
+            (Package.artifact_manifest retry.Outbound.artifact);
+          Package.dispose_artifact retry.Outbound.artifact;
+          acknowledge_outbound root first.Outbound.batch;
+          let acked = load repository in
+          Alcotest.(check string)
+            "acknowledgement preserves later history" history
+            (Yeokcham_v1_undo.encode acked.S.history |> ok Fun.id);
+          Alcotest.(check string)
+            "acknowledgement does not scan private edits"
+            "UNSAVED LATER PRIVATE EDIT"
+            (read (root ^ "/private.txt"));
+          Alcotest.(check bool)
+            "relay acknowledgement is durable" true
+            (Outbox.acknowledged (Option.get (frozen repository)));
+          acknowledge_outbound root first.Outbound.batch;
+          Alcotest.(check bool)
+            "ack retry publishes no root" true
+            (Raw.Mutable_ref.equal acked.S.head (load repository).S.head);
+          let next = prepare_outbound root (Some capability) |> Option.get in
+          Alcotest.(check bool)
+            "later public work creates a different batch" true
+            (Outbox.manifest next.Outbound.batch <> snapshot);
+          let next_manifest =
+            P.decode_manifest
+              ~repository:(C.pool_repository (L.pool (local acked)))
+              (Outbox.manifest next.Outbound.batch)
+            |> package
+          in
+          let next_records =
+            P.record_inventory (S.underlying_store repository) next_manifest
+            |> package
+          in
+          Alcotest.(check bool)
+            "later revision remains outgoing" true
+            (List.exists
+               (fun (id, _) -> C.Record_id.equal id later_id)
+               next_records);
+          Alcotest.(check (list string))
+            "next courier names its exact acknowledged predecessor" [ id ]
+            (Transport.publication_parents
+               (Outbox.publication next.Outbound.batch));
+          Package.dispose_artifact next.Outbound.artifact;
+          acknowledge_outbound root next.Outbound.batch;
+          Alcotest.(check bool)
+            "unchanged full public state has no outgoing batch" true
+            (Option.is_none (prepare_outbound root None))))
+
+let native_outbound_root_faults_retry_exact_batches () =
+  List.iter
+    (fun boundary ->
+      temporary (fun parent ->
+          let root = parent ^ "/alice" in
+          let repository, capability, _ = initialize root 'k' in
+          share root capability [ [ "note.txt" ] ] |> ignore;
+          let child = Unix.fork () in
+          if child = 0 then (
+            let observe event = if event = boundary then Unix._exit 73 in
+            (match boundary with
+            | Outbound.Freeze_before | Outbound.Freeze_after ->
+                Outbound.For_test.prepare ~observe ~root ~remote:"origin"
+                  ~endpoint ~signing_capability:(Some capability)
+                |> ignore
+            | Outbound.Acknowledge_before | Outbound.Acknowledge_after ->
+                let first =
+                  prepare_outbound root (Some capability) |> Option.get
+                in
+                let id =
+                  Transport.publication_id
+                    (Outbox.publication first.Outbound.batch)
+                in
+                Outbound.For_test.acknowledge ~observe ~root ~remote:"origin"
+                  ~endpoint ~publication:id
+                |> ignore);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "stopped at actual durable boundary" true (status = Unix.WEXITED 73);
+          let batch = frozen repository in
+          (match boundary with
+          | Outbound.Freeze_before ->
+              Alcotest.(check bool)
+                "no prematurely frozen intent" true (batch = None)
+          | Outbound.Freeze_after | Outbound.Acknowledge_before ->
+              Alcotest.(check bool)
+                "pending exact batch survived restart" false
+                (Outbox.acknowledged (Option.get batch))
+          | Outbound.Acknowledge_after ->
+              Alcotest.(check bool)
+                "lost acknowledgement response is already durable" true
+                (Outbox.acknowledged (Option.get batch)));
+          match boundary with
+          | Outbound.Acknowledge_after ->
+              acknowledge_outbound root (Option.get batch);
+              Alcotest.(check bool)
+                "acknowledged batch is not resent" true
+                (Option.is_none (prepare_outbound root None))
+          | Outbound.Freeze_before | Outbound.Freeze_after
+          | Outbound.Acknowledge_before ->
+              let retry =
+                prepare_outbound root
+                  (if boundary = Outbound.Freeze_before then Some capability
+                   else None)
+                |> Option.get
+              in
+              Option.iter
+                (fun old ->
+                  Alcotest.(check string)
+                    "same identity after interrupted root"
+                    (Transport.publication_id (Outbox.publication old))
+                    (Transport.publication_id
+                       (Outbox.publication retry.Outbound.batch)))
+                batch;
+              Package.dispose_artifact retry.Outbound.artifact;
+              acknowledge_outbound root retry.Outbound.batch))
+    [
+      Outbound.Freeze_before;
+      Outbound.Freeze_after;
+      Outbound.Acknowledge_before;
+      Outbound.Acknowledge_after;
+    ]
+
+let native_outbound_signer_is_unlocked_and_state_cannot_discard_pending () =
+  temporary (fun parent ->
+      let root = parent ^ "/alice" in
+      let repository, capability, authority = initialize root 'k' in
+      share root capability [ [ "note.txt" ] ] |> ignore;
+      let calls = ref 0 in
+      let signer =
+        T.signing_capability_of_external_signer
+          ~public_key:(T.signing_public_key capability)
+          ~sign:(fun ~domain bytes ->
+            incr calls;
+            let child = Unix.fork () in
+            (if child = 0 then
+               let fd =
+                 Unix.openfile
+                   (root ^ "/.yeokcham/local-worktree.lock")
+                   [ Unix.O_RDWR ] 0
+               in
+               try
+                 Unix.lockf fd Unix.F_TLOCK 0;
+                 Unix.close fd;
+                 Unix._exit 0
+               with Unix.Unix_error _ -> Unix._exit 1);
+            let _, status = Unix.waitpid [] child in
+            Alcotest.(check bool)
+              "courier provider holds no writer lock" true
+              (status = Unix.WEXITED 0);
+            write (root ^ "/private.txt") "PROVIDER-TIME PRIVATE EDIT";
+            T.sign_detached capability ~domain bytes
+            |> Result.map_error T.error_to_string)
+        |> ok T.error_to_string
+      in
+      let first = prepare_outbound root (Some signer) |> Option.get in
+      Package.dispose_artifact first.Outbound.artifact;
+      Alcotest.(check int) "one courier provider call" 1 !calls;
+      let before = load repository in
+      let old = Option.get before.S.collaboration in
+      let candidate =
+        S.collaboration_with_authority_transport
+          ~transport:Transport.empty_local_state ~authority
+          ~revisions:(S.signed_revisions old)
+          ~local_certificate:(S.local_certificate old)
+          ~authorizations:(S.authorizations old) ~adoptions:(S.adoptions old)
+        |> ok S.error_to_string
+      in
+      reject
+        (S.save_collaborative ~local:(local before) repository
+           ~expected:before.S.head ~project:before.S.project
+           ~collaboration:candidate);
+      reject
+        (Outbound.prepare ~root ~remote:"origin"
+           ~endpoint:(Transport.sha256 "https://different.invalid")
+           ~signing_capability:(Some capability));
+      reject
+        (Outbound.acknowledge ~root ~remote:"origin" ~endpoint
+           ~publication:(String.make 64 'f'));
+      Alcotest.(check bool)
+        "invalid updates cannot erase a durable batch" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "provider-time private edits survive" "PROVIDER-TIME PRIVATE EDIT"
+        (read (root ^ "/private.txt")))
+
+let native_outbound_acknowledges_only_exact_committed_records () =
+  temporary (fun parent ->
+      let root = parent ^ "/alice" in
+      let repository, capability, _ = initialize root 'k' in
+      let integrate revision =
+        let plan =
+          Service.Integrate.prepare ~root ~selected_revisions:[ revision ]
+            ~reconcile_heads:None
+          |> ok Service.Integrate.error_to_string
+        in
+        Service.Integrate.apply ~root
+          ~plan:(Yeokcham_v1_integration.id plan)
+          ~signing_capability:(Some capability)
+        |> ok Service.Integrate.error_to_string
+        |> fun result -> Option.get result.Service.Integrate.operation
+      in
+      let first = share root capability [ [ "note.txt" ] ] in
+      let first_operation =
+        integrate (Option.get first.Service.Share.revision)
+      in
+      let outgoing = prepare_outbound root (Some capability) |> Option.get in
+      Package.dispose_artifact outgoing.Outbound.artifact;
+      write (root ^ "/note.txt") "new accepted work after frozen courier\n";
+      let second = share root capability [ [ "note.txt" ] ] in
+      let second_operation =
+        integrate (Option.get second.Service.Share.revision)
+      in
+      let before = load repository in
+      acknowledge_outbound root outgoing.Outbound.batch;
+      let after = load repository in
+      let operation token =
+        List.find
+          (fun op -> C.Operation_id.equal op.L.Operation.token token)
+          (L.operations (local after))
+      in
+      Alcotest.(check bool)
+        "exact transferred acceptance is acknowledged" true
+        (operation first_operation.L.Operation.token).L.Operation.acknowledged;
+      Alcotest.(check bool)
+        "later acceptance remains outbound" false
+        (operation second_operation.L.Operation.token).L.Operation.acknowledged;
+      Alcotest.(check string)
+        "acknowledgement allocates no history"
+        (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+        (Yeokcham_v1_undo.encode after.S.history |> ok Fun.id);
+      let current = prepare_outbound root (Some capability) |> Option.get in
+      Package.dispose_artifact current.Outbound.artifact;
+      acknowledge_outbound root current.Outbound.batch;
+      Alcotest.(check bool)
+        "second exact transfer acknowledges its own acceptance" true
+        (List.find
+           (fun op ->
+             C.Operation_id.equal op.L.Operation.token
+               second_operation.L.Operation.token)
+           (L.operations (local (load repository))))
+          .L.Operation.acknowledged)
+
 let () =
   Alcotest.run "Core public package"
     [
       ( "public",
         [
+          Alcotest.test_case
+            "outbound exact retries preserve later private/public work" `Quick
+            native_outbound_freezes_retries_and_preserves_later_work;
+          Alcotest.test_case
+            "outbound and acknowledgement stop at actual root boundaries" `Quick
+            native_outbound_root_faults_retry_exact_batches;
+          Alcotest.test_case
+            "outbound provider is unlocked and pending batches cannot be erased"
+            `Quick
+            native_outbound_signer_is_unlocked_and_state_cannot_discard_pending;
+          Alcotest.test_case
+            "outbound acknowledges only its exact committed acceptances" `Quick
+            native_outbound_acknowledges_only_exact_committed_records;
           Alcotest.test_case
             "native receipt preserves private state and known-only branches"
             `Quick native_receipt_preserves_history_files_and_private_positions;

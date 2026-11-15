@@ -438,6 +438,8 @@
   yeokcham_v1_record
   yeokcham_v1_trust
   yeokcham_v1_store
+  yeokcham_v1_gc
+  yeokcham_v1_transport
   yeokcham_v1_local_service
   yeokcham_v1_integration
   yeokcham_v1_composition
@@ -451,6 +453,7 @@
  (alias runtest)
  (deps
   ../tools/generate_core_package_vectors.py
+  golden/v1/transport-publication-v1.cbor.hex
   (source_tree golden/core-package))
  (action
   (run python3 %{dep:../tools/generate_core_package_vectors.py})))

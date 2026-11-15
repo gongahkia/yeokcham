@@ -89,6 +89,24 @@ module Core : sig
   (** Copies verified immutable bytes only. The service must separately perform
       current trust admission and atomic metadata receipt; no cursor/files move.
   *)
+
+  val record_inventory :
+    Yeokcham_store.repository ->
+    manifest ->
+    ( (Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list,
+      error )
+    result
+  (** Canonical public metadata rows, not admission or availability proof. *)
+
+  val restore_artifact :
+    source:Yeokcham_store.repository ->
+    destination:string ->
+    repository:Model.Core.Repository_id.t ->
+    authority:Trust.authority ->
+    manifest:string ->
+    (artifact, error) result
+  (** Reconstructs and verifies an exact frozen public manifest from retained
+      immutable contents. Does not substitute newer records or working files. *)
 end
 
 val manifest_object_ids :

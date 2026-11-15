@@ -1765,6 +1765,35 @@ module Core = struct
   let prepared_records prepared = prepared.public_records
   let prepared_titles prepared = prepared.public_titles
   let prepared_branch prepared = prepared.control.selected_branch
+  let record_inventory = record_rows
+
+  let restore_artifact ~source ~destination ~repository ~authority ~manifest =
+    let* control = decode_manifest ~repository manifest in
+    let* inventory = inventory source control in
+    let* metadata = metadata_ids source control ~inventory:true in
+    let ids = List.map fst inventory @ metadata |> List.sort_uniq Id.compare in
+    if Sys.file_exists destination then Error (Destination_exists destination)
+    else
+      let* () = mkdir destination in
+      let* () = mkdir (package_path destination objects_name) in
+      let* () =
+        write_file_exclusive (package_path destination manifest_name) manifest
+      in
+      let* _ =
+        traverse
+          (fun id ->
+            let* bytes =
+              read_bounded ~limit:max_object_bytes (Store.object_path source id)
+            in
+            let* _ = decode_object_bytes id bytes in
+            write_file_exclusive (object_path destination (Id.to_hex id)) bytes)
+          ids
+      in
+      let* prepared =
+        prepare ~package:destination ~repository
+          ~known_authority:(Some authority)
+      in
+      Ok prepared.public_artifact
 
   let import_prepared ~destination prepared =
     iter_artifact_objects prepared.public_artifact ~f:(fun _ bytes ->

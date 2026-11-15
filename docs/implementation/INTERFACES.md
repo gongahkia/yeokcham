@@ -1479,3 +1479,70 @@ by successful resume without losing new records. These are actual service/root
 consumers of public Core packages. Native relay fetching, frozen outbound
 couriers/acknowledgements, clone, remote-branch materialization and complete
 two-person/fault coverage remain open; no ordinary Core relay command is claimed.
+
+### P3 frozen Core outbound batches (in progress)
+
+`Local_service.Core_outbound` aliases `Native_outbound`. `prepare ~root ~remote
+~endpoint ~signing_capability` exports the actual public Core pool through
+`Package.Core.create`, with local publication titles as courier metadata. The
+provider signs outside the workspace writer lock. The service reloads current
+state and checks active courier authority, local certificate and retained public
+records before freezing exact manifest/courier bytes through the existing state
+root. Newer shared records and private observations remain in current state;
+they do not retarget the frozen batch. No network request occurs in this API.
+
+A pending batch requires no signer to resume. `Package.Core.restore_artifact
+~source ~destination ~repository ~authority ~manifest` reconstructs its exact
+inventory from immutable contents, then runs the normal isolated Core verifier.
+It does not replace the frozen manifest with a current export. Public records
+cannot be erased; their snapshot closure stays in shared GC roots, while registry
+45 inventory pages retain the existing conservative metadata retention. Actual
+GC/reconstruction tests cover this ownership. Temporary exports live inside the
+mandatory-excluded metadata directory; caller disposal removes ordinary completed
+exports. Interrupted exports are staging copies, not independent mutable state.
+
+`Transport.Core_outbox` owns pure frozen-batch invariants in the existing
+collaboration transport value. Legacy-only values retain exact schema 1. With
+Core batches, transport local schema 2 has the ordered layout:
+
+```text
+[2, legacy_remote_rows, frozen_core_rows]
+frozen_core_row = [remote_name, endpoint_sha256_hex, manifest_bytes,
+                   signed_courier_bytes, acknowledged_bool]
+```
+
+Rows are sorted/unique by validated remote name, at most 64. Both control byte
+strings are at most 8 MiB; complete transport state is at most 16 MiB, checked
+before decoding. The courier's manifest SHA-256 must match exact bytes. Schema 2
+without frozen rows is noncanonical. This is private state, with no new envelope
+kind or registry number. `local_state_schema_version` remains the legacy default
+1. Endpoint is SHA-256 of the configured HTTPS URL, never a bearer credential.
+Changing an endpoint requires a distinct remote name; pending bytes are retained.
+
+`Core_outbox.freeze` preserves identical retries, including an existing
+acknowledgement. It refuses replacement of unacknowledged work.
+`acknowledge` requires the exact frozen courier ID and atomically retains its
+verified courier reference and announced manifest in the remote bookkeeping.
+`validate_update ~previous` rejects erased batches, endpoint changes, replacement
+of pending work, acknowledgement regression and lost acknowledgement evidence.
+`Store.save_collaborative` applies this guard under its existing root-CAS boundary.
+Legacy remote updates preserve the Core rows.
+
+`Core_outbound.acknowledge ~root ~remote ~endpoint ~publication` is called only
+after the actual relay accepts that courier. It records the transfer fact and
+marks a committed integration acknowledged only when every exact staged record
+appears in that frozen manifest's canonical `Package.Core.record_inventory`.
+Later acceptances remain pending. It preserves history/files and does not accept
+or capture work. Per-remote facts stay distinct in transport state; the existing
+operation boolean means at least one exact transfer, not all configured remotes.
+No-op integrations with no staged records are not marked as transferred.
+
+The returned outbound value contains the frozen batch, temporary verified
+artifact and whether it reused pending work. Caller disposes the artifact.
+`For_test` exposes `Freeze_before/after` and `Acknowledge_before/after` at actual
+state-root publication boundaries. Forked faults, fresh reconstruction without a
+signer, provider lock probes, later public/private work, wrong acknowledgements,
+endpoint changes, actual GC and exact acceptance acknowledgement are tested.
+An independent CBOR fixture covers schema 2 alongside unchanged signed courier
+bytes. These APIs still require the native HTTP/CLI exchange and clone consumers;
+local freeze/ack tests alone do not establish a relay acknowledgement or P3.

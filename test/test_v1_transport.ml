@@ -98,6 +98,115 @@ let publication_round_trip () =
   Transport.validate_feed ~known:[] [ decoded ]
   |> require_ok Transport.error_to_string
 
+let[@warning "-4"] core_outbox_canonical_and_monotonic () =
+  let module Outbox = Transport.Core_outbox in
+  let repository, capability, publisher, certificate, _ = authority () in
+  let endpoint = Transport.sha256 "https://relay.invalid" in
+  let make manifest =
+    Transport.create_publication ~repository ~publisher
+      ~certificate:(Trust.certificate_id certificate)
+      ~parents:[]
+      ~manifest:(Transport.sha256 manifest)
+      ~signing_capability:capability
+    |> require_ok Transport.error_to_string
+  in
+  let courier = make "manifest" in
+  let freeze state manifest publication =
+    Outbox.freeze state ~remote:"origin" ~endpoint ~manifest ~publication
+    |> require_ok Transport.error_to_string
+  in
+  let pending = freeze Transport.empty_local_state "manifest" courier in
+  let encoded =
+    Transport.encode_local_state pending |> require_ok Transport.error_to_string
+  in
+  let golden =
+    In_channel.with_open_bin
+      (golden_path "core-package/outbound-state.hex")
+      In_channel.input_all
+    |> String.trim
+  in
+  let hex =
+    String.init
+      (String.length encoded * 2)
+      (fun i ->
+        let byte = Char.code encoded.[i / 2] in
+        "0123456789abcdef".[if i mod 2 = 0 then byte lsr 4 else byte land 15])
+  in
+  Alcotest.(check string) "independent frozen control vector" golden hex;
+  let decoded =
+    Transport.decode_local_state encoded |> require_ok Transport.error_to_string
+  in
+  Alcotest.(check string)
+    "exact canonical local transport round trip" encoded
+    (Transport.encode_local_state decoded
+    |> require_ok Transport.error_to_string);
+  let reject = function
+    | Ok _ -> Alcotest.fail "invalid Core outbound state accepted"
+    | Error _ -> ()
+  in
+  reject
+    (Outbox.freeze pending ~remote:"origin" ~endpoint ~manifest:"later"
+       ~publication:(make "later"));
+  reject
+    (Outbox.freeze pending ~remote:"origin" ~endpoint ~manifest:"wrong"
+       ~publication:courier);
+  reject
+    (Outbox.find pending ~remote:"origin"
+       ~endpoint:(Transport.sha256 "different"));
+  reject
+    (Outbox.acknowledge pending ~remote:"origin" ~endpoint
+       ~publication:(Transport.sha256 "other"));
+  reject (Outbox.validate_update ~previous:pending Transport.empty_local_state);
+  reject
+    (Transport.decode_local_state (String.make ((16 * 1024 * 1024) + 1) '\000'));
+  let value =
+    Encoding.decode encoded |> require_ok Encoding.decode_error_to_string
+  in
+  let malformed rows =
+    Encoding.array
+      [
+        Encoding.integer 2L;
+        Encoding.array [] |> require_ok Encoding.construction_error_to_string;
+        Encoding.array rows |> require_ok Encoding.construction_error_to_string;
+      ]
+    |> require_ok Encoding.construction_error_to_string
+    |> Encoding.encode
+  in
+  (match value with
+  | Encoding.Array [ _; _; Encoding.Array [ row ] ] -> (
+      reject (Transport.decode_local_state (malformed []));
+      reject (Transport.decode_local_state (malformed [ row; row ]));
+      match row with
+      | Encoding.Array fields ->
+          let altered =
+            Encoding.array
+              (List.mapi
+                 (fun i value ->
+                   if i = 2 then Encoding.bytes "wrong manifest" else value)
+                 fields)
+            |> require_ok Encoding.construction_error_to_string
+          in
+          reject (Transport.decode_local_state (malformed [ altered ]))
+      | _ -> assert false)
+  | _ -> assert false);
+  let acked =
+    Outbox.acknowledge pending ~remote:"origin" ~endpoint
+      ~publication:(Transport.publication_id courier)
+    |> require_ok Transport.error_to_string
+  in
+  Outbox.validate_update ~previous:pending acked
+  |> require_ok Transport.error_to_string;
+  reject (Outbox.validate_update ~previous:acked pending);
+  let repeated = freeze acked "manifest" courier in
+  Alcotest.(check bool)
+    "identical freeze cannot erase acknowledgement" true
+    (Outbox.acknowledged (List.hd (Outbox.batches repeated)));
+  let later = freeze acked "later" (make "later") in
+  Outbox.validate_update ~previous:acked later
+  |> require_ok Transport.error_to_string;
+  let lost_evidence = Transport.remove_remote later ~name:"origin" in
+  reject (Outbox.validate_update ~previous:acked lost_evidence)
+
 let feed_rejects_missing_parent () =
   let repository, capability, publisher, certificate, _ = authority () in
   let parent = Transport.sha256 "missing parent" in
@@ -2174,6 +2283,9 @@ let () =
             feed_preserves_same_publisher_forks;
           Alcotest.test_case "local state is canonical" `Quick
             local_state_round_trip;
+          Alcotest.test_case
+            "Core outbound controls are canonical and monotonic" `Quick
+            core_outbox_canonical_and_monotonic;
         ] );
       ( "relay",
         [

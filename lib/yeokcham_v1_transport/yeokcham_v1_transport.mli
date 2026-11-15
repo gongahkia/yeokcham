@@ -93,6 +93,46 @@ val remove_remote : local_state -> name:string -> local_state
 val encode_local_state : local_state -> (string, error) result
 val decode_local_state : string -> (local_state, error) result
 
+module Core_outbox : sig
+  type batch
+
+  val batches : local_state -> batch list
+  val remote : batch -> string
+  val endpoint : batch -> string
+  val manifest : batch -> string
+  val publication : batch -> publication
+  val acknowledged : batch -> bool
+
+  val find :
+    local_state ->
+    remote:string ->
+    endpoint:string ->
+    (batch option, error) result
+
+  val freeze :
+    local_state ->
+    remote:string ->
+    endpoint:string ->
+    manifest:string ->
+    publication:publication ->
+    (local_state, error) result
+  (** Freezes exact courier/manifest bytes before network mutation. A pending
+      batch cannot be replaced; an identical retry preserves its
+      acknowledgement. Endpoint is a digest of the configured HTTPS URL, never a
+      credential. *)
+
+  val acknowledge :
+    local_state ->
+    remote:string ->
+    endpoint:string ->
+    publication:string ->
+    (local_state, error) result
+
+  val validate_update :
+    previous:local_state -> local_state -> (unit, error) result
+  (** The owning state-root writer must preserve pending batches and facts. *)
+end
+
 module V2 : sig
   (** Pure V2 relay-transfer planning. These values describe only raw immutable
       bytes and relay-local sessions; they are not V1 history or state. *)

@@ -975,7 +975,17 @@ let save ?history ?local repository ~expected ~project =
 let save_collaborative_at_boundaries ~before_publish ~after_publish ?history
     ?local repository ~expected ~project ~collaboration =
   let* collaboration = validate_collaboration ~project collaboration in
-  let* _, _, existing_history, existing_local = previous repository expected in
+  let* _, existing_collaboration, existing_history, existing_local =
+    previous repository expected
+  in
+  let* () =
+    match existing_collaboration with
+    | None -> Ok ()
+    | Some previous ->
+        Transport.Core_outbox.validate_update ~previous:(transport previous)
+          (transport collaboration)
+        |> Result.map_error (fun error -> Transport_error error)
+  in
   let* history = observed_history ?history existing_history project in
   let* local =
     local_for_history ?local ~existing:existing_local ~project history

@@ -28,7 +28,18 @@ type remote_state = {
   remote_review_inbox_value : string list;
 }
 
-type local_state = { local_remotes : remote_state list }
+type core_outbound = {
+  core_remote : string;
+  core_endpoint : string;
+  core_manifest : string;
+  core_publication : publication;
+  core_acknowledged : bool;
+}
+
+type local_state = {
+  local_remotes : remote_state list;
+  local_core_outbound : core_outbound list;
+}
 
 type error =
   | Invalid_digest of string
@@ -1163,7 +1174,7 @@ let remote_state ~name ~cursor ~known ~announced_manifests ~announced_revisions
       remote_review_inbox_value = review_inbox;
     }
 
-let empty_local_state = { local_remotes = [] }
+let empty_local_state = { local_remotes = []; local_core_outbound = [] }
 let remote_name remote = remote.remote_name_value
 let remote_cursor remote = remote.remote_cursor_value
 let remote_known_publications remote = remote.remote_known_publications_value
@@ -1179,16 +1190,21 @@ let find_remote state ~name =
 
 let with_remote state remote =
   let rec insert reversed = function
-    | [] -> Ok { local_remotes = List.rev (remote :: reversed) }
+    | [] -> Ok { state with local_remotes = List.rev (remote :: reversed) }
     | current :: rest ->
         let compared =
           String.compare remote.remote_name_value current.remote_name_value
         in
         if compared = 0 then
-          Ok { local_remotes = List.rev_append reversed (remote :: rest) }
+          Ok
+            {
+              state with
+              local_remotes = List.rev_append reversed (remote :: rest);
+            }
         else if compared < 0 then
           Ok
             {
+              state with
               local_remotes =
                 List.rev_append reversed (remote :: current :: rest);
             }
@@ -1198,6 +1214,7 @@ let with_remote state remote =
 
 let remove_remote state ~name =
   {
+    state with
     local_remotes =
       List.filter
         (fun remote -> not (String.equal remote.remote_name_value name))
@@ -1239,7 +1256,50 @@ let encode_remote remote =
   let* inbox = encode_texts remote.remote_review_inbox_value in
   array [ name; cursor; known; manifests; revisions; inbox ]
 
+let encode_core_outbound row =
+  let* remote = text row.core_remote in
+  let* endpoint = text row.core_endpoint in
+  array
+    [
+      remote;
+      endpoint;
+      Encoding.bytes row.core_manifest;
+      Encoding.bytes (encode_publication row.core_publication);
+      Encoding.bool row.core_acknowledged;
+    ]
+
+let max_local_state_bytes = 16 * 1024 * 1024
+
+let core_acknowledgement_present state row =
+  match find_remote state ~name:row.core_remote with
+  | None -> false
+  | Some remote ->
+      List.mem
+        (publication_manifest row.core_publication)
+        (remote_announced_manifests remote)
+      && List.exists
+           (fun reference ->
+             reference_id reference = publication_id row.core_publication
+             && Model.Device_id.equal
+                  (reference_publisher reference)
+                  (publication_publisher row.core_publication)
+             && reference_certificate reference
+                = publication_certificate row.core_publication)
+           (remote_known_publications remote)
+
 let encode_local_state state =
+  let* () =
+    if
+      List.exists
+        (fun row ->
+          row.core_acknowledged && not (core_acknowledgement_present state row))
+        state.local_core_outbound
+    then
+      Error
+        (Invalid_publication
+           "Core acknowledgement lacks its retained courier/manifest evidence")
+    else Ok ()
+  in
   let rec loop reversed = function
     | [] -> array (List.rev reversed)
     | remote :: rest ->
@@ -1247,8 +1307,25 @@ let encode_local_state state =
         loop (encoded :: reversed) rest
   in
   let* remotes = loop [] state.local_remotes in
-  array [ Encoding.integer local_state_schema_version; remotes ]
-  |> Result.map Encoding.encode
+  let* value =
+    if state.local_core_outbound = [] then
+      array [ Encoding.integer local_state_schema_version; remotes ]
+    else
+      let* rows =
+        List.fold_left
+          (fun result row ->
+            let* values = result in
+            let* value = encode_core_outbound row in
+            Ok (value :: values))
+          (Ok []) state.local_core_outbound
+      in
+      let* rows = array (List.rev rows) in
+      array [ Encoding.integer 2L; remotes; rows ]
+  in
+  let bytes = Encoding.encode value in
+  if String.length bytes > max_local_state_bytes then
+    Error (Invalid_publication "transport local state exceeds 16 MiB")
+  else Ok bytes
 
 let decode_reference value =
   let* fields = exact_array "transport publication reference" 3 value in
@@ -1315,11 +1392,84 @@ let decode_remote value =
         ~announced_revisions:revisions ~review_inbox:inbox
   | _ -> assert false
 
-let decode_local_state bytes =
+let make_core_outbound ~remote ~endpoint ~manifest ~publication ~acknowledged =
+  let* () = validate_remote_name remote in
+  let* () = check_digest endpoint in
+  if
+    String.length manifest > 8 * 1024 * 1024
+    || String.length (encode_publication publication) > 8 * 1024 * 1024
+  then Error (Invalid_publication "frozen Core courier control exceeds 8 MiB")
+  else if
+    not (String.equal (sha256 manifest) (publication_manifest publication))
+  then
+    Error
+      (Invalid_publication "frozen Core manifest does not match its courier")
+  else
+    Ok
+      {
+        core_remote = remote;
+        core_endpoint = endpoint;
+        core_manifest = manifest;
+        core_publication = publication;
+        core_acknowledged = acknowledged;
+      }
+
+let[@warning "-4"] decode_core_outbound value =
+  let* fields = exact_array "frozen Core outbound" 5 value in
+  match fields with
+  | [ remote; endpoint; manifest; publication; Encoding.Bool acknowledged ] ->
+      let* remote = text_field "frozen Core remote" remote in
+      let* endpoint = text_field "frozen Core endpoint" endpoint in
+      let* manifest = bytes_field "frozen Core manifest" manifest in
+      let* publication = bytes_field "frozen Core courier" publication in
+      let* () =
+        if
+          String.length manifest > 8 * 1024 * 1024
+          || String.length publication > 8 * 1024 * 1024
+        then
+          Error
+            (Invalid_publication "frozen Core courier control exceeds 8 MiB")
+        else Ok ()
+      in
+      let* publication = decode_publication publication in
+      make_core_outbound ~remote ~endpoint ~manifest ~publication ~acknowledged
+  | _ -> Error (Invalid_publication "invalid frozen Core outbound fields")
+
+let[@warning "-4"] decode_local_state bytes =
+  let* () =
+    if String.length bytes > max_local_state_bytes then
+      Error (Invalid_publication "transport local state exceeds 16 MiB")
+    else Ok ()
+  in
   let* value =
     Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
   in
-  let* fields = exact_array "transport local state" 2 value in
+  let* fields, core_rows =
+    match value with
+    | Encoding.Array [ Encoding.Integer 2L; remotes; rows ] ->
+        let* rows = array_values "frozen Core outbound rows" rows in
+        if List.length rows > 64 then
+          Error (Invalid_publication "too many frozen Core remote batches")
+        else
+          let* rows =
+            List.fold_left
+              (fun result row ->
+                let* rows = result in
+                let* row = decode_core_outbound row in
+                Ok (row :: rows))
+              (Ok []) rows
+          in
+          let rows = List.rev rows in
+          let* () =
+            strictly_sorted "frozen Core remote batches"
+              (fun a b -> String.compare a.core_remote b.core_remote)
+              rows
+          in
+          Ok ([ Encoding.integer 1L; remotes ], rows)
+    | value ->
+        let* fields = exact_array "transport local state" 2 value in
+        Ok (fields, [])
+  in
   match fields with
   | [ version; remotes ] ->
       let* version = integer_field "transport local state version" version in
@@ -1347,8 +1497,139 @@ let decode_local_state bytes =
                      "transport remotes must be sorted and unique")
         in
         let* () = sorted remotes in
-        let state = { local_remotes = remotes } in
+        let state =
+          { local_remotes = remotes; local_core_outbound = core_rows }
+        in
         let* canonical = encode_local_state state in
         if String.equal canonical bytes then Ok state
         else Error Noncanonical_bytes
   | _ -> assert false
+
+module Core_outbox = struct
+  type batch = core_outbound
+
+  let batches state = state.local_core_outbound
+  let remote batch = batch.core_remote
+  let endpoint batch = batch.core_endpoint
+  let manifest batch = batch.core_manifest
+  let publication batch = batch.core_publication
+  let acknowledged batch = batch.core_acknowledged
+
+  let find state ~remote ~endpoint =
+    let* () = validate_remote_name remote in
+    let* () = check_digest endpoint in
+    match
+      List.find_opt
+        (fun row -> row.core_remote = remote)
+        state.local_core_outbound
+    with
+    | Some row when row.core_endpoint <> endpoint ->
+        Error
+          (Invalid_publication
+             "Core remote endpoint changed; preserve its pending batch and \
+              configure a distinct remote name")
+    | row -> Ok row
+
+  let put state row =
+    let rows =
+      row
+      :: List.filter
+           (fun other -> other.core_remote <> row.core_remote)
+           state.local_core_outbound
+      |> List.sort (fun a b -> String.compare a.core_remote b.core_remote)
+    in
+    if List.length rows > 64 then
+      Error (Invalid_publication "too many frozen Core remote batches")
+    else
+      let state = { state with local_core_outbound = rows } in
+      let* _ = encode_local_state state in
+      Ok state
+
+  let same a b =
+    a.core_manifest = b.core_manifest
+    && encode_publication a.core_publication
+       = encode_publication b.core_publication
+
+  let freeze state ~remote ~endpoint ~manifest ~publication =
+    let* row =
+      make_core_outbound ~remote ~endpoint ~manifest ~publication
+        ~acknowledged:false
+    in
+    let* previous = find state ~remote ~endpoint in
+    match previous with
+    | Some previous when same previous row -> Ok state
+    | Some previous when not previous.core_acknowledged ->
+        Error
+          (Invalid_publication
+             "Core remote has an unacknowledged frozen batch; retry it before \
+              preparing later work")
+    | None | Some _ -> put state row
+
+  let acknowledge state ~remote ~endpoint ~publication:id =
+    let* previous = find state ~remote ~endpoint in
+    match previous with
+    | Some row when publication_id row.core_publication = id ->
+        if row.core_acknowledged then Ok state
+        else
+          let old = find_remote state ~name:remote in
+          let known =
+            publication_reference row.core_publication
+            :: Option.fold ~none:[] ~some:remote_known_publications old
+            |> List.sort_uniq (fun a b ->
+                String.compare (reference_id a) (reference_id b))
+          in
+          let manifests =
+            publication_manifest row.core_publication
+            :: Option.fold ~none:[] ~some:remote_announced_manifests old
+            |> List.sort_uniq String.compare
+          in
+          let* remote =
+            remote_state ~name:remote
+              ~cursor:(Option.bind old remote_cursor)
+              ~known ~announced_manifests:manifests
+              ~announced_revisions:
+                (Option.fold ~none:[] ~some:remote_announced_revisions old)
+              ~review_inbox:(Option.fold ~none:[] ~some:remote_review_inbox old)
+          in
+          let* state = with_remote state remote in
+          put state { row with core_acknowledged = true }
+    | None | Some _ ->
+        Error
+          (Invalid_publication
+             "acknowledgement does not name the frozen Core courier")
+
+  let validate_update ~previous state =
+    List.fold_left
+      (fun result old ->
+        let* () = result in
+        let* next =
+          find state ~remote:old.core_remote ~endpoint:old.core_endpoint
+        in
+        let* () =
+          if
+            old.core_acknowledged
+            && not (core_acknowledgement_present state old)
+          then
+            Error
+              (Invalid_publication
+                 "cannot erase acknowledged Core courier/manifest evidence")
+          else Ok ()
+        in
+        match next with
+        | None ->
+            Error
+              (Invalid_publication "cannot erase a frozen Core remote batch")
+        | Some next when same old next ->
+            if old.core_acknowledged && not next.core_acknowledged then
+              Error
+                (Invalid_publication
+                   "cannot erase a Core transfer acknowledgement")
+            else Ok ()
+        | Some next when old.core_acknowledged && not next.core_acknowledged ->
+            Ok ()
+        | Some _ ->
+            Error
+              (Invalid_publication
+                 "cannot replace an unacknowledged frozen Core batch"))
+      (Ok ()) previous.local_core_outbound
+end
