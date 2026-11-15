@@ -1339,3 +1339,59 @@ consumer and does not establish the new Core loop. Preserve schema-4 roots and
 all current recovery data when changing binaries; older binaries cannot decode
 known-only branch state, and source rollback cannot restore files or undo
 accepted history. P3 remains active; P4 is unstarted.
+
+P3 frozen Core outbound checkpoint: external commit
+`639553a236ab5c862a29a98bc9a63a430728b911` (`newthings`) appeared during
+verification. Its 15 paths contain exactly this continuation's owned outbound
+service, transport state, package reconstruction, tests/vectors and interfaces.
+All recorded checked-file hashes match the committed files. Inspected/preserved
+without reset or amend; main is clean before this ledger update.
+
+`Local_service.Core_outbound` now freezes exact public manifest and signed
+courier bytes under the existing state root before network requests. The signer
+runs outside the writer lock; current authority/local certificate and retained
+records are checked before publication. Pending retries reconstruct that exact
+verified package without a signer, including after actual GC. Later public work
+and private observations remain current and do not retarget the batch. A changed
+endpoint requires a distinct remote name rather than repurposing pending work.
+
+`Transport.Core_outbox` extends the existing collaboration transport value with
+canonical private schema 2 only when Core rows exist. Legacy-only schema 1 bytes
+are unchanged; no envelope kind or competing mutable ref was added. Root saves
+refuse dropped pending batches, endpoint changes, acknowledgement regression and
+lost courier/manifest evidence. Acknowledgement requires the exact frozen courier
+and marks an integration transferred only when all its staged records occur in
+that frozen inventory; later acceptances remain pending. Operation boolean means
+at least one exact transfer, with per-remote facts retained separately. Local
+acceptance, frozen work and actual relay acknowledgement remain distinct; the
+service acknowledgement API is not itself evidence of a network response.
+
+Core-package14, HTTPS/legacy transport21, signed local-core69, store8, transfer8
+and GC11 passed. The independent generator verifies four public/hash/outbound
+vectors, including unchanged historical courier bytes. `make build`, `make lint`
+and default `make ci` exited 0 on parent `306ca3b3c994d81fb348eb8e279b3a8544390e6f`
+with the exact pending files captured as `639553a`; CI took 58.617 seconds and
+reused matching unchanged Dune results where applicable. Commands, exits,
+durations and file hashes are in `core-outbox-checkpoint-checks.json` under the
+P3 external log directory. Initial strict-warning/test syntax/module-name build
+failures and formatter promotions (exit 2) preceded the complete passing runs.
+The early four-case and publication-only filters intentionally skipped other
+cases; the subsequent whole Core-package14 and transport21 runs executed them.
+README, P2 report/receipt and accepted G01 preservation hashes still match.
+
+This adds partial G02 private-schema, G08 outbound/retry and G13 exact-operation
+acknowledgement coverage. It does not establish Core native HTTP transfer, verified
+clone, foreground coverage or the Alice/Bob loop. Those consumers, supported first
+selection of known-only branches, incoming courier-title persistence, native
+conflict resolutions, missing-content inspection and the full criterion audit
+remain required. Legacy HTTPS tests exercise the existing older family; they are
+regression evidence, not the new Core loop. Do not use the relay's lexical
+publication cursor as an arrival high-water mark: a later courier can sort before
+it. The native consumer must rescan the bounded inventory and filter verified
+known IDs, or supply an actual append-order protocol before claiming coverage.
+
+Preserve schema-2 transport and schema-4 local roots, public inventory pages and
+current recovery data when changing binaries. Source rollback cannot remove a
+relay acknowledgement, restore files or undo accepted history; older transport
+readers refuse Core-bearing state. Native transfer/resolution remains the next
+P3 work, not P4 or a new original full phase. P3 stays active and incomplete.
