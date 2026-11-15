@@ -1522,6 +1522,7 @@ module Core = struct
     Ok titles
 
   let public_titles = load_titles
+  let metadata_authority = load_authority
 
   let[@warning "-4"] declared_selected_snapshots store manifest ~known_authority
       =

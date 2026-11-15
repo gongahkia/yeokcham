@@ -104,6 +104,10 @@ module Core : sig
     Model.Core.pool ->
     ((Model.Core.Record_id.t * string) list, error) result
 
+  val metadata_authority :
+    Yeokcham_store.repository -> manifest -> Trust.authority option -> (Trust.authority, error) result
+  (** Verified authority declarations, before fetching ordinary contents. *)
+
   val declared_selected_snapshots :
     Yeokcham_store.repository ->
     manifest ->

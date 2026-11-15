@@ -48,6 +48,7 @@ type error =
   | Store_error of Store.error
   | Raw_error of Raw.error
   | Transport_error of Transport.error
+  | Authority_error of string
   | Invalid of string
 
 let error_to_string = function
@@ -59,6 +60,7 @@ let error_to_string = function
   | Store_error e -> Store.error_to_string e
   | Raw_error e -> Raw.error_to_string e
   | Transport_error e -> Transport.error_to_string e
+  | Authority_error s -> s
   | Invalid s -> s
 
 let ( let* ) = Result.bind
@@ -208,7 +210,7 @@ module Id_map = Map.Make (struct
   let compare = Raw.Stored_object_id.compare
 end)
 
-let[@warning "-4"] fetch_core client project source local authority directory
+let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client project source directory
     manifest_bytes =
   let* scope =
     Core.Repository_id.of_hex project
@@ -217,11 +219,6 @@ let[@warning "-4"] fetch_core client project source local authority directory
   in
   let* manifest =
     Package.Core.decode_manifest ~repository:scope manifest_bytes |> package
-  in
-  let* reusable =
-    Package.Core.public_object_ids ~source ~authority
-      ~records:(Store.Local.record_objects local)
-    |> package
   in
   let reusable =
     List.fold_left (fun map id -> Id_map.add id () map) Id_map.empty reusable
@@ -322,6 +319,8 @@ let[@warning "-4"] fetch_core client project source local authority directory
       (fun (namespace, id) -> metadata namespace 0 id)
       (Package.Core.metadata_roots manifest)
   in
+  let* authority = Package.Core.metadata_authority source manifest known_authority |> package in
+  let* () = check_authority authority in
   let* objects = Package.Core.inventory source manifest |> package in
   let sizes =
     List.fold_left
@@ -433,10 +432,11 @@ let[@warning "-4"] receive client project root remote endpoint repository
         | Yeokcham_encoding.Array (Yeokcham_encoding.Integer 2L :: _) ->
             let* loaded = Store.load repository |> store in
             let* local, _, authority = context loaded in
+            let* reusable = Package.Core.public_object_ids ~source:(Store.underlying_store repository)
+                ~authority ~records:(Store.Local.record_objects local) |> package in
             let* () =
-              fetch_core client project
-                (Store.underlying_store repository)
-                local authority directory manifest
+              fetch_core ~known_authority:(Some authority) ~reusable ~check_authority:(fun _ -> Ok ())
+                client project (Store.underlying_store repository) directory manifest
             in
             let* received =
               Service.Core_receive.receive_publication ~root ~remote ~endpoint
@@ -542,13 +542,13 @@ let run_with ~observe ~root ~remote ~load_signing_capability =
   let endpoint = Transport.sha256 config.Config.url in
   let* repository = Store.open_repository ~root |> store in
   let* loaded = Store.load repository |> store in
-  let* _, collaboration, _ = context loaded in
+  let* local, collaboration, _ = context loaded in
   let* _ =
     Outbox.find (Store.transport collaboration) ~remote ~endpoint |> transport
   in
   let* token =
     Credential.load_for_repository ~url:config.Config.url
-      ~repository:(Core.Repository_id.to_hex (Core.pool_repository (Store.Local.pool (Option.get loaded.Store.local))))
+      ~repository:(Core.Repository_id.to_hex (Core.pool_repository (Store.Local.pool local)))
     |> Result.map_error Credential.error_to_string
     |> invalid
   in
@@ -617,4 +617,18 @@ let run = run_with ~observe:(fun _ -> ())
 
 module For_test = struct
   let run = run_with
+end
+
+module Fetch = struct
+  let inventory = inventory
+  let publication = fetch_publication
+  let order_feed = order_feed
+
+  let with_core ~root ~client ~repository ~source ~known_authority ~reusable
+      ~check_authority ~manifest action =
+    with_package root (fun directory ->
+        let project = Core.Repository_id.to_hex repository in
+        let* () = fetch_core ~known_authority ~reusable ~check_authority client project source directory manifest in
+        let* prepared = Package.Core.prepare ~package:directory ~repository ~known_authority |> package in
+        action ~package:directory prepared)
 end

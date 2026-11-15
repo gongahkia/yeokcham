@@ -7146,10 +7146,10 @@ let run_remote_login arguments =
     Transport_config.find ~root ~name
     |> require_ok Transport_config.error_to_string
   in
+  let identity = Service.identity ~root |> require_ok Service.error_to_string in
   let token = read_bearer_token () in
   Transport_credential.save ~remote:name ~token
   |> require_ok Transport_credential.error_to_string;
-  let identity = Service.identity ~root |> require_ok Service.error_to_string in
   Transport_credential.save_for_repository ~url:remote.Transport_config.url
     ~repository:(Trust.Repository_id.to_string identity.Service.repository) ~token
   |> require_ok Transport_credential.error_to_string;
@@ -7706,6 +7706,7 @@ let[@warning "-4"] fail_exchange error =
   let module Native = Sync.Core in
   let status, code =
     match error with
+    | Native.Authority_error _ -> (7, "exchange-authority-blocked")
     | Native.Receipt_error
         (Service.Core_receive.Admission_error (Local.Receive_trust _))
     | Native.Package_error
