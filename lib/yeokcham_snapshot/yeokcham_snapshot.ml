@@ -1516,6 +1516,66 @@ let require_no_ignored_paths ~excluded_root_names ~root =
 
 type capture_stage = Before_open | After_read | Before_publish
 
+type captured_file = {
+  captured_content : Content.id;
+  captured_mode : file_mode;
+  captured_fingerprint : string;
+}
+
+let inspect_regular_file path =
+  try
+    let fd = Native.open_at None path false in
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+        let stat = Unix.fstat fd in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error
+            (Unsupported_file_type
+               { path; kind = "replacement must be a regular file" })
+        else Ok (stat, Native.fingerprint fd))
+  with
+  | Unix.Unix_error (error, _, _) ->
+      Error (scan_error "inspect replacement" path error)
+  | Failure message ->
+      Error (Scan_error { path; operation = "inspect replacement"; message })
+
+let validate_captured_file ~path captured =
+  let* _, stamp = inspect_regular_file path in
+  if stamp = captured.captured_fingerprint then Ok ()
+  else Error (Observation_changed path)
+
+let[@warning "-4"] capture_regular_file_with ~observe ~store ~path =
+  let rec attempt remaining =
+    observe Before_open [ Filename.basename path ];
+    let result =
+      let* stat, stamp = inspect_regular_file path in
+      let* captured_content =
+        store_regular_file ~expected_stamp:stamp store path stat
+      in
+      observe After_read [ Filename.basename path ];
+      let captured =
+        {
+          captured_content;
+          captured_mode =
+            (if stat.Unix.st_perm land 0o111 = 0 then Regular else Executable);
+          captured_fingerprint = stamp;
+        }
+      in
+      let* () = validate_captured_file ~path captured in
+      observe Before_publish [ Filename.basename path ];
+      let* () = validate_captured_file ~path captured in
+      Ok captured
+    in
+    match result with
+    | Error (Observation_changed _) when remaining > 1 -> attempt (remaining - 1)
+    | Error (Observation_changed changed) -> Error (Capture_unstable changed)
+    | result -> result
+  in
+  attempt 3
+
+let capture_regular_file = capture_regular_file_with ~observe:(fun _ _ -> ())
+
 type observation =
   | Observed_entry of string list * string option
   | Observed_directory of string list * string * string list
@@ -1758,6 +1818,8 @@ let scan ~root ~store =
 
 module For_test = struct
   type stage = capture_stage = Before_open | After_read | Before_publish
+
+  let capture_regular_file = capture_regular_file_with
 
   let scan ~observe ~root ~store =
     scan_with_observer

@@ -26,14 +26,14 @@ class IntegrationCliTests(unittest.TestCase):
         result = self.cli("init", self.root, machine=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def cli(self, *arguments, machine=True, environment=None):
+    def cli(self, *arguments, machine=True, environment=None, timeout=20):
         args = [str(arg) for arg in arguments]
         if args[0] != "init":
             args += ["--root", str(self.root)]
         if machine:
             args += ["--format", "json"]
         return subprocess.run([BINARY, *args], env=environment or self.environment,
-                              capture_output=True, text=True, timeout=20)
+                              capture_output=True, text=True, timeout=timeout)
 
     def data(self, result, status=0):
         self.assertEqual(result.returncode, status, result.stdout + result.stderr)
@@ -91,6 +91,84 @@ class IntegrationCliTests(unittest.TestCase):
         self.assertEqual(noop["code"], "integration-unchanged")
         self.assertTrue(noop["data"]["no_op"])
         self.assertEqual(self.head(), committed)
+
+    def test_named_conflicts_deferral_and_exact_version_prepare_fresh_plan(self):
+        first = self.share()
+        (self.root / "note.txt").write_bytes(b"another independent shared version\r\n")
+        second = self.share()
+        (self.root / "note.txt").write_bytes(b"PRIVATE overlapping E\r\n")
+        before = self.head()
+        inspection = self.data(self.cli("conflicts"))["data"]
+        self.assertEqual(self.head(), before)
+        self.assertTrue(inspection["conflicts"])
+        conflict = next(row for row in inspection["conflicts"] if not row["private_workspace"])
+        self.assertRegex(conflict["conflict_id"], r"^[0-9a-f]{64}$")
+        self.assertIn("revision:" + first["revision_id"], [row["version_id"] for row in conflict["versions"]])
+        deferred = self.data(self.cli("resolve", conflict["conflict_id"], "--defer"))
+        self.assertEqual(deferred["code"], "conflict-deferred")
+        self.assertEqual(deferred["plan_id"], conflict["plan_id"])
+        self.assertEqual(self.head(), before)
+        chosen = self.data(self.cli("resolve", conflict["conflict_id"], "--use", "revision:" + first["revision_id"]))
+        self.assertNotEqual(chosen["plan_id"], conflict["plan_id"])
+        self.assertRegex(chosen["data"]["public_resolution"], r"^[0-9a-f]{64}$")
+        self.assertTrue(chosen["data"]["retained"])
+        self.assertEqual((self.root / "note.txt").read_bytes(), b"PRIVATE overlapping E\r\n")
+        retained = self.head()
+        unavailable = dict(self.environment, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(self.parent / "missing"))
+        repeated = self.data(self.cli("resolve", conflict["conflict_id"], "--use", "revision:" + first["revision_id"], environment=unavailable))
+        self.assertEqual(repeated["plan_id"], chosen["plan_id"])
+        self.assertEqual(self.head(), retained)
+        inspected = self.data(self.cli("conflicts"))["data"]
+        self.assertEqual([row["plan_id"] for row in inspected["plans"]], [chosen["plan_id"]])
+        self.assertEqual(self.data(self.cli("status"))["data"]["integration_operations"], [])
+        private = next(row for row in inspected["conflicts"] if row["private_workspace"])
+        kept = self.data(self.cli("resolve", private["conflict_id"], "--use", "working"))
+        self.assertIsNone(kept["data"]["public_resolution"])
+        self.assertEqual(self.head(), retained)
+        self.assertEqual(kept["data"]["plan"]["readiness"], "ready")
+        self.assertEqual(kept["data"]["plan"]["accepted_snapshot"], first["public_snapshot"])
+        self.assertEqual(len(kept["data"]["plan"]["workspace_decisions"]), 1)
+        self.data(self.cli("integrate", "--plan", kept["plan_id"], "--preview"))
+        self.assertEqual(self.head(), retained)
+        applied = self.data(self.cli("integrate", "--plan", kept["plan_id"], "--yes"))
+        self.assertEqual(applied["data"]["accepted_snapshot"], first["public_snapshot"])
+        self.assertEqual((self.root / "note.txt").read_bytes(), b"PRIVATE overlapping E\r\n")
+        self.assertEqual((self.root / "private.txt").read_text(), "PRIVATE SENTINEL\n")
+
+    def test_conflict_replacement_streams_executable_bytes_and_defers_application(self):
+        first = self.share()
+        (self.root / "note.txt").write_bytes(b"independent variant\n")
+        self.share()
+        inspection = self.data(self.cli("conflicts"))["data"]
+        conflict = next(row for row in inspection["conflicts"] if not row["private_workspace"])
+        replacement = self.parent / "replacement.bin"
+        content = bytes(range(251)) * 9001
+        replacement.write_bytes(content)
+        replacement.chmod(0o751)
+        chosen = self.data(self.cli("resolve", conflict["conflict_id"], "--file", replacement))
+        self.assertTrue(chosen["data"]["retained"])
+        self.assertEqual((self.root / "note.txt").read_bytes(), b"independent variant\n")
+        plain = self.cli("conflicts", "--plan", chosen["plan_id"], machine=False)
+        self.assertEqual(plain.returncode, 0, plain.stderr)
+        self.assertIn(chosen["plan_id"], plain.stdout)
+        self.assertNotIn(content[:100].decode("latin1"), plain.stdout)
+        self.data(self.cli("integrate", "--plan", chosen["plan_id"], "--yes", timeout=120))
+        self.assertEqual((self.root / "note.txt").read_bytes(), content)
+        self.assertTrue((self.root / "note.txt").stat().st_mode & 0o100)
+        self.assertEqual((self.root / "private.txt").read_text(), "PRIVATE SENTINEL\n")
+
+    def test_stale_conflict_and_invalid_version_refuse_without_publication(self):
+        first = self.share()
+        (self.root / "note.txt").write_bytes(b"another version\n")
+        self.share()
+        conflict = self.data(self.cli("conflicts"))["data"]["conflicts"][0]
+        before = self.head()
+        self.data(self.cli("resolve", conflict["conflict_id"], "--use", "unknown"), 2)
+        self.assertEqual(self.head(), before)
+        (self.root / "private.txt").write_text("external edit after inspection\n")
+        self.data(self.cli("resolve", conflict["conflict_id"], "--use", "revision:" + first["revision_id"]), 3)
+        self.assertEqual(self.head(), before)
+        self.assertEqual((self.root / "private.txt").read_text(), "external edit after inspection\n")
 
     def test_noninteractive_confirmation_and_stale_plan(self):
         shared = self.share()

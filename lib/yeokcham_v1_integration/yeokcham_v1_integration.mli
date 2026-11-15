@@ -21,6 +21,16 @@ type readiness =
   | Conflicted of Core.conflict list
   | Decision of string
 
+type workspace_decision = private {
+  decision_path : string list;
+  decision_replacement : Core.Object_id.t;
+}
+
+val make_workspace_decision :
+  path:string list ->
+  replacement_snapshot:Core.Object_id.t ->
+  (workspace_decision, error) result
+
 type t
 
 val prepare :
@@ -48,6 +58,20 @@ val prepare_resolved :
     filesystem observation. Divergent heads require explicit reconciliation. No
     ordinary file, history cursor, accepted head or outbox is published. *)
 
+val prepare_decided :
+  workspace_decisions:workspace_decision list ->
+  resolution_ids:Core.Record_id.t list ->
+  store:Yeokcham_store.repository ->
+  loaded:Yeokcham_v1_store.loaded ->
+  observed:Yeokcham_v1_model.Snapshot_id.t ->
+  observation:Yeokcham_snapshot.Observation.t ->
+  selected_revisions:Core.Record_id.t list ->
+  reconcile_heads:Core.Record_id.t list option ->
+  (t, error) result
+(** Exact immutable preparation from verified domain records and a complete
+    filesystem observation. Divergent heads require explicit reconciliation. No
+    ordinary file, history cursor, accepted head or outbox is published. *)
+
 val id : t -> Core.Plan_id.t
 val stored_id : t -> Yeokcham_store.Stored_object_id.t
 val encode : t -> string
@@ -58,6 +82,9 @@ val accepted_snapshot : t -> Core.Object_id.t option
 val known_present : t -> Core.Object_id.t
 val contributions : t -> Yeokcham_v1_store.Local.publication list
 val no_op : t -> bool
+val workspace_decisions : t -> workspace_decision list
+val plan_observation : t -> Core.Digest.t
+val context_identity : t -> Core.Digest.t
 
 val decode :
   store:Yeokcham_store.repository ->
@@ -111,3 +138,20 @@ val forget :
 (** Releases only this immutable proposal alias. Refuses retirement while an
     incomplete durable operation references the plan. Operation roots are also
     protected independently of this alias. *)
+
+module For_test : sig
+  val encode_control :
+    request:Core.composition_request ->
+    event_heads:Core.Record_id.t list ->
+    proof_root:Yeokcham_store.Stored_object_id.t ->
+    selection_root:Yeokcham_store.Stored_object_id.t ->
+    observation_digest:Core.Digest.t ->
+    known_present:Core.Object_id.t ->
+    accepted_snapshot:Core.Object_id.t option ->
+    readiness:readiness ->
+    no_op:bool ->
+    workspace_decisions:workspace_decision list ->
+    (string, error) result
+  (** Owner encoding only for independent symbolic vectors. Returns no plan or
+      authority to apply; ordinary decoding and revalidation remain required. *)
+end

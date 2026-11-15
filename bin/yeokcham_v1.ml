@@ -123,12 +123,14 @@ let command_name () =
 
 let native_json_command command =
   (command = "share" && not (legacy_share_arguments (raw_arguments ())))
+  || (command = "resolve" && not (List.mem "--decision" (raw_arguments ())))
   || List.mem command
        [
          "status";
          "exchange";
          "clone";
          "integrate";
+         "conflicts";
          "operation";
          "operation-show";
          "operation-resume";
@@ -177,12 +179,14 @@ let print_json bytes =
 
 let domain_command command =
   (command = "share" && not (legacy_share_arguments (raw_arguments ())))
+  || (command = "resolve" && not (List.mem "--decision" (raw_arguments ())))
   || List.mem command
        [
          "status";
          "exchange";
          "clone";
          "integrate";
+         "conflicts";
          "operation";
          "operation-show";
          "operation-resume";
@@ -510,6 +514,8 @@ let usage_text =
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
   \  yeokcham save [--root PATH]\n\
   \  yeokcham integrate [CHANGE...] [--all] [--preview|--yes] [--plan ID]\n\
+  \  yeokcham conflicts [--plan ID] [--root PATH]\n\
+  \  yeokcham resolve CONFLICT (--use VERSION|--file PATH|--defer) [--plan ID]\n\
   \  yeokcham operation show|resume ID [--root PATH]\n\
   \  yeokcham operation recover ID [--preview|--yes] [--plan ID] \
    [--keep-current] [--replan]\n\
@@ -858,9 +864,21 @@ let help_for = function
       Some
         "usage: yeokcham withdraw [--root PATH] --change ID\n\n\
          Withdraw an eligible local shared change through the V1 model."
+  | [ "conflicts" ] ->
+      Some
+        "usage: yeokcham conflicts [--plan ID] [--root PATH]\n\n\
+         Inspect exact shared/private conflicts and named versions. \
+         Incomparable plans remain explicit; no acceptance or ordinary-file \
+         changes."
   | [ "resolve" ] ->
       Some
-        "usage: yeokcham resolve [--root PATH] --decision ID --change ID \
+        "usage: yeokcham resolve CONFLICT (--use VERSION|--file PATH|--defer) \
+         [--plan ID] [--root PATH]\n\n\
+         Prepare a fresh exact plan. Shared choices publish a scoped \
+         resolution proposal; workspace choices stay private. Then inspect and \
+         confirm integrate --plan ID. No acceptance or ordinary-file \
+         replacement occurs here.\n\n\
+         Advanced V1: resolve [--root PATH] --decision ID --change ID \
          --revision ID [--tree PATH] [--authority EPOCH]\n\n\
          Explicitly resolve one decision; it does not infer or automatically \
          merge a conflict."
@@ -6446,6 +6464,22 @@ let integration_plan_json ?(historical = false) ~root plan =
        ("event_heads", ids (Integration.event_heads plan));
        ("accepted_heads", ids request.Core.accepted_heads);
        ("exact_revisions", ids request.Core.selected_revisions);
+       ("resolution_ids", ids request.Core.resolution_ids);
+       ( "workspace_decisions",
+         `List
+           (List.map
+              (fun value ->
+                `Assoc
+                  [
+                    ( "path",
+                      json_byte_path
+                        (String.concat "/" value.Integration.decision_path) );
+                    ( "replacement_snapshot",
+                      `String
+                        (Core.Object_id.to_hex
+                           value.Integration.decision_replacement) );
+                  ])
+              (Integration.workspace_decisions plan)) );
        ("composition_profile", `String request.Core.composition_profile);
        ("cursor", json_history_identity workspace.Core.cursor);
        ( "working_basis",
@@ -6866,6 +6900,268 @@ let run_integrate arguments =
       && (not result.Native_integrate.resumed)
       && not result.Native_integrate.recovered
   | None -> false
+
+module Native_conflicts = Service.Conflicts
+module Conflict_snapshot = Yeokcham_snapshot
+
+let json_conflict_version (version : Native_conflicts.version) =
+  let entry =
+    match version.Native_conflicts.entry with
+    | None -> `Assoc [ ("kind", `String "absent") ]
+    | Some Yeokcham_v1_composition.Directory ->
+        `Assoc [ ("kind", `String "directory") ]
+    | Some (Yeokcham_v1_composition.File { mode; content }) ->
+        `Assoc
+          [
+            ( "kind",
+              `String
+                (match mode with
+                | Conflict_snapshot.Regular -> "regular"
+                | Conflict_snapshot.Executable -> "executable"
+                | Conflict_snapshot.Symlink -> "symlink") );
+            ( "content_id",
+              `String
+                (Yeokcham_store.Stored_object_id.to_hex
+                   (Conflict_snapshot.Content.stored_object_id content)) );
+          ]
+  in
+  `Assoc
+    [
+      ("version_id", `String version.Native_conflicts.version_id);
+      ("name", `String version.Native_conflicts.name);
+      ( "snapshot",
+        `String (Core.Object_id.to_hex version.Native_conflicts.snapshot) );
+      ("entry", entry);
+      ( "preview_escaped",
+        json_optional
+          (fun s -> `String s)
+          version.Native_conflicts.preview_escaped );
+      ("preview_truncated", `Bool version.Native_conflicts.preview_truncated);
+    ]
+
+let json_native_conflict (conflict : Native_conflicts.conflict) =
+  `Assoc
+    [
+      ( "conflict_id",
+        `String (Core.Digest.to_hex conflict.Native_conflicts.conflict_id) );
+      ( "plan_id",
+        `String (Core.Plan_id.to_hex conflict.Native_conflicts.source_plan) );
+      ("path", json_byte_path (String.concat "/" conflict.Native_conflicts.path));
+      ("private_workspace", `Bool conflict.Native_conflicts.private_workspace);
+      ( "versions",
+        `List
+          (List.map json_conflict_version conflict.Native_conflicts.versions) );
+    ]
+
+let run_conflicts arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  if remaining <> [] || flags.selection_preview || flags.selection_yes then
+    usage ();
+  let root = flags.selection_root in
+  local_failure_context := Some (native_failure_context root);
+  let plan =
+    Option.map
+      (fun text -> Core.Plan_id.of_hex text |> require_ok Core.error_to_string)
+      flags.selection_plan
+  in
+  let inspected = Native_conflicts.inspect ~root ~plan |> require_integration in
+  let actions =
+    List.concat_map
+      (fun conflict ->
+        let conflict_id =
+          Core.Digest.to_hex conflict.Native_conflicts.conflict_id
+        in
+        [
+          action ~root
+            [ "resolve"; conflict_id; "--defer" ]
+            "Keep this conflict and every candidate without accepting work.";
+        ])
+      inspected.Native_conflicts.conflicts
+    @ List.filter_map
+        (fun plan ->
+          match Integration.readiness plan with
+          | Integration.Ready _ ->
+              Some
+                (action ~root
+                   [
+                     "integrate";
+                     "--plan";
+                     Core.Plan_id.to_hex (Integration.id plan);
+                     "--preview";
+                   ]
+                   "Inspect this exact shared/private result before acceptance.")
+          | Integration.Conflicted _ | Integration.Decision _ -> None)
+        inspected.Native_conflicts.plans
+  in
+  if requested_format () = Json_format then
+    domain_json ~outcome:`Completed ~code:"conflicts-inspected"
+      ~message:
+        "Exact current plans and named versions inspected; acceptance and \
+         files are unchanged."
+      ~data:
+        (`Assoc
+           [
+             ( "plans",
+               `List
+                 (List.map
+                    (fun plan -> integration_plan_json ~root plan)
+                    inspected.Native_conflicts.plans) );
+             ( "conflicts",
+               `List
+                 (List.map json_native_conflict
+                    inspected.Native_conflicts.conflicts) );
+           ])
+      ~next_actions:actions ()
+  else (
+    List.iter
+      (fun plan -> render_integration_plan ~root plan)
+      inspected.Native_conflicts.plans;
+    List.iter
+      (fun conflict ->
+        Printf.printf "conflict %s\nplan %s\npath %s (%s)\n"
+          (Core.Digest.to_hex conflict.Native_conflicts.conflict_id)
+          (Core.Plan_id.to_hex conflict.Native_conflicts.source_plan)
+          (Output.display_value
+             (String.concat "/" conflict.Native_conflicts.path))
+          (if conflict.Native_conflicts.private_workspace then
+             "private workspace"
+           else "shared result");
+        List.iter
+          (fun version ->
+            Printf.printf "  version %s; snapshot %s\n"
+              (Output.display_value version.Native_conflicts.version_id)
+              (Core.Object_id.to_hex version.Native_conflicts.snapshot);
+            Option.iter
+              (fun text -> Printf.printf "    bytes %s\n" text)
+              version.Native_conflicts.preview_escaped;
+            if version.Native_conflicts.preview_truncated then
+              print_endline
+                "    contents exceed the 8192-byte display bound; exact \
+                 content identity is retained")
+          conflict.Native_conflicts.versions)
+      inspected.Native_conflicts.conflicts)
+
+let run_native_resolve arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  if flags.selection_preview || flags.selection_yes then usage ();
+  let root = flags.selection_root in
+  local_failure_context := Some (native_failure_context root);
+  let rec parse choice names = function
+    | [] -> (choice, List.rev names)
+    | "--use" :: value :: rest when choice = None ->
+        parse (Some (Native_conflicts.Use value)) names rest
+    | "--file" :: value :: rest when choice = None ->
+        parse (Some (Native_conflicts.File value)) names rest
+    | "--defer" :: rest when choice = None ->
+        parse (Some Native_conflicts.Defer) names rest
+    | value :: _ when String.starts_with ~prefix:"-" value -> usage ()
+    | value :: rest -> parse choice (value :: names) rest
+  in
+  let choice, names = parse None [] remaining in
+  let choice, identity =
+    match (choice, names) with
+    | Some choice, [ identity ] -> (choice, identity)
+    | _ -> usage ()
+  in
+  let conflict =
+    Core.Digest.of_hex identity |> require_ok Core.error_to_string
+  in
+  let plan =
+    Option.map
+      (fun text -> Core.Plan_id.of_hex text |> require_ok Core.error_to_string)
+      flags.selection_plan
+  in
+  let signer () =
+    match Service.identity ~root with
+    | Error e -> Error (Service.error_to_string e)
+    | Ok identity ->
+        V1_signer.load ~root (Trust.device_id identity.Service.device)
+        |> Result.map_error V1_signer.error_to_string
+  in
+  let result =
+    Native_conflicts.resolve ~root ~plan ~conflict ~choice ~signer
+    |> require_integration
+  in
+  let plan_id =
+    Core.Plan_id.to_hex (Integration.id result.Native_conflicts.prepared)
+  in
+  let actions =
+    if not result.Native_conflicts.retained then
+      [
+        action ~root
+          ([
+             "resolve";
+             identity;
+             "--plan";
+             Core.Plan_id.to_hex result.Native_conflicts.source;
+           ]
+          @
+          match choice with
+          | Native_conflicts.Use value -> [ "--use"; value ]
+          | Native_conflicts.File value -> [ "--file"; value ]
+          | Native_conflicts.Defer -> [ "--defer" ])
+          "The scoped proposal was recorded; retry the same explicit choice to \
+           retain its integration plan.";
+      ]
+    else
+      [
+        action ~root
+          [ "conflicts"; "--plan"; plan_id ]
+          "Inspect remaining conflicts and exact named versions.";
+        action ~root
+          [ "integrate"; "--plan"; plan_id; "--preview" ]
+          "Inspect this exact plan before explicit acceptance.";
+      ]
+  in
+  let message =
+    if result.Native_conflicts.deferred then
+      "Conflict deferred; files, history and shared state are unchanged."
+    else if not result.Native_conflicts.retained then
+      "Scoped resolution proposal recorded, but its integration plan could not \
+       be retained. Retry the exact choice; no acceptance or file replacement \
+       occurred."
+    else if result.Native_conflicts.public_resolution = None then
+      "Private workspace choice retained in a fresh plan; shared contents, \
+       files and history are unchanged."
+    else
+      "Scoped shared resolution proposal recorded and a fresh plan retained; \
+       files and accepted history are unchanged."
+  in
+  if requested_format () = Json_format then
+    domain_json ~plan_id
+      ~outcome:
+        (if result.Native_conflicts.deferred then `Unchanged
+         else if result.Native_conflicts.retained then `Completed
+         else `Incomplete)
+      ~code:
+        (if result.Native_conflicts.deferred then "conflict-deferred"
+         else if result.Native_conflicts.retained then "resolution-prepared"
+         else "resolution-plan-incomplete")
+      ~message
+      ~data:
+        (`Assoc
+           [
+             ( "source_plan_id",
+               `String (Core.Plan_id.to_hex result.Native_conflicts.source) );
+             ("conflict_id", `String identity);
+             ("deferred", `Bool result.Native_conflicts.deferred);
+             ( "public_resolution",
+               json_optional
+                 (fun id -> `String (Core.Record_id.to_hex id))
+                 result.Native_conflicts.public_resolution );
+             ("retained", `Bool result.Native_conflicts.retained);
+             ( "retention_error",
+               json_optional
+                 (fun value -> `String value)
+                 result.Native_conflicts.retention_error );
+             ( "plan",
+               integration_plan_json ~root result.Native_conflicts.prepared );
+           ])
+      ~next_actions:actions ()
+  else (
+    print_endline message;
+    render_integration_plan ~root result.Native_conflicts.prepared);
+  if not result.Native_conflicts.retained then exit 8
 
 let run_native_operation ~resume arguments =
   let flags, remaining = parse_local_selection_flags arguments in
@@ -8572,8 +8868,11 @@ let dispatch () =
       observe_after_success [ "withdraw" ] arguments (fun () ->
           run_withdraw arguments)
   | _ :: "resolve" :: arguments ->
-      observe_after_success [ "resolve" ] arguments (fun () ->
-          run_resolve arguments)
+      if List.mem "--decision" arguments then
+        observe_after_success [ "resolve" ] arguments (fun () ->
+            run_resolve arguments)
+      else run_native_resolve arguments
+  | _ :: "conflicts" :: arguments -> run_conflicts arguments
   | _ :: "decision" :: "show" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "inspect" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "diff" :: arguments -> run_decision_diff arguments

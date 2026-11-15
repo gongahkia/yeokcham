@@ -128,6 +128,18 @@ let context loaded =
   in
   Ok (local, collaboration, authority)
 
+let require_idle ~root loaded =
+  let* () = no_restore root in
+  let* () = Clone_guard.require_normal loaded |> metadata in
+  let* local, _, _ = context loaded in
+  match Local.pending_operation local with
+  | None -> Ok ()
+  | Some operation ->
+      Error
+        (Metadata
+           ("integration is incomplete; inspect operation "
+           ^ Core.Operation_id.to_hex operation.Operation.token))
+
 let snapshot identity =
   let* raw =
     Raw.Stored_object_id.of_raw_bytes (Core.Object_id.to_raw identity)
@@ -166,8 +178,15 @@ let observe_tree root store =
   in
   Ok (identity, observed, observation)
 
-let prepare_with ~clone ~resolution_ids ~root ~selected_revisions
-    ~reconcile_heads =
+let check_plan ~root ~store ~safety ~observation plan =
+  match Plan.readiness plan with
+  | Plan.Ready outputs ->
+      let* target = snapshot outputs.Core.workspace_snapshot in
+      Safe_apply.check ~root ~store ~safety ~target observation |> physical
+  | Plan.Conflicted _ | Plan.Decision _ -> Ok ()
+
+let prepare_with ~clone ~workspace_decisions ~resolution_ids ~root
+    ~selected_revisions ~reconcile_heads =
   with_writer ~root (fun repository ->
       let* () = no_restore root in
       let* loaded = Store.load repository |> store_error in
@@ -190,27 +209,21 @@ let prepare_with ~clone ~resolution_ids ~root ~selected_revisions
       let store = Store.underlying_store repository in
       let* safety, observed, observation = observe_tree root store in
       let* plan =
-        Plan.prepare_resolved ~resolution_ids ~store ~loaded ~observed
-          ~observation ~selected_revisions ~reconcile_heads
+        Plan.prepare_decided ~workspace_decisions ~resolution_ids ~store ~loaded
+          ~observed ~observation ~selected_revisions ~reconcile_heads
         |> plan_error
       in
-      let* () =
-        match Plan.readiness plan with
-        | Plan.Ready outputs ->
-            let* target = snapshot outputs.Core.workspace_snapshot in
-            Safe_apply.check ~root ~store ~safety ~target observation
-            |> physical
-        | Plan.Conflicted _ | Plan.Decision _ -> Ok ()
-      in
+      let* () = check_plan ~root ~store ~safety ~observation plan in
       let* () = Plan.retain ~store plan |> plan_error in
       Ok plan)
 
-let prepare = prepare_with ~clone:None ~resolution_ids:[]
-let prepare_resolved = prepare_with ~clone:None
+let prepare_decided = prepare_with ~clone:None
+let prepare_resolved = prepare_decided ~workspace_decisions:[]
+let prepare = prepare_resolved ~resolution_ids:[]
 
 let prepare_clone ~root ~request =
-  prepare_with ~clone:(Some request) ~resolution_ids:[] ~root
-    ~selected_revisions:[] ~reconcile_heads:None
+  prepare_with ~clone:(Some request) ~workspace_decisions:[] ~resolution_ids:[]
+    ~root ~selected_revisions:[] ~reconcile_heads:None
 
 let save ~observe repository loaded ~local ~project ~history =
   let* _, collaboration, _ = context loaded in

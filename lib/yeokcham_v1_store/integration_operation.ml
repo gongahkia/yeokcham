@@ -407,7 +407,78 @@ let[@warning "-4"] control_record_ids = function
       else Error "noncanonical integration control references"
   | _ -> Error "invalid integration control references"
 
-let[@warning "-4"] plan_outputs store scope plan plan_object =
+let[@warning "-4"] normalise_plan_control payload =
+  match payload with
+  | E.Array
+      [
+        E.Integer 2L;
+        request;
+        selection;
+        observation;
+        known;
+        accepted;
+        readiness;
+        E.Bool no_op;
+        E.Array rows;
+      ]
+    when rows <> [] && List.length rows <= Core.max_references - 5 ->
+      let* decisions =
+        traverse
+          (function
+            | E.Array [ E.Array parts; E.Bytes raw ] ->
+                let* path =
+                  traverse
+                    (function
+                      | E.Bytes part -> Ok part
+                      | _ -> Error "malformed private decision path")
+                    parts
+                in
+                let* () =
+                  Composition.validate_path path
+                  |> Result.map_error Composition.error_to_string
+                in
+                let* replacement = Core.Object_id.of_raw raw |> model in
+                Ok (path, replacement)
+            | _ -> Error "malformed private decision")
+          rows
+      in
+      let paths = List.map fst decisions in
+      let rec prefix a b =
+        match (a, b) with
+        | [], _ -> true
+        | x :: xs, y :: ys when x = y -> prefix xs ys
+        | _ :: _, [] | _ :: _, _ :: _ -> false
+      in
+      let* _ =
+        List.fold_left
+          (fun acc path ->
+            let* previous = acc in
+            if List.exists (fun p -> prefix p path || prefix path p) previous
+            then Error "overlapping private decisions"
+            else Ok (path :: previous))
+          (Ok []) paths
+      in
+      if paths <> List.sort_uniq Stdlib.compare paths || no_op then
+        Error "noncanonical private decisions"
+      else
+        let* payload =
+          array
+            [
+              E.integer 1L;
+              request;
+              selection;
+              observation;
+              known;
+              accepted;
+              readiness;
+              E.bool no_op;
+            ]
+        in
+        Ok (payload, decisions)
+  | payload -> Ok (payload, [])
+
+let[@warning "-4"] plan_outputs ?(verify_workspace = false) store scope plan
+    plan_object =
   let* envelope =
     Raw.get ~max_bytes:(8 * 1024 * 1024) store plan_object
     |> Result.map_error Raw.error_to_string
@@ -425,7 +496,10 @@ let[@warning "-4"] plan_outputs store scope plan plan_object =
     || not (Core.Plan_id.equal identity plan)
   then Error "integration operation references the wrong plan control"
   else
-    match Envelope.payload envelope with
+    let* payload, decisions =
+      normalise_plan_control (Envelope.payload envelope)
+    in
+    match payload with
     | E.Array
         [
           E.Integer 1L;
@@ -477,6 +551,36 @@ let[@warning "-4"] plan_outputs store scope plan plan_object =
           || declared <> Core.Object_id.to_raw accepted
         then Error "integration operation plan scope/output mismatch"
         else
+          let* () =
+            if (not verify_workspace) || decisions = [] then Ok ()
+            else
+              let load id =
+                Composition.load store id
+                |> Result.map_error Composition.error_to_string
+              in
+              let* base = load known in
+              let* accepted_tree = load accepted in
+              let* observed_tree = load safety in
+              let* target_tree = load target in
+              let* choices =
+                traverse
+                  (fun (path, id) ->
+                    let* replacement = load id in
+                    Ok (path, replacement))
+                  decisions
+              in
+              let* expected =
+                Composition.merge_resolved store ~base
+                  ~variants:[ accepted_tree; observed_tree ]
+                  ~decisions:choices
+                |> Result.map_error Composition.error_to_string
+              in
+              if Composition.differences expected target_tree = [] then Ok ()
+              else
+                Error
+                  "private workspace result does not match its exact plan \
+                   decisions"
+          in
           Ok
             ( branch,
               cursor,
@@ -485,14 +589,15 @@ let[@warning "-4"] plan_outputs store scope plan plan_object =
               accepted,
               target,
               List.sort_uniq Core.Object_id.compare
-                [ safety; accepted; target; basis_snapshot; known ] )
+                ([ safety; accepted; target; basis_snapshot; known ]
+                @ List.map snd decisions) )
     | _ ->
         Error "integration operation requires a supported non-no-op Ready plan"
 
 let make ~store ~repository ~token ~plan ~plan_object ~source ~target_sequence
     ~accepted ~staged ~physical_digest ~expected ~created_at =
   let* branch, cursor, working_basis, safety, _, target, protected =
-    plan_outputs store repository plan plan_object
+    plan_outputs ~verify_workspace:true store repository plan plan_object
   in
   let* expected_root =
     Raw.Mutable_ref.target expected
@@ -960,7 +1065,8 @@ let[@warning "-4"] control_inputs store t =
     Raw.get ~max_bytes:(8 * 1024 * 1024) store t.plan_object
     |> Result.map_error Raw.error_to_string
   in
-  match Envelope.payload envelope with
+  let* payload, _ = normalise_plan_control (Envelope.payload envelope) in
+  match payload with
   | E.Array
       [
         E.Integer 1L;
@@ -997,7 +1103,9 @@ let[@warning "-4"] validate ~store ~authority pool operations =
     traverse
       (fun t ->
         let* _, _, _, _, accepted_snapshot, _, _ =
-          plan_outputs store (Core.pool_repository pool) t.plan t.plan_object
+          plan_outputs ~verify_workspace:(pending t) store
+            (Core.pool_repository pool)
+            t.plan t.plan_object
         in
         let* staged =
           traverse

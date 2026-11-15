@@ -200,10 +200,15 @@ let commands =
     command [ "operation"; "forget" ]
       ~options:[ root; flag "--preview"; flag "--yes"; identifier "--plan" ];
     command ~hook:true [ "withdraw" ] ~options:[ root; identifier "--change" ];
+    command [ "conflicts" ] ~options:[ root; identifier "--plan" ];
     command ~hook:true [ "resolve" ]
       ~options:
         [
           root;
+          identifier "--plan";
+          option "--use" Free_argument;
+          path "--file";
+          flag "--defer";
           identifier "--decision";
           identifier "--change";
           identifier "--revision";

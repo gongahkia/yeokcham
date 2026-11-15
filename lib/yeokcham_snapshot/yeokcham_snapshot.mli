@@ -75,6 +75,24 @@ module Content : sig
       content. *)
 end
 
+type captured_file = private {
+  captured_content : Content.id;
+  captured_mode : file_mode;
+  captured_fingerprint : string;
+}
+
+val capture_regular_file :
+  store:Yeokcham_store.repository ->
+  path:string ->
+  (captured_file, error) result
+(** Stream an explicit replacement using the existing native capture/chunker.
+    Refuse symlinks/special files and retry at most three unstable observations.
+*)
+
+val validate_captured_file :
+  path:string -> captured_file -> (unit, error) result
+(** Recheck the exact native file identity after signing or confirmation. *)
+
 module Chunk : sig
   type id
 
@@ -234,6 +252,12 @@ val explain_ignore :
 
 module For_test : sig
   type stage = Before_open | After_read | Before_publish
+
+  val capture_regular_file :
+    observe:(stage -> string list -> unit) ->
+    store:Yeokcham_store.repository ->
+    path:string ->
+    (captured_file, error) result
 
   val scan :
     observe:(stage -> string list -> unit) ->

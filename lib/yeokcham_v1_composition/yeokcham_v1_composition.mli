@@ -48,6 +48,23 @@ val merge :
 (** Only immutable content/tree objects can be staged. No working-file, state
     root, cursor, accepted-history or publication mutation. *)
 
+val replace_subtree :
+  base:tree -> path:path -> replacement:tree -> (tree, error) result
+(** Exact subtree choice, including absence. Adds only necessary directory
+    ancestors; refuses to replace an undecided ancestor file. *)
+
+val validate_decision :
+  base:tree -> path:path -> replacement:tree -> (unit, error) result
+
+val merge_resolved :
+  Yeokcham_store.repository ->
+  base:tree ->
+  variants:tree list ->
+  decisions:(path * tree) list ->
+  (tree, error) result
+(** Explicit whole-path choices over actual merge conflicts. Rejects unused,
+    overlapping or out-of-scope choices; remaining conflicts stay explicit. *)
+
 module Scope : sig
   val max_page_bytes : int
 

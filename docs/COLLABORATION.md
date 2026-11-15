@@ -211,12 +211,45 @@ of triggering rollback. Incomplete integration blocks ordinary capture/navigatio
 and keeps its safety/target roots protected.
 
 Divergent branch histories require explicitly naming every event and accepted
-head with repeated `--reconcile ID`; `--yes` alone never selects a winner. Conflict
-plans identify shared/private paths and exact variants. Complete native conflict
-resolution is still P3 work; the older
-`resolve --decision` and package flows below are a different record family.
-Required unsupported policy refuses explicitly. These local commands do not yet
-complete the two-person native clone/exchange pilot.
+head with repeated `--reconcile ID`; `--yes` alone never selects a winner. Required
+unsupported policy refuses explicitly. The complete P3 criterion and two-person
+resolution audit remains open.
+
+## Preparing exact conflict choices
+
+```sh
+yeokcham conflicts
+yeokcham conflicts --plan PLAN_ID
+yeokcham resolve CONFLICT_ID --defer
+yeokcham resolve CONFLICT_ID --use VERSION_ID
+yeokcham resolve CONFLICT_ID --file /path/to/combined-contents
+yeokcham conflicts --plan NEW_PLAN_ID
+yeokcham integrate --plan NEW_PLAN_ID --preview
+yeokcham integrate --plan NEW_PLAN_ID --yes
+```
+
+`conflicts` shows exact shared/private paths and named versions, including
+absence, type/mode/content identities and an escaped preview up to 8192 bytes.
+Use the printed version identity, such as `revision:RECORD_ID`, to select exact
+contents. For an overlapping private conflict, `working` retains private disk
+contents while `accepted` selects the proposed shared result. Shared and private
+choices stay distinct: a shared choice records a scoped authenticated resolution
+proposal; a private choice belongs only to the new local plan. Neither accepts
+work, advances private history or changes ordinary files. Deferral preserves the
+proposal. Explicit replacement files must be stable regular files; capture streams
+large bytes, preserves the executable distinction and refuses symlinks/special files.
+
+Resolution prints a fresh plan ID for further inspection and explicit integration.
+Default inspection retains incomparable plan alternatives rather than selecting
+an arrival-order winner. Stale inputs require fresh preparation; a recorded exact
+shared choice can be retried without another signature. Signing never holds the
+worktree writer lock. If a shared proposal was recorded but its local plan alias
+could not be retained, the command reports incomplete preparation and an exact
+retry action, with no acceptance or ordinary-file change.
+
+These native commands are distinct from the earlier V1 `resolve --decision` and
+package flows below. Local automated resolution journeys are implemented; the
+full Alice/Bob native TLS resolution loop and final P3 audit remain required.
 
 ## Recovering a pending integration
 

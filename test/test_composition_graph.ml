@@ -673,6 +673,40 @@ let dependency_conflicts_bind_every_superseded_variant () =
            (body_accepted ~parents ~chosen ~resolutions:[ id 's' ] expected))
       |> graph)
 
+let nested_decision_keeps_only_necessary_parent_structure () =
+  with_store (fun store ->
+      let pool, empty = fixture store in
+      let nested bytes =
+        C.tree
+          [
+            ([ "folder" ], C.Directory);
+            ( [ "folder"; "note" ],
+              C.File
+                {
+                  mode = S.Regular;
+                  content = S.Content.store store bytes |> ok S.error_to_string;
+                } );
+          ]
+        |> composed
+      in
+      let pool, _ =
+        publish store pool '1' ~change:(change 'a') ~base:empty (nested "left")
+      in
+      let pool, _ =
+        publish store pool '2' ~change:(change 'b') ~base:empty (nested "right")
+      in
+      let parents = [ id 'g' ] and chosen = [ id '1'; id '2' ] in
+      let replacement = nested "chosen" in
+      let expected = C.store store replacement |> composed in
+      let pool =
+        resolution store pool 's' ~parents ~chosen ~path:[ "folder"; "note" ]
+          ~comparison:empty replacement
+      in
+      G.validate store pool |> graph;
+      snapshot_equals store expected
+        (G.compose ~resolutions:[ id 's' ] store pool ~parents ~revisions:chosen
+        |> graph))
+
 let () =
   Alcotest.run "Core accepted composition graph"
     [
@@ -715,5 +749,8 @@ let () =
           Alcotest.test_case
             "resolution names conflicts inside the selected dependency closure"
             `Quick dependency_conflicts_bind_every_superseded_variant;
+          Alcotest.test_case
+            "nested decisions allow only their necessary parent structure"
+            `Quick nested_decision_keeps_only_necessary_parent_structure;
         ] );
     ]

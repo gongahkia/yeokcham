@@ -43,6 +43,25 @@ type boundary =
   | Recovery_completed_root
   | Recovery_mutation of Safe_apply.boundary * string list
 
+val with_writer :
+  root:string ->
+  (Yeokcham_v1_store.repository -> ('a, error) result) ->
+  ('a, error) result
+(** Shared native worktree writer boundary. Reload state in the callback and
+    release the lock before calling a signing provider or waiting for a person.
+*)
+
+val require_idle :
+  root:string -> Yeokcham_v1_store.loaded -> (unit, error) result
+
+val check_plan :
+  root:string ->
+  store:Yeokcham_store.repository ->
+  safety:Yeokcham_snapshot.Snapshot.id ->
+  observation:Yeokcham_snapshot.Observation.t ->
+  Plan.t ->
+  (unit, error) result
+
 val prepare :
   root:string ->
   selected_revisions:Core.Record_id.t list ->
@@ -52,6 +71,16 @@ val prepare :
     Does not advance private/accepted history or mutate ordinary files. *)
 
 val prepare_resolved :
+  resolution_ids:Core.Record_id.t list ->
+  root:string ->
+  selected_revisions:Core.Record_id.t list ->
+  reconcile_heads:Core.Record_id.t list option ->
+  (Plan.t, error) result
+(** Captures a complete observation, prepares and retains an immutable proposal.
+    Does not advance private/accepted history or mutate ordinary files. *)
+
+val prepare_decided :
+  workspace_decisions:Plan.workspace_decision list ->
   resolution_ids:Core.Record_id.t list ->
   root:string ->
   selected_revisions:Core.Record_id.t list ->

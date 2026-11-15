@@ -282,6 +282,42 @@ let select ~base ~observed ~paths:selected ~excluded =
   in
   tree (entries result)
 
+let minimal_paths paths =
+  List.sort_uniq Stdlib.compare paths
+  |> List.filter (fun path ->
+      not
+        (List.exists
+           (fun ancestor -> ancestor <> path && prefix ancestor path)
+           paths))
+
+let replace_subtree ~base:target ~path ~replacement =
+  let* () = valid_path path in
+  let result =
+    Paths.filter (fun candidate _ -> not (prefix path candidate)) target
+  in
+  let subtree =
+    Paths.filter (fun candidate _ -> prefix path candidate) replacement
+  in
+  let* result =
+    Paths.fold
+      (fun candidate entry acc ->
+        let* result = acc in
+        let rec ensure ancestor result =
+          match ancestor with
+          | [] -> Ok result
+          | ancestor -> (
+              match Paths.find_opt ancestor result with
+              | Some (File _) -> Error (Conflicts [ ancestor ])
+              | Some Directory | None ->
+                  ensure (parent ancestor) (Paths.add ancestor Directory result)
+              )
+        in
+        let* result = ensure (parent candidate) result in
+        Ok (Paths.add candidate entry result))
+      subtree (Ok result)
+  in
+  tree (entries result)
+
 let merge repository ~base ~variants =
   let choose same before values =
     let changed = List.filter (fun value -> not (same value before)) values in
@@ -364,6 +400,69 @@ let merge repository ~base ~variants =
   | Some e, _ -> Error e
   | None, _ :: _ -> Error (Conflicts (List.sort_uniq Stdlib.compare conflicts))
   | None, [] -> tree (entries result)
+
+let validate_decision ~base ~path ~replacement =
+  let* expected = replace_subtree ~base ~path ~replacement in
+  if differences expected replacement = [] then Ok ()
+  else
+    Error
+      (Invalid_input
+         "replacement changes contents outside its explicit decision")
+
+let merge_resolved repository ~base ~variants ~decisions =
+  let* () =
+    if List.length decisions <= Core.max_references then Ok ()
+    else Error (Invalid_input "too many workspace decisions")
+  in
+  let* _ =
+    List.fold_left
+      (fun acc (path, replacement) ->
+        let* seen = acc in
+        let* () = validate_decision ~base ~path ~replacement in
+        if
+          List.exists
+            (fun previous -> prefix previous path || prefix path previous)
+            seen
+        then Error (Invalid_input "overlapping workspace decisions")
+        else Ok (path :: seen))
+      (Ok []) decisions
+  in
+  let mask paths tree =
+    Paths.filter
+      (fun path _ -> not (List.exists (fun chosen -> prefix chosen path) paths))
+      tree
+  in
+  let rec apply installed pending =
+    match
+      merge repository
+        ~base:(mask (List.map fst installed) base)
+        ~variants:(List.map (mask (List.map fst installed)) variants)
+    with
+    | Error (Conflicts paths) ->
+        let paths = minimal_paths paths in
+        let ready, pending =
+          List.partition (fun (path, _) -> List.mem path paths) pending
+        in
+        if ready = [] then
+          if pending = [] then Error (Conflicts paths)
+          else
+            Error
+              (Invalid_input "workspace decision does not address a conflict")
+        else apply (installed @ ready) pending
+    | Error ((Invalid_input _ | Unavailable _ | Integrity _) as error) ->
+        Error error
+    | Ok _ when pending <> [] ->
+        Error
+          (Invalid_input
+             "workspace decision targets contents that do not conflict")
+    | Ok target ->
+        List.fold_left
+          (fun acc (path, replacement) ->
+            let* target = acc in
+            replace_subtree ~base:target ~path ~replacement)
+          (Ok target) installed
+  in
+  apply [] (List.sort (fun (a, _) (b, _) -> Stdlib.compare a b) decisions)
 
 module Scope = struct
   let max_page_bytes = 1024 * 1024
@@ -839,8 +938,10 @@ module Graph = struct
       in
       match scope with
       | [ path ] ->
-          if List.for_all (prefix path) (differences before replacement) then
-            Ok (path, replacement)
+          let* expected =
+            replace_subtree ~base:before ~path ~replacement |> content
+          in
+          if differences expected replacement = [] then Ok (path, replacement)
           else
             Error
               (Invalid_graph
@@ -848,41 +949,6 @@ module Graph = struct
                   path")
       | [] | _ :: _ :: _ ->
           Error (Invalid_graph "resolution scope must contain exactly one path")
-
-  let minimal_paths paths =
-    List.sort_uniq Stdlib.compare paths
-    |> List.filter (fun path ->
-        not
-          (List.exists
-             (fun ancestor -> ancestor <> path && prefix ancestor path)
-             paths))
-
-  let splice target path replacement =
-    let result =
-      Paths.filter (fun candidate _ -> not (prefix path candidate)) target
-    in
-    let subtree =
-      Paths.filter (fun candidate _ -> prefix path candidate) replacement
-    in
-    let* result =
-      Paths.fold
-        (fun candidate entry acc ->
-          let* result = acc in
-          let rec ensure ancestor result =
-            match ancestor with
-            | [] -> Ok result
-            | ancestor -> (
-                match Paths.find_opt ancestor result with
-                | Some (File _) -> Error (Conflicts [ ancestor ])
-                | Some Directory | None ->
-                    ensure (parent ancestor)
-                      (Paths.add ancestor Directory result))
-          in
-          let* result = ensure (parent candidate) result in
-          Ok (Paths.add candidate entry result))
-        subtree (Ok result)
-    in
-    tree (entries result)
 
   let compose_unresolved context ~masked ~parents ~revisions =
     let mask tree =
@@ -1080,7 +1146,7 @@ module Graph = struct
           List.fold_left
             (fun acc (path, replacement) ->
               let* target = acc in
-              splice target path replacement |> content)
+              replace_subtree ~base:target ~path ~replacement |> content)
             (Ok target) installed
     in
     apply [] decisions

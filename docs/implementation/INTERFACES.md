@@ -1956,8 +1956,95 @@ Native tests apply text and large opaque choices, preserve unrelated private E,
 retry without a signer and interrupt at actual file/Prepared/Materialized/Committed
 boundaries without duplicate acceptance/navigation.
 
-This is a connected record/graph/plan/application prerequisite. Ordinary native
-`conflicts`/`resolve` commands, named-version/replacement-file journeys and private
-workspace choices remain unfinished; the earlier V1 `resolve --decision` family
-does not supply them. P3 and its full end-to-end resolution/authority/fault audit
-are incomplete. No review, native custody, human or cross-OS qualification is claimed.
+The following native commands now consume this record/graph/plan/application
+boundary. The earlier V1 `resolve --decision` family remains separate.
+
+### P3 native conflict preparation and private workspace decisions
+
+`Local_service.Conflicts = Native_resolution` exposes `inspect ~root ~plan` and
+`resolve ~root ~plan ~conflict ~choice ~signer`. Inspection returns current plans
+and conflicts with exact identities, byte paths, shared/private scope, named
+versions, snapshot/content identities and an escaped contents preview bounded
+at 8192 bytes. Larger contents retain their identities and an explicit truncated
+marker; complete closure verification uses existing bounded streaming.
+Version names include `comparison`, `revision:RECORD_ID`, `accepted:RECORD_ID`
+and, for a private conflict, `accepted` and `working`. Absence, directories,
+regular/executable files and symlinks remain distinct.
+
+The conflict digest is SHA-256 of `yeokcham/integration-conflict/v1\0` followed
+by canonical `[plan_id_bytes, path_component_bytes, private_workspace_bool]`.
+It binds the exact source proposal rather than an arrival-order index. Explicit
+`--plan` always revalidates that proposal. Default inspection revalidates current
+retained alternatives, discards stale observations and suppresses only plans with
+strictly fewer identical decisions in the same exact context. Incomparable
+decisions remain separate plans. If no current proposal remains, inspection
+prepares all eligible exact heads, including every incomparable change revision;
+composition reports their conflict instead of choosing a head. Divergent branch
+heads still require explicit preparation naming every causal head.
+
+`Plan.context_identity` hashes `yeokcham/integration-context/v1\0` followed by
+canonical `[request_with_empty_resolution_set, selection_root, filesystem_digest]`.
+It groups decision alternatives over the same frozen inputs; it is never an
+application identity or permission to select among incomparable decisions.
+`Plan.plan_observation` exposes the captured digest without rescanning disk.
+
+`Use VERSION`, `File PATH` and `Defer` are the only native resolution choices.
+Deferral changes no project root or files. Shared choices create one exact scoped
+authenticated resolution proposal and a fresh plan. Source, authority and target
+are revalidated after the signing provider returns, outside the writer lock;
+unchanged retained bodies reuse their signed identity without invoking a provider.
+Unrelated receipts remain in the fresh root. The root publication preserves
+project/history/branch selection and accepts no work. If root publication succeeds
+but alias retention fails, the outcome includes the actual source/conflict,
+resolution/plan identities and `retained=false`; the CLI exits 8 with an exact
+retry action instead of claiming completed preparation.
+
+Private choices use `Plan.make_workspace_decision ~path ~replacement_snapshot`
+and `prepare_decided ~workspace_decisions ~resolution_ids ...`. They require a
+complete accepted proposal, invoke no signer, publish no Core resolution record
+and change no project root. Plan 46 schema 1 remains byte-stable for no private
+decisions. Schema 2 is exactly:
+
+```text
+[2, request, selection_root, filesystem_digest, known_present_snapshot,
+ accepted_snapshot, readiness, false,
+ [[path_component_bytes, replacement_snapshot], ...]]
+```
+
+Decision rows are nonempty, sorted and unique by byte path, contain no ancestor/
+descendant overlaps, and are bounded to `Core.max_references - 5` so operation
+protection can retain the five base roots plus every replacement. Both decoder
+and journal-control reader enforce shape, identifiers, paths, ordering and bounds.
+`Composition.replace_subtree` copies exactly the chosen subtree or absence,
+adding only necessary directory ancestors and refusing an undecided ancestor file.
+`merge_resolved` installs choices over actual conflicts, rejects unused/overlapping/
+out-of-scope decisions, and reports unresolved paths. Preparation and pending
+operation verification recompute the private result from known-present, accepted,
+observed and replacement contents; a declared Ready output is not sufficient.
+Replacement snapshots are protected by proposal and incomplete-operation roots.
+Completed journals remain inspectable after released private objects expire.
+
+`Snapshot.capture_regular_file ~store ~path` streams explicit replacements through
+the native scanner/chunker. Its private `captured_file` carries content, executable
+distinction and a file identity fingerprint. It refuses final symlinks/special
+files and bounds instability retries at three. `validate_captured_file` rechecks
+the identity after signing; the replacement is captured again under the writer
+and its exact snapshot compared before publication, including after intervening GC.
+The source file is never copied into the public tree except at the chosen path.
+
+`Native_integration.with_writer`, `require_idle` and `check_plan` provide the
+existing writer/pending-operation/preflight boundary to this consumer. Actual
+integration remains a separate preview/confirmation through `integrate --plan`.
+Native preparation executes no project hooks. Legacy `resolve --decision`
+keeps its existing explicit V1 behavior and hook routing.
+
+Independent Python CBOR/envelope/SHA-256 vectors cover schemas 1 and 2 in
+`test/golden/integration`; `For_test.encode_control` uses the production encoder
+and returns bytes only, never an applicable plan. Negative tests include duplicate,
+unsorted/overlapping/invalid decisions, false Ready outputs and changed sources.
+Fresh CLI processes exercise exact named choices, deferral, signature-free retry,
+separate accepted D/private E, streamed executable replacements, stale/unknown
+choices and JSON/plain output. Native tests interrupt private decisions at real
+Prepared/file/Materialized/Committed facts and retain private E in the safety root.
+P3's two-person TLS resolution extension and full criterion/authority/error/fault
+audit remain incomplete. No native custody, human or cross-OS qualification is claimed.

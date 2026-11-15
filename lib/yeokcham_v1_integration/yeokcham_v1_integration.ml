@@ -33,6 +33,11 @@ type readiness =
   | Conflicted of Core.conflict list
   | Decision of string
 
+type workspace_decision = {
+  decision_path : string list;
+  decision_replacement : Core.Object_id.t;
+}
+
 type t = {
   identity : Core.Plan_id.t;
   stored : Raw.Stored_object_id.t;
@@ -44,6 +49,10 @@ type t = {
   known_present : Core.Object_id.t;
   contributions : Local.publication list;
   no_op : bool;
+  workspace_decisions : workspace_decision list;
+  observation_digest : Core.Digest.t;
+  context_binding : Core.Digest.t;
+  selection_object : Raw.Stored_object_id.t;
 }
 
 let id t = t.identity
@@ -56,10 +65,51 @@ let accepted_snapshot t = t.accepted_snapshot
 let known_present t = t.known_present
 let contributions t = t.contributions
 let no_op t = t.no_op
+let workspace_decisions t = t.workspace_decisions
+let plan_observation t = t.observation_digest
+let context_identity t = t.context_binding
 let ( let* ) = Result.bind
 let metadata r = Result.map_error (fun s -> Metadata s) r
 let model r = Result.map_error (fun e -> Invalid (Core.error_to_string e)) r
 let content r = Result.map_error (fun e -> Content e) r
+
+let make_workspace_decision ~path ~replacement_snapshot =
+  let* () = Composition.validate_path path |> content in
+  Ok { decision_path = path; decision_replacement = replacement_snapshot }
+
+let path_prefix parent path =
+  let rec loop parent path =
+    match (parent, path) with
+    | [], _ -> true
+    | x :: xs, y :: ys when x = y -> loop xs ys
+    | _ :: _, [] | _ :: _, _ :: _ -> false
+  in
+  loop parent path
+
+let normalise_decisions values =
+  let* () =
+    if List.length values <= Core.max_references - 5 then Ok ()
+    else Error (Invalid "too many workspace decisions")
+  in
+  let sorted =
+    List.sort (fun a b -> Stdlib.compare a.decision_path b.decision_path) values
+  in
+  let* _ =
+    List.fold_left
+      (fun acc value ->
+        let* previous = acc in
+        let* () = Composition.validate_path value.decision_path |> content in
+        if
+          List.exists
+            (fun path ->
+              path_prefix path value.decision_path
+              || path_prefix value.decision_path path)
+            previous
+        then Error (Invalid "overlapping workspace decisions")
+        else Ok (value.decision_path :: previous))
+      (Ok []) sorted
+  in
+  Ok sorted
 
 let graph r =
   Result.map_error (fun e -> Invalid (Composition.Graph.error_to_string e)) r
@@ -102,6 +152,50 @@ let traverse f values =
       Ok (value :: rows))
     (Ok []) values
   |> Result.map List.rev
+
+let encode_decisions decisions =
+  let* values =
+    traverse
+      (fun value ->
+        let* parts = path value.decision_path in
+        array [ parts; raw_object value.decision_replacement ])
+      decisions
+  in
+  array values
+
+let make_context_binding request selection observation =
+  let* request =
+    match request with
+    | E.Array fields ->
+        let* empty = array [] in
+        array (List.mapi (fun i field -> if i = 5 then empty else field) fields)
+    | E.Integer _ | E.Bytes _ | E.Text _ | E.Map _ | E.Bool _ | E.Null ->
+        Error (Integrity "invalid plan context request")
+  in
+  let* value = array [ request; raw_store selection; raw_digest observation ] in
+  Core.Digest.of_raw
+    (Hash.digest_string ("yeokcham/integration-context/v1\000" ^ E.encode value)
+    |> Hash.to_raw_string)
+  |> model
+
+let plan_payload ~request ~selection ~observation ~known ~accepted ~readiness
+    ~no_op ~decisions =
+  let fields =
+    [
+      request;
+      raw_store selection;
+      raw_digest observation;
+      raw_object known;
+      object_option accepted;
+      readiness;
+      E.bool no_op;
+    ]
+  in
+  match decisions with
+  | [] -> array (E.integer 1L :: fields)
+  | _ :: _ ->
+      let* choices = encode_decisions decisions in
+      array ((E.integer 2L :: fields) @ [ choices ])
 
 let filesystem_digest observation =
   let* entries =
@@ -190,7 +284,14 @@ let selection_root store pool revisions =
       (fun change ->
         let heads = Core.change_heads pool change in
         let* () =
-          if List.length heads > 1 then
+          if
+            List.length heads > 1
+            && not
+                 (List.for_all
+                    (fun head ->
+                      List.exists (Core.Record_id.equal head) revisions)
+                    heads)
+          then
             Error
               (Choice
                  "selected change has concurrent revisions; resolve its exact \
@@ -267,8 +368,34 @@ let encode_readiness = function
       let* detail = text detail in
       array [ E.integer 2L; detail ]
 
-let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
-    ~selected_revisions ~reconcile_heads =
+let control_envelope ~request ~selection ~observation ~known ~accepted
+    ~readiness ~no_op ~decisions =
+  let* payload =
+    plan_payload ~request ~selection ~observation ~known ~accepted ~readiness
+      ~no_op ~decisions
+  in
+  Envelope.create ~object_type:Envelope.Core_integration_plan
+    ~object_format_version:1 ~mandatory_features:0L ~payload ()
+  |> Result.map_error (fun e -> Invalid (Envelope.creation_error_to_string e))
+
+module For_test = struct
+  let encode_control ~request ~event_heads ~proof_root ~selection_root
+      ~observation_digest ~known_present ~accepted_snapshot ~readiness ~no_op
+      ~workspace_decisions =
+    let* decisions = normalise_decisions workspace_decisions in
+    let* request = encode_request request event_heads proof_root in
+    let* readiness = encode_readiness readiness in
+    let* envelope =
+      control_envelope ~request ~selection:selection_root
+        ~observation:observation_digest ~known:known_present
+        ~accepted:accepted_snapshot ~readiness ~no_op ~decisions
+    in
+    Ok (Envelope.encode envelope)
+end
+
+let prepare_decided ~workspace_decisions ~resolution_ids ~store ~loaded
+    ~observed ~observation ~selected_revisions ~reconcile_heads =
+  let* workspace_decisions = normalise_decisions workspace_decisions in
   let* local =
     loaded.Store.local
     |> Option.to_result
@@ -404,7 +531,10 @@ let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
         ~revisions:request.Core.selected_revisions
     with
     | Error (Composition.Graph.Content_error (Composition.Conflicts paths)) ->
-        Ok (None, conflicts ~private_workspace:false paths)
+        if workspace_decisions <> [] then
+          Error
+            (Invalid "workspace decisions require a complete accepted proposal")
+        else Ok (None, conflicts ~private_workspace:false paths)
     | Error
         (Composition.Graph.Content_error
            (( Composition.Invalid_input _ | Composition.Unavailable _
@@ -418,9 +548,18 @@ let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
           Composition.load store known.Preservation.known_present |> content
         in
         let* observed = Composition.load store observed_snapshot |> content in
+        let* decisions =
+          traverse
+            (fun choice ->
+              let* replacement =
+                Composition.load store choice.decision_replacement |> content
+              in
+              Ok (choice.decision_path, replacement))
+            workspace_decisions
+        in
         match
-          Composition.merge store ~base:known_tree
-            ~variants:[ accepted; observed ]
+          Composition.merge_resolved store ~base:known_tree
+            ~variants:[ accepted; observed ] ~decisions
         with
         | Error (Composition.Conflicts paths) ->
             Ok (Some accepted_snapshot, conflicts ~private_workspace:true paths)
@@ -452,30 +591,22 @@ let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
     Composition.Graph.represented pool [ selected.Local.basis ] |> graph
   in
   let no_op =
-    request.Core.resolution_ids = []
+    workspace_decisions = []
+    && request.Core.resolution_ids = []
     && branch.Core.accepted_heads = [ selected.Local.basis ]
     && List.length branch.Core.event_heads = 1
     && List.for_all
          (fun id -> List.exists (Core.Record_id.equal id) already)
          request.Core.selected_revisions
   in
-  let* payload =
-    array
-      [
-        E.integer 1L;
-        request_value;
-        raw_store selection_root;
-        raw_digest observation_digest;
-        raw_object known.Preservation.known_present;
-        object_option accepted_snapshot;
-        readiness_value;
-        E.bool no_op;
-      ]
+  let* context_binding =
+    make_context_binding request_value selection_root observation_digest
   in
   let* envelope =
-    Envelope.create ~object_type:Envelope.Core_integration_plan
-      ~object_format_version:1 ~mandatory_features:0L ~payload ()
-    |> Result.map_error (fun e -> Invalid (Envelope.creation_error_to_string e))
+    control_envelope ~request:request_value ~selection:selection_root
+      ~observation:observation_digest ~known:known.Preservation.known_present
+      ~accepted:accepted_snapshot ~readiness:readiness_value ~no_op
+      ~decisions:workspace_decisions
   in
   let bytes = Envelope.encode envelope in
   if String.length bytes > 8 * 1024 * 1024 then
@@ -501,8 +632,13 @@ let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
         known_present = known.Preservation.known_present;
         contributions = known.Preservation.contributions;
         no_op;
+        workspace_decisions;
+        observation_digest;
+        context_binding;
+        selection_object = selection_root;
       }
 
+let prepare_resolved = prepare_decided ~workspace_decisions:[]
 let prepare = prepare_resolved ~resolution_ids:[]
 
 let[@warning "-4"] decoded_model value =
@@ -566,6 +702,38 @@ let[@warning "-4"] decode ~store ~loaded bytes =
              ~none:(Integrity "plan workspace has no authenticated local state")
       in
       let pool = Local.pool local in
+      let* control, decision_values =
+        match Envelope.payload envelope with
+        | E.Array
+            [
+              E.Integer 2L;
+              request;
+              selection;
+              observation;
+              known;
+              accepted;
+              readiness;
+              E.Bool no_op;
+              E.Array decisions;
+            ]
+          when decisions <> []
+               && List.length decisions <= Core.max_references - 5 ->
+            let* control =
+              array
+                [
+                  E.integer 1L;
+                  request;
+                  selection;
+                  observation;
+                  known;
+                  accepted;
+                  readiness;
+                  E.bool no_op;
+                ]
+            in
+            Ok (control, decisions)
+        | control -> Ok (control, [])
+      in
       let* ( request_value,
              selection,
              observation_digest,
@@ -573,7 +741,7 @@ let[@warning "-4"] decode ~store ~loaded bytes =
              accepted_value,
              readiness_value,
              no_op ) =
-        match Envelope.payload envelope with
+        match control with
         | E.Array
             [
               E.Integer 1L;
@@ -867,6 +1035,30 @@ let[@warning "-4"] decode ~store ~loaded bytes =
         | value ->
             decoded_id Core.Object_id.of_raw value |> Result.map Option.some
       in
+      let* workspace_decisions =
+        traverse
+          (function
+            | E.Array [ parts; replacement ] ->
+                let* decision_path = decoded_path parts in
+                let* decision_replacement =
+                  decoded_id Core.Object_id.of_raw replacement
+                in
+                Ok { decision_path; decision_replacement }
+            | _ -> Error (Integrity "malformed workspace decision"))
+          decision_values
+      in
+      let* canonical =
+        normalise_decisions workspace_decisions
+        |> Result.map_error (fun error -> Integrity (error_to_string error))
+      in
+      let* () =
+        if
+          canonical = workspace_decisions
+          && (workspace_decisions = []
+             || (accepted_snapshot <> None && not no_op))
+        then Ok ()
+        else Error (Integrity "noncanonical or unbound workspace decisions")
+      in
       let* readiness =
         match readiness_value with
         | E.Array [ E.Integer 0L; accepted; working ] ->
@@ -919,17 +1111,13 @@ let[@warning "-4"] decode ~store ~loaded bytes =
       let* expected_request = encode_request request event_heads proof in
       let* expected_readiness = encode_readiness readiness in
       let* expected =
-        array
-          [
-            E.integer 1L;
-            expected_request;
-            raw_store selection;
-            raw_digest observation_digest;
-            raw_object known_present;
-            object_option accepted_snapshot;
-            expected_readiness;
-            E.bool no_op;
-          ]
+        plan_payload ~request:expected_request ~selection
+          ~observation:observation_digest ~known:known_present
+          ~accepted:accepted_snapshot ~readiness:expected_readiness ~no_op
+          ~decisions:workspace_decisions
+      in
+      let* context_binding =
+        make_context_binding expected_request selection observation_digest
       in
       if not (E.equal expected (Envelope.payload envelope)) then
         Error (Integrity "noncanonical integration plan control")
@@ -950,6 +1138,10 @@ let[@warning "-4"] decode ~store ~loaded bytes =
             known_present;
             contributions;
             no_op;
+            workspace_decisions;
+            observation_digest;
+            context_binding;
+            selection_object = selection;
           }
 
 let[@warning "-4"] input_bytes plan =
@@ -961,9 +1153,21 @@ let[@warning "-4"] input_bytes plan =
   | E.Array [ E.Integer 1L; request; selection; observation; _; _; _; _ ] ->
       let* inputs = array [ request; selection; observation ] in
       Ok (E.encode inputs)
+  | E.Array
+      [ E.Integer 2L; request; selection; observation; _; _; _; _; decisions ]
+    ->
+      let* inputs = array [ request; selection; observation; decisions ] in
+      Ok (E.encode inputs)
   | _ -> Error (Integrity "invalid prepared plan payload")
 
 let[@warning "-4"] revalidate ~store ~loaded ~observed ~observation plan =
+  let* current_observation = filesystem_digest observation in
+  let* () =
+    if Core.Digest.equal current_observation plan.observation_digest then Ok ()
+    else
+      Error
+        (Stale "workspace observation changed; prepare a fresh integration plan")
+  in
   let reconcile_heads =
     if
       List.length plan.request.Core.accepted_heads > 1
@@ -975,9 +1179,10 @@ let[@warning "-4"] revalidate ~store ~loaded ~observed ~observation plan =
     else None
   in
   let* current =
-    prepare_resolved ~resolution_ids:plan.request.Core.resolution_ids ~store
-      ~loaded ~observed ~observation
-      ~selected_revisions:plan.request.Core.selected_revisions ~reconcile_heads
+    prepare_decided ~workspace_decisions:plan.workspace_decisions
+      ~resolution_ids:plan.request.Core.resolution_ids ~store ~loaded ~observed
+      ~observation ~selected_revisions:plan.request.Core.selected_revisions
+      ~reconcile_heads
     |> Result.map_error (function
       | Choice detail -> Stale detail
       | error -> error)
@@ -1002,7 +1207,11 @@ let retention_roots plan =
   List.sort_uniq Core.Object_id.compare
     (workspace.Core.observed_snapshot :: workspace.Core.basis_snapshot
    :: plan.known_present
-    :: (Option.to_list plan.accepted_snapshot @ outputs))
+    :: (Option.to_list plan.accepted_snapshot
+       @ outputs
+       @ List.map
+           (fun value -> value.decision_replacement)
+           plan.workspace_decisions))
 
 let[@warning "-4"] revalidate_shared ~store ~loaded ~cursor plan =
   let* local =
@@ -1067,26 +1276,9 @@ let[@warning "-4"] revalidate_shared ~store ~loaded ~cursor plan =
     selection_root store (Local.pool local) plan.request.Core.selected_revisions
     |> Result.map_error (function Choice detail -> Stale detail | e -> e)
   in
-  let* envelope =
-    Envelope.decode plan.bytes
-    |> Result.map_error (fun e -> Integrity (Envelope.decode_error_to_string e))
-  in
-  match Envelope.payload envelope with
-  | E.Array
-      [
-        _schema;
-        _request;
-        selection;
-        _observation;
-        _known;
-        _accepted;
-        _readiness;
-        _no_op;
-      ] ->
-      let* selection = decoded_store selection in
-      if Raw.Stored_object_id.equal current_selection selection then Ok ()
-      else Error (Stale "integration selected change heads changed")
-  | _ -> Error (Integrity "malformed prepared integration control")
+  if Raw.Stored_object_id.equal current_selection plan.selection_object then
+    Ok ()
+  else Error (Stale "integration selected change heads changed")
 
 let plan_directory store =
   Filename.concat

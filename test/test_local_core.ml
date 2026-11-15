@@ -4198,6 +4198,322 @@ let unaccepted_resolution_replacement_survives_gc () =
         "collected store still materializes the exact pending decision" bytes
         (read_file root "note.txt"))
 
+let[@warning "-4"] private_workspace_decisions_bind_separate_results () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, public =
+        add_incoming_revision repository capability certificate authority
+          "note.txt" "shared D\r\n"
+      in
+      write_file root "note.txt" "PRIVATE OVERLAPPING E\r\n";
+      let unresolved = native_plan root [ revision ] in
+      Alcotest.(check bool)
+        "overlapping private work is a workspace conflict" true
+        (match I.readiness unresolved with
+        | I.Conflicted conflicts ->
+            List.for_all (fun c -> c.C.private_workspace) conflicts
+        | I.Ready _ | I.Decision _ -> false);
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let base =
+        Composition.load store (I.known_present unresolved)
+        |> ok Composition.error_to_string
+      in
+      let observed =
+        Composition.load store
+          (I.request unresolved).C.workspace.C.observed_snapshot
+        |> ok Composition.error_to_string
+      in
+      let replacement =
+        Composition.replace_subtree ~base ~path:[ "note.txt" ]
+          ~replacement:observed
+        |> ok Composition.error_to_string
+        |> Composition.store store
+        |> ok Composition.error_to_string
+      in
+      let choice =
+        I.make_workspace_decision ~path:[ "note.txt" ]
+          ~replacement_snapshot:replacement
+        |> ok I.error_to_string
+      in
+      let plan =
+        Native_integrate.prepare_decided ~root ~selected_revisions:[ revision ]
+          ~resolution_ids:[] ~workspace_decisions:[ choice ]
+          ~reconcile_heads:None
+        |> integrate_ok
+      in
+      Alcotest.(check bool)
+        "context stays exact while the private decision changes the plan" true
+        (C.Digest.equal
+           (I.context_identity unresolved)
+           (I.context_identity plan)
+        && not (C.Plan_id.equal (I.id unresolved) (I.id plan)));
+      let decoded =
+        I.decode ~store ~loaded:(load repository) (I.encode plan)
+        |> ok I.error_to_string
+      in
+      Alcotest.(check bool)
+        "private choices survive canonical decode" true
+        (I.workspace_decisions decoded = [ choice ]);
+      let row path replacement =
+        plan_array [ plan_array (List.map PE.bytes path); PE.bytes replacement ]
+      in
+      let replacement_raw = C.Object_id.to_raw replacement in
+      let rows values = alter_field 8 (fun _ -> plan_array values) in
+      let malformed =
+        [
+          altered_plan plan (alter_field 0 (fun _ -> PE.integer 3L));
+          altered_plan plan (rows []);
+          altered_plan plan
+            (rows
+               [
+                 row [ "note.txt" ] replacement_raw;
+                 row [ "note.txt" ] replacement_raw;
+               ]);
+          altered_plan plan
+            (rows [ row [ "z" ] replacement_raw; row [ "a" ] replacement_raw ]);
+          altered_plan plan
+            (rows
+               [
+                 row [ "note.txt" ] replacement_raw;
+                 row [ "note.txt"; "child" ] replacement_raw;
+               ]);
+          altered_plan plan (rows [ row [ ".." ] replacement_raw ]);
+          altered_plan plan (rows [ row [ "note.txt" ] "short" ]);
+          altered_plan plan (alter_field 7 (fun _ -> PE.bool true));
+          altered_plan plan (alter_field 5 (fun _ -> PE.null));
+        ]
+      in
+      List.iter
+        (fun bytes ->
+          reject "malformed private choices decoded"
+            (I.decode ~store ~loaded:(load repository) bytes))
+        malformed;
+      let forged_bytes =
+        altered_plan plan
+          (alter_field 6 (fun _ ->
+               plan_array
+                 [
+                   PE.integer 0L;
+                   PE.bytes (C.Object_id.to_raw public);
+                   PE.bytes (C.Object_id.to_raw public);
+                 ]))
+      in
+      let forged =
+        I.decode ~store ~loaded:(load repository) forged_bytes
+        |> ok I.error_to_string
+      in
+      I.retain ~store forged |> ok I.error_to_string;
+      reject
+        "a syntactically ready private plan bypassed actual composition proof"
+        (Native_integrate.apply ~root ~plan:(I.id forged)
+           ~signing_capability:(Some capability));
+      Alcotest.(check string)
+        "false ready output cannot replace private E"
+        "PRIVATE OVERLAPPING E\r\n"
+        (read_file root "note.txt");
+      Alcotest.(check bool)
+        "private preparation moves no state root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let applied = native_apply root plan (Some capability) in
+      let after = load repository in
+      let accepted =
+        Composition.Graph.accepted
+          (L.pool (local after))
+          (L.selected (local after)).L.basis
+        |> ok Composition.Graph.error_to_string
+      in
+      Alcotest.(check bool)
+        "private decision never becomes a public resolution record" false
+        (C.records (L.pool (local after))
+        |> List.exists (fun (_, body) ->
+            match body.C.payload with
+            | C.Resolution_revision _ -> true
+            | C.Shared_revision _ | C.Accepted_version _ | C.Branch_event _ ->
+                false));
+      Alcotest.(check bool)
+        "accepted public bytes stay D" true
+        (C.Object_id.equal accepted.C.result_snapshot public);
+      Alcotest.(check string)
+        "chosen overlapping private E stays on disk" "PRIVATE OVERLAPPING E\r\n"
+        (read_file root "note.txt");
+      let retried = native_apply root plan None in
+      Alcotest.(check bool)
+        "private decision retry reuses operation and root" true
+        ((Option.get applied.Native_integrate.operation).Op.token
+         = (Option.get retried.Native_integrate.operation).Op.token
+        && Raw.Mutable_ref.equal after.S.head (load repository).S.head))
+
+let explicit_replacement_capture_is_streamed_and_revalidated () =
+  with_root (fun root ->
+      let repository, _, _, _, _ = initialize root in
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let path = root ^ "/replacement" in
+      let bytes =
+        String.init ((2 * 1024 * 1024) + 71) (fun i -> Char.chr (i mod 251))
+      in
+      write_file root "replacement" bytes;
+      Unix.chmod path 0o751;
+      let captured =
+        Snapshot.capture_regular_file ~store ~path
+        |> ok Snapshot.error_to_string
+      in
+      Alcotest.(check bool)
+        "replacement captures executable distinction" true
+        (captured.Snapshot.captured_mode = Snapshot.Executable);
+      Alcotest.(check string)
+        "large replacement preserves all bytes" bytes
+        (Snapshot.Content.load store captured.Snapshot.captured_content
+        |> ok Snapshot.error_to_string);
+      Unix.chmod path 0o600;
+      reject "provider-time permission changes bypass source identity"
+        (Snapshot.validate_captured_file ~path captured);
+      let attempts = ref 0 in
+      let unstable =
+        Snapshot.For_test.capture_regular_file ~store ~path
+          ~observe:(fun stage _ ->
+            if stage = Snapshot.For_test.After_read then (
+              incr attempts;
+              write_file root "replacement" (string_of_int !attempts)))
+      in
+      reject "unstable replacement became complete" unstable;
+      Alcotest.(check int)
+        "replacement instability retries are bounded" 3 !attempts;
+      let link = root ^ "/replacement-link"
+      and fifo = root ^ "/replacement-fifo" in
+      Unix.symlink path link;
+      Unix.mkfifo fifo 0o600;
+      reject "replacement followed a symlink"
+        (Snapshot.capture_regular_file ~store ~path:link);
+      reject "replacement blocked on or accepted a FIFO"
+        (Snapshot.capture_regular_file ~store ~path:fifo);
+      Alcotest.(check bool)
+        "capture/refusal never changes saved state/history" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+
+let native_conflict_signing_releases_writer_and_rechecks_sources () =
+  let module Conflicts = Service.Conflicts in
+  List.iter
+    (fun file_choice ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let left, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "left\r\n"
+          in
+          let _, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "right\r\n"
+          in
+          let inspection = Conflicts.inspect ~root ~plan:None |> integrate_ok in
+          let conflict = List.hd inspection.Conflicts.conflicts in
+          let before = load repository in
+          let replacement =
+            Filename.temp_file "yeokcham-explicit-resolution-" ""
+          in
+          Fun.protect
+            ~finally:(fun () -> Unix.unlink replacement)
+            (fun () ->
+              Out_channel.with_open_bin replacement (fun ch ->
+                  output_string ch "chosen\r\n");
+              let unlocked = ref false in
+              let signer () =
+                Native_integrate.with_writer ~root (fun _ ->
+                    unlocked := true;
+                    Ok ())
+                |> integrate_ok;
+                if file_choice then
+                  Out_channel.with_open_bin replacement (fun ch ->
+                      output_string ch "changed during signing\r\n")
+                else
+                  write_file root "private.bin"
+                    "external private edit while signing";
+                Ok capability
+              in
+              let choice =
+                if file_choice then Conflicts.File replacement
+                else Conflicts.Use ("revision:" ^ C.Record_id.to_hex left)
+              in
+              reject
+                "provider-time changes must refuse before publishing a \
+                 resolution"
+                (Conflicts.resolve ~root ~plan:None
+                   ~conflict:conflict.Conflicts.conflict_id ~choice ~signer);
+              Alcotest.(check bool)
+                "signer executes outside worktree writer" true !unlocked;
+              Alcotest.(check bool)
+                "stale source never publishes public metadata or moves history"
+                true
+                (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+              Alcotest.(check bool)
+                "refused resolution never materializes ordinary files" false
+                (Sys.file_exists (root ^ "/note.txt")))))
+    [ false; true ]
+
+let native_private_conflicts_resume_actual_mutation_facts () =
+  let module Conflicts = Service.Conflicts in
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let _, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "shared D\r\n"
+          in
+          write_file root "note.txt" "PRIVATE E\r\n";
+          let inspection = Conflicts.inspect ~root ~plan:None |> integrate_ok in
+          let conflict = List.hd inspection.Conflicts.conflicts in
+          Alcotest.(check bool)
+            "actual native conflict is private" true
+            conflict.Conflicts.private_workspace;
+          let result =
+            Conflicts.resolve ~root ~plan:None
+              ~conflict:conflict.Conflicts.conflict_id
+              ~choice:(Conflicts.Use "accepted") ~signer:(fun () ->
+                Alcotest.fail "private choice must not invoke a signer")
+            |> integrate_ok
+          in
+          let plan = result.Conflicts.prepared in
+          interrupt_native root plan capability boundary;
+          ignore (native_apply root plan None);
+          let after = load repository in
+          Alcotest.(check string)
+            "chosen target resumes exactly" "shared D\r\n"
+            (read_file root "note.txt");
+          let operation =
+            Option.get (L.find_operation (local after) ~plan:(I.id plan))
+          in
+          let saved =
+            Composition.load (S.underlying_store repository) operation.Op.safety
+            |> ok Composition.error_to_string
+          in
+          let entry = List.assoc [ "note.txt" ] (Composition.entries saved) in
+          Alcotest.(check string)
+            "private E remains in the exact safety root" "PRIVATE E\r\n"
+            (match entry with
+            | Composition.File { content; _ } ->
+                Snapshot.Content.load (S.underlying_store repository) content
+                |> ok Snapshot.error_to_string
+            | Composition.Directory ->
+                Alcotest.fail "expected private safety file");
+          ignore (native_apply root plan None);
+          Alcotest.(check bool)
+            "private decision restart adds no second navigation or acceptance"
+            true
+            (Raw.Mutable_ref.equal after.S.head (load repository).S.head)))
+    [
+      Native_integrate.Prepared_root;
+      Native_integrate.Mutation
+        (Service.Safe_apply.After_mutation, [ "note.txt" ]);
+      Native_integrate.Materialized_root;
+      Native_integrate.Committed_root;
+    ]
+
 let native_integration_resumes_real_file_and_root_boundaries () =
   List.iter
     (fun boundary ->
@@ -5581,5 +5897,18 @@ let () =
           Alcotest.test_case
             "unaccepted resolution replacement survives actual GC" `Quick
             unaccepted_resolution_replacement_survives_gc;
+          Alcotest.test_case
+            "private workspace choices bind a separate result and retry" `Quick
+            private_workspace_decisions_bind_separate_results;
+          Alcotest.test_case
+            "replacement streaming, identity checks and bounded races" `Quick
+            explicit_replacement_capture_is_streamed_and_revalidated;
+          Alcotest.test_case
+            "native resolution releases writer and rechecks provider-time \
+             sources"
+            `Quick native_conflict_signing_releases_writer_and_rechecks_sources;
+          Alcotest.test_case
+            "native private choices resume actual file and root facts" `Quick
+            native_private_conflicts_resume_actual_mutation_facts;
         ] );
     ]

@@ -875,3 +875,24 @@
   yeokcham_v1_model
   yeokcham_snapshot
   yeokcham_store))
+
+(test
+ (name test_integration_control)
+ (modules test_integration_control)
+ (libraries
+  alcotest
+  yeokcham_v1_integration
+  yeokcham_v1_model
+  yeokcham_store
+  yeokcham_hash)
+ (deps
+  (source_tree golden/integration)))
+
+(rule
+ (alias runtest)
+ (deps
+  ../tools/generate_integration_vectors.py
+  ../tools/generate_core_package_vectors.py
+  (source_tree golden/integration))
+ (action
+  (run python3 %{dep:../tools/generate_integration_vectors.py})))

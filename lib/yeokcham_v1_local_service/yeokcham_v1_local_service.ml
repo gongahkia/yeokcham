@@ -1,5 +1,6 @@
 module Safe_apply = Safe_apply
 module Integrate = Native_integration
+module Conflicts = Native_resolution
 module Core_receive = Native_receipt
 module Core_outbound = Native_outbound
 module Clone_state = Clone_guard
