@@ -8,6 +8,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
+- Active implementation slice: P3 shared workflow, session `p3-shared-2026-11-15`,
+  starting clean main `2c7329d3ee930a38d5e8654346fab5d28853c707`.
+  [Scoped task](implementation/goals/P03-shared-workflow.md); prerequisites verified.
 - Completed implementation slice: P2 local workflow, session `p2-local-2026-11-14`,
   starting clean main `56eb13d271421720299d7e3f0dcd589d80b4d153`.
   P1 core-workflow foundation is complete;
@@ -16,11 +19,11 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   `06b662a8bab5c783117e5fcf45e36b7d942cfc64`. See the
   [P1 report](implementation/reports/P01-attempt-01.md) and
   [acceptance receipt](implementation/results/P01-acceptance.json).
-- Current pilot handoff: P2 is complete; P3 is next eligible and unstarted, P4 pending.
+- Current pilot handoff: P2 is complete; P3 is in progress, P4 pending.
   See the [P2 report](implementation/reports/P02-attempt-01.md) and
   [acceptance receipt](implementation/results/P02-acceptance.json). The current
   priority remains the [complete pilot](PILOT_PLAN.md).
-  P2 was separately invoked after P1; no P3/P4 work is authorized.
+  P3 was separately invoked after P2; P4 remains unauthorized.
 - Original G02 has partial coverage through P1, with its full remainder below.
   It is not complete and does not make full G03 ready.
 - Completed full-design phases: **1 / 20** (G01). Completed pilot slices:
@@ -94,7 +97,7 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
 | P2 local work | complete | [Scoped task](implementation/goals/P02-local-workflow.md), [report](implementation/reports/P02-attempt-01.md), [receipt](implementation/results/P02-acceptance.json); all seven scoped criteria passed; original phases remain partial |
-| P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
+| P3 shared loop | in_progress | [Scoped task](implementation/goals/P03-shared-workflow.md); started at `2c7329d3ee930a38d5e8654346fab5d28853c707`; implementation/verification underway, no completion claim |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
 ## Current-phase checkpoints
@@ -787,3 +790,16 @@ no storage performance improvement is claimed. Preserve current metadata/live
 files/journals/proofs and displaced native nodes when changing executable versions;
 a source rollback does not undo materialization. See the report's exact rollback
 order and data implications. No push/release/deployment or additional agent.
+
+
+## P3 shared-workflow start — November 15, 2026
+
+Verified clean `main`, one worktree, HEAD `2c7329d3ee930a38d5e8654346fab5d28853c707` and all five
+requested prerequisite ancestors before editing. No newer commits or unrelated
+changes observed. Session `p3-shared-2026-11-15`; full task saved at
+[P03-shared-workflow](implementation/goals/P03-shared-workflow.md). P2 reports
+and accepted G01 result digests are recorded in external
+`/home/gongahkia/.cache/yeokcham-p3-20261115/start.json`; no measurements rerun.
+Inspecting actual composition, selected-publication, accepted-result verification,
+local root, transfer and safe-application boundaries before implementation.
+P3 remains incomplete; P4 and independent full phases are not started.
