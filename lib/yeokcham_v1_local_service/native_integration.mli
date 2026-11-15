@@ -4,6 +4,7 @@ module Operation = Yeokcham_v1_store.Local.Operation
 
 type error =
   | Plan_error of Plan.error
+  | Capture_error of Yeokcham_snapshot.error
   | Application_error of Safe_apply.error
   | Metadata of string
 

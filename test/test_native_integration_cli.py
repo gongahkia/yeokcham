@@ -157,8 +157,36 @@ class IntegrationCliTests(unittest.TestCase):
         self.data(self.cli("operation", "show", "invalid"), 2)
         result = subprocess.run([BINARY, "integrate", "--root", str(self.parent / "absent"), "--yes", "--format", "json"],
                                 env=self.environment, capture_output=True, text=True, timeout=5)
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 5)
         self.assertEqual(json.loads(result.stdout)["schema_version"], 2)
+
+    def test_conflicted_preview_is_incomplete_and_cannot_accept(self):
+        first = self.share()
+        (self.root / "note.txt").write_text("different independent addition\n")
+        second = self.share()
+        before = self.head()
+        preview = self.data(self.cli("integrate", "--all", "--preview"))
+        self.assertEqual(preview["outcome"], "incomplete")
+        self.assertEqual(preview["data"]["readiness"], "conflicted")
+        self.assertNotIn("accepted_snapshot", preview["data"])
+        conflict = preview["data"]["conflicts"][0]
+        self.assertEqual(conflict["path"]["path"], "note.txt")
+        self.assertIn(first["revision_id"], conflict["versions"])
+        self.assertIn(second["revision_id"], conflict["versions"])
+        denied = self.data(self.cli("integrate", "--all", "--yes"), 4)
+        self.assertEqual(denied["error"]["code"], "integration-conflicts")
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.data(self.cli("status"))["data"]["integration_operations"], [])
+        self.assertEqual((self.root / "note.txt").read_text(), "different independent addition\n")
+
+    def test_malformed_ignore_is_invalid_without_plan_or_history_change(self):
+        self.share()
+        before = self.head()
+        (self.root / ".yeokchamignore").write_text("[unterminated\n")
+        failed = self.data(self.cli("integrate", "--preview"), 2)
+        self.assertEqual(failed["error"]["code"], "invalid-ignore-rule")
+        self.assertEqual(self.head(), before)
+        self.assertFalse((self.root / ".yeokcham/integration-plans").exists())
 
 
 if __name__ == "__main__":

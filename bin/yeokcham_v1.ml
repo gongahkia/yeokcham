@@ -5786,11 +5786,13 @@ let run_package_adopt arguments =
 let integration_repository root =
   let repository =
     Yeokcham_v1_store.open_repository ~root
-    |> require_ok Yeokcham_v1_store.error_to_string
+    |> Result.map_error (fun error -> Service.Store_error error)
+    |> require_local
   in
   let loaded =
     Yeokcham_v1_store.load repository
-    |> require_ok Yeokcham_v1_store.error_to_string
+    |> Result.map_error (fun error -> Service.Store_error error)
+    |> require_local
   in
   let local =
     match loaded.Yeokcham_v1_store.local with
@@ -5851,6 +5853,8 @@ let[@warning "-4"] require_integration = function
   | Error error -> (
       let message = Native_integrate.error_to_string error in
       match error with
+      | Native_integrate.Capture_error error ->
+          fail_local (Service.Snapshot_error error)
       | Native_integrate.Plan_error (Integration.Invalid _) ->
           fail_with_status 2 "invalid-integration" message
       | Native_integrate.Plan_error (Integration.Choice _ | Integration.Stale _)
@@ -6284,6 +6288,7 @@ let run_integrate arguments =
            || (repeated && not flags.selection_preview)
            || Integration.no_op plan
          then `Unchanged
+         else if not ready then `Incomplete
          else `Completed)
       ~code ~message ~data ~next_actions:actions ()
   else (

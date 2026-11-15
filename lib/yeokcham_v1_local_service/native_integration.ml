@@ -16,11 +16,13 @@ module Proof = Yeokcham_v1_restore_proof
 
 type error =
   | Plan_error of Plan.error
+  | Capture_error of Snapshot.error
   | Application_error of Safe_apply.error
   | Metadata of string
 
 let error_to_string = function
   | Plan_error e -> Plan.error_to_string e
+  | Capture_error e -> Snapshot.error_to_string e
   | Application_error e -> Safe_apply.error_to_string e
   | Metadata s -> s
 
@@ -126,7 +128,7 @@ let physical_operation token =
 let observe_tree root store =
   let* identity, _, observation =
     Snapshot.Observation.scan ~root ~store
-    |> Result.map_error (fun e -> Metadata (Snapshot.error_to_string e))
+    |> Result.map_error (fun e -> Capture_error e)
   in
   let* observed =
     Model.Snapshot_id.of_string
