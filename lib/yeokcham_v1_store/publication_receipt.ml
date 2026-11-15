@@ -175,9 +175,26 @@ let proof repository pool ~revision:id ~observed ~contributed_scope =
         let* previous = find_revision pool previous in
         Ok previous.Core.result_snapshot
     | _ ->
-        Error
-          "publication correspondence needs explicit resolution of concurrent \
-           revisions"
+        let accepted_versions =
+          Core.records pool
+          |> List.filter_map (fun (id, body) ->
+              match body.Core.payload with
+              | Core.Accepted_version _ -> Some id
+              | Core.Shared_revision _ | Core.Branch_event _
+              | Core.Resolution_revision _ ->
+                  None)
+        in
+        let* reconciled =
+          Composition.Graph.reconciled_base pool ~accepted_versions
+            ~previous_revisions:revision.Core.previous_revisions
+            ~base_snapshot:revision.Core.base_snapshot
+          |> Result.map_error Composition.Graph.error_to_string
+        in
+        if reconciled then Ok revision.Core.base_snapshot
+        else
+          Error
+            "publication correspondence requires a recorded accepted base \
+             representing every concurrent revision"
   in
   let* before = Composition.load repository before |> composition in
   let* after =

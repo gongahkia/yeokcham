@@ -3806,6 +3806,28 @@ let[@warning "-4-40-42"] native_conflicts_resolve_and_preserve_private_work_thro
               cli bob "Bob receives Alice's exact concurrent revision"
                 [ "exchange"; "origin" ]
               |> ignore;
+              let unresolved = load bob in
+              let output, _, status =
+                run_cli
+                  [
+                    "share";
+                    "main.ml";
+                    "--update";
+                    change;
+                    "--root";
+                    bob;
+                    "--format";
+                    "json";
+                  ]
+              in
+              Alcotest.(check bool)
+                "unresolved forks cannot be updated by an implicit winner" true
+                (status = Unix.WEXITED 3);
+              Alcotest.(check bool)
+                "unresolved update reports a decision" true
+                (Yojson.Safe.from_string output |> member "ok" = `Bool false);
+              same_root "refused fork update preserves the state root"
+                unresolved bob;
               let change_id =
                 Core.Change_id.of_hex change |> require_ok Core.error_to_string
               in
@@ -4082,7 +4104,67 @@ let[@warning "-4-40-42"] native_conflicts_resolve_and_preserve_private_work_thro
                 output;
               cli bob "Bob exchanges after resolved catch-up"
                 [ "exchange"; "origin" ]
-              |> ignore)))
+              |> ignore;
+              write (bob ^ "/main.ml") "Bob's next explicit shared update\r\n";
+              let next =
+                cli bob "Bob updates the reconciled logical change"
+                  [ "share"; "main.ml"; "--update"; change ]
+              in
+              let next_revision =
+                member "data" next |> member "revision_id" |> to_string
+                |> Core.Record_id.of_hex
+                |> require_ok Core.error_to_string
+              in
+              let local = Option.get (load bob).Store.local in
+              let body =
+                Core.find (Local.pool local) next_revision |> Option.get
+              in
+              (match body.Core.payload with
+              | Core.Shared_revision value ->
+                  Alcotest.(check (list string))
+                    "new revision causally names both resolved heads"
+                    (List.sort String.compare [ alice_revision; bob_revision ])
+                    (List.map Core.Record_id.to_hex
+                       value.Core.previous_revisions);
+                  Alcotest.(check string)
+                    "new revision uses the recorded accepted result as its base"
+                    (to_string accepted_snapshot)
+                    (Core.Object_id.to_hex value.Core.base_snapshot)
+              | _ -> Alcotest.fail "update did not produce a shared revision");
+              Alcotest.(check int)
+                "explicit successor collapses the change fork" 1
+                (List.length (Core.change_heads (Local.pool local) change_id));
+              let recorded = load bob in
+              let repeated =
+                cli bob "Bob retries the same reconciled update"
+                  [ "share"; "main.ml"; "--update"; change ]
+              in
+              Alcotest.(check bool)
+                "recorded successor identity is reused" true
+                (member "data" repeated |> member "revision_id"
+                = `String (Core.Record_id.to_hex next_revision));
+              same_root "retry after reconciliation adds no history or revision"
+                recorded bob;
+              cli bob "Bob integrates the next exact successor"
+                [ "integrate"; change; "--yes" ]
+              |> ignore;
+              cli bob "Bob exchanges the next exact successor"
+                [ "exchange"; "origin" ]
+              |> ignore;
+              let alice_before = history alice in
+              cli alice "Alice receives the successor without losing private E"
+                [ "exchange"; "team" ]
+              |> ignore;
+              Alcotest.(check string)
+                "successor receipt leaves Alice's private continuation" alice_e
+                (read (alice ^ "/main.ml"));
+              Alcotest.(check string)
+                "successor receipt leaves Alice's history cursor" alice_before
+                (history alice);
+              Alcotest.(check string)
+                "successor publication excludes Bob's private sentinel"
+                bob_secret
+                (read (bob ^ "/bob-private.txt")))))
 
 let[@warning "-4-40-42"] native_requested_branch_contents_precede_other_shared_data
     () =

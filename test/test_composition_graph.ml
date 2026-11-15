@@ -342,6 +342,105 @@ let resolved_inputs store =
   in
   (pool, empty, left, right)
 
+let update_after_accepted_revision_reconciliation () =
+  with_store (fun store ->
+      let pool, empty = fixture store in
+      let pool, original =
+        publish store pool '1' ~change:(change 'a') ~base:empty
+          (tree store [ ("a", "initial\n") ])
+      in
+      let pool, _ =
+        publish store pool '9' ~change:(change 'b') ~base:empty
+          (tree store [ ("b", "other accepted work\n") ])
+      in
+      let initial =
+        tree store [ ("a", "initial\n"); ("b", "other accepted work\n") ]
+        |> C.store store |> composed
+      in
+      let pool =
+        retain pool 'h'
+          (body_accepted ~parents:[ id 'g' ] ~chosen:[ id '1'; id '9' ] initial)
+      in
+      let pool, left =
+        publish store pool '2'
+          ~previous:[ id '1' ]
+          ~change:(change 'a') ~base:empty
+          (tree store [ ("a", "left\n") ])
+      in
+      let pool, _ =
+        publish store pool '3'
+          ~previous:[ id '1' ]
+          ~change:(change 'a') ~base:empty
+          (tree store [ ("a", "right\n") ])
+      in
+      let left_accepted =
+        tree store [ ("a", "left\n"); ("b", "other accepted work\n") ]
+        |> C.store store |> composed
+      in
+      let one_sided =
+        retain pool 'k'
+          (body_accepted ~parents:[ id 'h' ] ~chosen:[ id '2' ] left_accepted)
+      in
+      let one_sided, _ =
+        publish store one_sided '4'
+          ~previous:[ id '2'; id '3' ]
+          ~change:(change 'a') ~base:left_accepted
+          (tree store
+             [ ("a", "next explicit update\n"); ("b", "other accepted work\n") ])
+      in
+      rejected "one accepted predecessor cannot stand in for all revision heads"
+        (G.compose store one_sided ~parents:[ id 'k' ] ~revisions:[ id '4' ]);
+      let chosen =
+        tree store [ ("a", "left\n"); ("b", "other accepted work\n") ]
+      in
+      let accepted = C.store store chosen |> composed in
+      let pool =
+        resolution store pool 's'
+          ~parents:[ id 'h' ]
+          ~chosen:[ id '2'; id '3' ]
+          ~path:[ "a" ] ~comparison:initial chosen
+      in
+      let pool =
+        retain pool 'i'
+          (body_accepted
+             ~parents:[ id 'h' ]
+             ~chosen:[ id '2'; id '3' ]
+             ~resolutions:[ id 's' ]
+             accepted)
+      in
+      G.validate store pool |> graph;
+      let updated =
+        tree store
+          [ ("a", "next explicit update\n"); ("b", "other accepted work\n") ]
+      in
+      List.iter
+        (fun base ->
+          let invalid, _ =
+            publish store pool '4'
+              ~previous:[ id '2'; id '3' ]
+              ~change:(change 'a') ~base updated
+          in
+          rejected
+            "unresolved or unrelated base was treated as fork reconciliation"
+            (G.compose store invalid ~parents:[ id 'i' ] ~revisions:[ id '4' ]))
+        [ empty; original; left; initial ];
+      let pool, expected =
+        publish store pool '4'
+          ~previous:[ id '2'; id '3' ]
+          ~change:(change 'a') ~base:accepted updated
+      in
+      snapshot_equals store expected
+        (G.compose store pool ~parents:[ id 'i' ] ~revisions:[ id '4' ] |> graph);
+      let pool =
+        retain pool 'j'
+          (body_accepted ~parents:[ id 'i' ] ~chosen:[ id '4' ] expected)
+      in
+      G.validate store pool |> graph;
+      Alcotest.(check (list string))
+        "successor explicitly joins every old change head"
+        [ Core.Record_id.to_hex (id '4') ]
+        (Core.change_heads pool (change 'a') |> List.map Core.Record_id.to_hex))
+
 let resolution_preserves_automatic_paths_and_validates_acceptance () =
   with_store (fun store ->
       let pool, empty, _, _ = resolved_inputs store in
@@ -728,6 +827,10 @@ let () =
             competing_updates_and_conflicts;
           Alcotest.test_case "private snapshot is not a recorded public base"
             `Quick unrelated_base;
+          Alcotest.test_case
+            "accepted reconciliation permits an exact successor to every \
+             revision head"
+            `Quick update_after_accepted_revision_reconciliation;
           Alcotest.test_case
             "exact resolution preserves automatic work and proves acceptance"
             `Quick resolution_preserves_automatic_paths_and_validates_acceptance;

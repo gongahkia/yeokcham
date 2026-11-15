@@ -36,6 +36,10 @@ val prepare :
   update:Core.Change_id.t option ->
   title:string option ->
   (prepared, error) Stdlib.result
+(** Concurrent revision heads may be updated only after every head is
+    represented in the selected accepted basis. Such a successor names all heads
+    and uses that recorded result as its base, selecting only the requested disk
+    paths. *)
 
 val preview : prepared -> result
 

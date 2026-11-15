@@ -814,6 +814,25 @@ module Graph = struct
     in
     represented_revisions pool roots
 
+  let reconciled_base pool ~accepted_versions ~previous_revisions ~base_snapshot
+      =
+    List.fold_left
+      (fun acc id ->
+        let* found = acc in
+        if found then Ok true
+        else
+          let* value = accepted pool id in
+          if not (Core.Object_id.equal value.Core.result_snapshot base_snapshot)
+          then Ok false
+          else
+            let* represented = represented pool [ id ] in
+            Ok
+              (List.for_all
+                 (fun previous ->
+                   List.exists (Core.Record_id.equal previous) represented)
+                 previous_revisions))
+      (Ok false) accepted_versions
+
   let rec revision_ancestors pool seen = function
     | [] -> Ok seen
     | id :: rest when Ids.mem id seen -> revision_ancestors pool seen rest
@@ -849,32 +868,53 @@ module Graph = struct
       Error
         (Invalid_graph "revision changes paths outside its exact declared scope")
 
-  let effective_base context represented value =
-    let previous =
-      List.filter
-        (fun id -> Ids.mem id represented)
-        value.Core.previous_revisions
+  let effective_base context accepted_ancestors applied value =
+    let maximal previous =
+      let* inherited =
+        List.fold_left
+          (fun acc id ->
+            let* acc = acc in
+            let* value = revision context.pool id in
+            let* ancestors =
+              revision_ancestors context.pool Ids.empty
+                value.Core.previous_revisions
+            in
+            Ok (Ids.union acc ancestors))
+          (Ok Ids.empty) previous
+      in
+      Ok (List.filter (fun id -> not (Ids.mem id inherited)) previous)
     in
-    let* inherited =
-      List.fold_left
-        (fun acc id ->
-          let* acc = acc in
-          let* value = revision context.pool id in
-          let* ancestors =
-            revision_ancestors context.pool Ids.empty
-              value.Core.previous_revisions
-          in
-          Ok (Ids.union acc ancestors))
-        (Ok Ids.empty) previous
-    in
-    match List.filter (fun id -> not (Ids.mem id inherited)) previous with
-    | [] -> Ok value.Core.base_snapshot
-    | [ id ] ->
-        let* previous = revision context.pool id in
-        Ok previous.Core.result_snapshot
-    | _ ->
-        Error
-          (Decision "updated revision has incomparable represented predecessors")
+    let* all_previous = maximal value.Core.previous_revisions in
+    match all_previous with
+    | [] | [ _ ] -> (
+        let* previous =
+          maximal
+            (List.filter
+               (fun id -> Ids.mem id applied)
+               value.Core.previous_revisions)
+        in
+        match previous with
+        | [] -> Ok value.Core.base_snapshot
+        | [ id ] ->
+            let* previous = revision context.pool id in
+            Ok previous.Core.result_snapshot
+        | _ ->
+            Error
+              (Decision
+                 "updated revision has incomparable represented predecessors"))
+    | _ :: _ :: _ ->
+        let* reconciled =
+          reconciled_base context.pool
+            ~accepted_versions:(Ids.elements accepted_ancestors)
+            ~previous_revisions:value.Core.previous_revisions
+            ~base_snapshot:value.Core.base_snapshot
+        in
+        if reconciled then Ok value.Core.base_snapshot
+        else
+          Error
+            (Decision
+               "updated revision has incomparable represented predecessors \
+                without a recorded accepted reconciliation base")
 
   let public_base context accepted_ancestors applied value =
     let* from_accepted =
@@ -1076,7 +1116,9 @@ module Graph = struct
                 let* variants = acc in
                 let* value = revision context.pool id in
                 let* () = public_base context parents_ancestry applied value in
-                let* base = effective_base context applied value in
+                let* base =
+                  effective_base context parents_ancestry applied value
+                in
                 let* base = load context base in
                 let* changed = load context value.Core.result_snapshot in
                 let* combined =

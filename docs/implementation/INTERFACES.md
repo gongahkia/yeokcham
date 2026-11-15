@@ -993,6 +993,19 @@ same intent after root publication. Unchanged new sharing is an honest no-op;
 explicit updates with changed inputs create a new immutable version. A
 same-content update may contribute an empty scope, which claims no new local
 path correspondence. Its snapshot-only witness still binds the source node.
+`Native_share.prepare` permits a multihead update only when every current change
+head is represented in the selected private working basis. The new revision
+names all old heads, uses that accepted result as its public base, and selects
+only the requested disk paths. `Graph.compose` requires an actual accepted
+ancestor with that exact base and every predecessor represented; accepting one
+side or merely naming an older public base cannot collapse an unresolved fork.
+Ordinary single-head updates retain their existing exact predecessor behavior.
+`Graph.reconciled_base pool ~accepted_versions ~previous_revisions ~base_snapshot`
+returns whether a candidate authenticated accepted version has the exact base
+and represents every predecessor. Share preparation, graph composition and
+private publication-receipt proof reuse this predicate. Receipt validation can
+then prove a multihead successor's newly selected paths against its recorded
+accepted base instead of inventing one predecessor as the comparison.
 
 The ordinary CLI supports `share [PATH...]`, `--title`, `--update CHANGE`,
 `--preview`/`--dry-run`, root-relative paths and literal `--` paths. No extra

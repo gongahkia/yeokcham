@@ -26,6 +26,10 @@ contents stay in private local capture/history. Sharing does not accept work or
 change ordinary files. A recorded identical request reuses its revision and
 operation identities. An explicit update with changed inputs creates another
 immutable version, including equal contents with a changed title.
+When a change has concurrent revision heads, first explicitly resolve and accept
+all of them. A subsequent `share --update CHANGE_ID` then names every old head
+and bases its selected changes on that recorded accepted result. Unresolved
+forks still refuse; unselected private contents stay private.
 Signing-provider interaction occurs outside the workspace writer lock. If files
 or saved state change while the provider is active, sharing refuses and asks for
 a fresh preview/retry instead of publishing the older capture.
@@ -246,7 +250,9 @@ an arrival-order winner. Stale inputs require fresh preparation; a recorded exac
 shared choice can be retried without another signature. Signing never holds the
 worktree writer lock. If a shared proposal was recorded but its local plan alias
 could not be retained, the command reports incomplete preparation and an exact
-retry action, with no acceptance or ordinary-file change.
+retry action, with no acceptance or ordinary-file change. This exits 8 with
+`ok=false` and `outcome=interrupted`. Its `--use resolution:RECORD_ID` retry
+reuses the stored exact choice even if the original replacement file is gone.
 
 `status` reports `resolution_proposals` with exact IDs, comparison/replacement
 snapshots and `accepted_by` references. A recorded proposal alone is not an

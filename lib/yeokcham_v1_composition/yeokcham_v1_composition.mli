@@ -123,6 +123,17 @@ module Graph : sig
   val common_base :
     Core.pool -> Core.Record_id.t list -> (Core.Record_id.t, failure) result
 
+  val reconciled_base :
+    Core.pool ->
+    accepted_versions:Core.Record_id.t list ->
+    previous_revisions:Core.Record_id.t list ->
+    base_snapshot:Core.Object_id.t ->
+    (bool, failure) result
+  (** Whether a candidate accepted version has exactly this result and
+      represents every predecessor. The caller supplies the eligible accepted
+      context and verifies its contents/signatures through the ordinary
+      graph/trust boundary. *)
+
   val compose :
     ?resolutions:Core.Record_id.t list ->
     Yeokcham_store.repository ->

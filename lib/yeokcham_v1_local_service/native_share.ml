@@ -117,11 +117,27 @@ let prepare ~store ~loaded ~observed ~observation ~paths ~update ~title =
                 [ id ],
                 version.Core.dependencies,
                 version.Core.result_snapshot )
-        | _ :: _ ->
-            Error
-              (Choice
-                 "change has concurrent revisions; choose/reconcile them \
-                  explicitly before updating"))
+        | heads ->
+            let previous = List.map fst heads in
+            let* reconciled =
+              Composition.Graph.reconciled_base (Local.pool local)
+                ~accepted_versions:[ selected.Local.basis ]
+                ~previous_revisions:previous
+                ~base_snapshot:basis.Core.result_snapshot
+              |> Result.map_error (fun error ->
+                  Metadata (Composition.Graph.error_to_string error))
+            in
+            if reconciled then
+              Ok
+                ( basis.Core.result_snapshot,
+                  previous,
+                  [],
+                  basis.Core.result_snapshot )
+            else
+              Error
+                (Choice
+                   "change has concurrent revisions; explicitly resolve and \
+                    accept every revision head before updating"))
   in
   let* base = Composition.load store base_snapshot |> content in
   let* prior = Composition.load store old_result |> content in
