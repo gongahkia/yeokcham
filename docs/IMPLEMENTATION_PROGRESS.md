@@ -1191,3 +1191,31 @@ This corrects a required P3 writer/signing boundary; it does not establish nativ
 Core export/clone/exchange or conflict resolution. Those consumers, durable
 native outbound acknowledgement, the Alice/Bob relay loop and the complete
 criterion audit remain open. P3 stays in progress and P4 remains unstarted.
+
+P3 native-transfer metadata prerequisite:
+`b0fe7049f8104789676b23f41f24af36c97733b9` adds
+`Pages.page_references ~namespace ~expected bytes` without changing registry
+codes or stored bytes. It verifies each at-most-1-MiB envelope's identity,
+type/version/features, namespace and local structure before returning bounded
+direct references. Complete collection canonicality and cross-page value/maximum
+checks still require the existing full verifier; discovery alone is not admission.
+Tests walk the actual 17001-row/8-MiB-value closure, including shared repeated
+chunks, and reject malformed scoped inputs before following references. A false
+child maximum explicitly demonstrates the distinction from full validation.
+
+Metadata-pages9, `make build`, `make lint` and `DUNE_JOBS=2 make ci` exited 0
+on the exact pending tree on parent `8ecfee3`, then committed unchanged. CI took
+46.572 seconds, with matching successful Dune actions cached where applicable.
+Exact commands, environments, exits and file hashes are in
+`public-page-discovery-checkpoint-checks.json` under the P3 external log directory.
+Expected formatter promotion exited 2 before successful lint. No new transfer
+success, native custody, shared coverage or P3 completion is claimed.
+
+Next connect a verified public-only Core inventory/manifest to native transport,
+durable outbound acknowledgements, receipt and clone. Existing local decoding
+still requires complete public composition contents; metadata/availability receipt
+needs an explicit boundary without weakening validation of newly admitted signed
+results. Unknown remote branches must remain distinct from private working
+positions. Native conflict resolutions and the full Alice/Bob privacy/fault audit
+also remain required. Preserve all current operation schemas/roots and the P2
+journeys while implementing those consumers.
