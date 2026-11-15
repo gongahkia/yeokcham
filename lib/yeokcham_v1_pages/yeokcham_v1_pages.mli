@@ -7,6 +7,16 @@ val error_to_string : error -> string
 val max_page_bytes : int
 val max_value_bytes : int
 
+val page_references :
+  namespace:string ->
+  expected:Yeokcham_store.Stored_object_id.t ->
+  string ->
+  (Yeokcham_store.Stored_object_id.t list, error) result
+(** Bounded structural references from one identity-checked, scoped page. Does
+    not fetch children or prove complete canonical collection/value boundaries;
+    use [load]/[load_bounded] after fetching the closure. Transfer callers must
+    bound their graph traversal and reject repeated collection tree pages. *)
+
 val store :
   Yeokcham_store.repository ->
   namespace:string ->

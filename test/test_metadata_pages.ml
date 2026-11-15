@@ -236,11 +236,114 @@ let independent_vector () =
         (read "metadata-page-id.hex")
         (Raw.Stored_object_id.to_hex id))
 
+let transfer_discovers_exact_scoped_metadata_closure () =
+  fixture (fun store ->
+      let namespace = "public-transfer\000repository" in
+      let values =
+        List.init 17001 (fun i ->
+            (Printf.sprintf "key-%08d" i, string_of_int i))
+      in
+      let values = ("large", String.make P.max_value_bytes 'x') :: values in
+      let root = P.store store ~namespace values |> pages in
+      let visited = Hashtbl.create 32 in
+      let rec fetch pending =
+        match pending with
+        | [] -> ()
+        | id :: rest when Hashtbl.mem visited id -> fetch rest
+        | id :: rest ->
+            let bytes =
+              Raw.read_file_bounded ~path:(Raw.object_path store id)
+                ~max_bytes:P.max_page_bytes
+              |> ok Raw.error_to_string
+            in
+            let references =
+              P.page_references ~namespace ~expected:id bytes |> pages
+            in
+            Hashtbl.add visited id ();
+            fetch (references @ rest)
+      in
+      fetch [ root ];
+      let actual =
+        Hashtbl.to_seq_keys visited
+        |> List.of_seq
+        |> List.sort Raw.Stored_object_id.compare
+      in
+      Alcotest.(check bool)
+        "discovery covers tree, value-index and repeated chunks exactly" true
+        (actual = (P.closure store ~namespace root |> pages));
+      Alcotest.(check bool)
+        "fetched closure still requires canonical full validation" true
+        (P.load store ~namespace root |> pages = List.sort compare values))
+
+let transfer_refuses_untrusted_page_structure () =
+  fixture (fun store ->
+      let namespace = "public-transfer" in
+      let root = P.store store ~namespace [ ("a", "value") ] |> pages in
+      let bytes id =
+        Raw.get store id |> ok Raw.error_to_string |> Envelope.encode
+      in
+      reject
+        (P.page_references ~namespace:"private-transfer" ~expected:root
+           (bytes root));
+      let other = P.store store ~namespace [ ("b", "value") ] |> pages in
+      reject (P.page_references ~namespace ~expected:root (bytes other));
+      reject
+        (P.page_references ~namespace ~expected:root
+           (String.make (P.max_page_bytes + 1) 'x'));
+      let inline value = array [ E.integer 0L; E.bytes value ] in
+      let row key value = array [ E.bytes key; inline value ] in
+      List.iter
+        (fun (kind, fields) ->
+          let id = page store ~namespace kind fields in
+          reject (P.page_references ~namespace ~expected:id (bytes id)))
+        [
+          (4L, []);
+          (0L, [ array [ row "b" "1"; row "a" "2" ] ]);
+          (0L, [ array [ row "a" "1"; row "a" "2" ] ]);
+          (0L, [ array [ row "" "x" ] ]);
+          (0L, [ array [ row "a" (String.make 4097 'x') ] ]);
+          ( 0L,
+            [
+              array
+                [
+                  array [ E.bytes "a"; array [ E.integer 1L; E.bytes "short" ] ];
+                ];
+            ] );
+          (1L, [ array [] ]);
+          (2L, [ E.bytes "" ]);
+          (2L, [ E.bytes (String.make ((512 * 1024) + 1) 'x') ]);
+          (3L, [ E.integer (Int64.of_int (P.max_value_bytes + 1)); array [] ]);
+        ];
+      (* page-local structure cannot establish a child's maximum or chunk length. *)
+      let bad_index =
+        page store ~namespace 1L
+          [
+            array
+              [
+                array
+                  [
+                    E.bytes "wrong maximum";
+                    E.bytes (Raw.Stored_object_id.to_raw_bytes root);
+                  ];
+              ];
+          ]
+      in
+      Alcotest.(check bool)
+        "structural discovery is not a canonicality success path" true
+        (P.page_references ~namespace ~expected:bad_index (bytes bad_index)
+        |> pages = [ root ]);
+      reject (P.load store ~namespace bad_index))
+
 let () =
   Alcotest.run "Bounded metadata pages"
     [
       ( "pages",
         [
+          Alcotest.test_case "transfer discovers the exact scoped page closure"
+            `Quick transfer_discovers_exact_scoped_metadata_closure;
+          Alcotest.test_case
+            "transfer rejects malformed pages before following refs" `Quick
+            transfer_refuses_untrusted_page_structure;
           Alcotest.test_case "paged canonical collections and large values"
             `Quick roundtrip_and_bounds;
           Alcotest.test_case "inline and repeated chunk boundaries" `Quick

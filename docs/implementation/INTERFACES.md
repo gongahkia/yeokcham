@@ -934,6 +934,22 @@ publish capture/history, signed records and receipts; transport acknowledgements
 and recoverable integration operations remain later P3 work. No exchange or
 integration success follows from this checkpoint.
 
+`Yeokcham_v1_pages.page_references ~namespace ~expected bytes` discovers direct
+metadata child/value references for transfer before a complete collection is
+available. It bounds each input envelope to 1 MiB before decoding, verifies its
+raw stored identity/type/scope and supported version/features, and rejects
+malformed rows/references, unsorted/duplicate keys, invalid fanout and value/chunk
+limits. Returned references are unique and sorted; repeated identical value
+chunks remain valid. No object is fetched or written by this function.
+
+This is structural discovery, not admission: a caller must bound graph traversal
+and reject repeated collection tree pages, then run the ordinary canonical
+`load`/`load_bounded` verifier over the fetched closure. Child maxima, actual chunk
+lengths and canonical pagination require that full check. Tests compare discovered
+closure against the existing verifier over a 17001-row/8-MiB-value collection and
+show that a structurally traversable false child maximum still fails admission.
+This primitive alone does not implement Core export, remote receipt or clone.
+
 ### P3 selected-publication service and CLI (in progress)
 
 `Local_service.Share` aliases `Native_share`. `Share.prepare ~store ~loaded

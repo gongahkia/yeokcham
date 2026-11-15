@@ -149,6 +149,100 @@ let store repository ~namespace values =
     (fun envelope -> Raw.put repository envelope |> stored)
     ~namespace values
 
+let[@warning "-4"] page_references ~namespace ~expected bytes =
+  let* () = namespace_valid namespace in
+  let* () =
+    if String.length bytes <= max_page_bytes then Ok ()
+    else Error (Integrity "page exceeds 1 MiB")
+  in
+  let* envelope =
+    Envelope.decode bytes
+    |> Result.map_error (fun error ->
+        Integrity (Envelope.decode_error_to_string error))
+  in
+  let* () =
+    if
+      Envelope.object_type envelope = Envelope.Core_metadata_page
+      && Id.equal expected (Raw.id_of_envelope envelope)
+    then Ok ()
+    else Error (Integrity "wrong page type or identity")
+  in
+  let reference raw =
+    Id.of_raw_bytes raw
+    |> Option.to_result ~none:(Integrity "malformed page reference")
+  in
+  let ordered extract rows =
+    let rec loop previous reversed = function
+      | [] -> Ok (List.concat (List.rev reversed))
+      | row :: rest ->
+          let* key, references = extract row in
+          if
+            key = ""
+            || String.length key > max_key_bytes
+            || Option.fold ~none:false
+                 ~some:(fun previous -> String.compare previous key >= 0)
+                 previous
+          then Error (Integrity "invalid or unsorted page keys")
+          else loop (Some key) (references :: reversed) rest
+    in
+    loop None [] rows
+  in
+  let* references =
+    match Envelope.payload envelope with
+    | E.Array [ E.Integer 1L; E.Bytes scope; E.Integer 0L; E.Array rows ]
+      when scope = namespace && List.length rows <= fanout ->
+        ordered
+          (function
+            | E.Array [ E.Bytes key; E.Array [ E.Integer 0L; E.Bytes value ] ]
+              when String.length value <= inline_bytes ->
+                Ok (key, [])
+            | E.Array [ E.Bytes key; E.Array [ E.Integer 1L; E.Bytes raw ] ] ->
+                let* id = reference raw in
+                Ok (key, [ id ])
+            | _ -> Error (Integrity "invalid collection row"))
+          rows
+    | E.Array [ E.Integer 1L; E.Bytes scope; E.Integer 1L; E.Array children ]
+      when scope = namespace && children <> [] && List.length children <= fanout
+      ->
+        let* ids =
+          ordered
+            (function
+              | E.Array [ E.Bytes maximum; E.Bytes raw ] ->
+                  let* id = reference raw in
+                  Ok (maximum, [ id ])
+              | _ -> Error (Integrity "invalid collection child"))
+            children
+        in
+        if List.length ids = List.length (List.sort_uniq Id.compare ids) then
+          Ok ids
+        else Error (Integrity "repeated collection child")
+    | E.Array [ E.Integer 1L; E.Bytes scope; E.Integer 2L; E.Bytes chunk ]
+      when scope = namespace
+           && String.length chunk > 0
+           && String.length chunk <= chunk_bytes ->
+        Ok []
+    | E.Array
+        [
+          E.Integer 1L;
+          E.Bytes scope;
+          E.Integer 3L;
+          E.Integer length;
+          E.Array chunks;
+        ]
+      when scope = namespace
+           && length > Int64.of_int inline_bytes
+           && length <= Int64.of_int max_value_bytes
+           && List.length chunks
+              = (Int64.to_int length + chunk_bytes - 1) / chunk_bytes ->
+        traverse
+          (function
+            | E.Bytes raw -> reference raw
+            | _ -> Error (Integrity "malformed value chunk reference"))
+          chunks
+    | _ -> Error (Integrity "unsupported page schema, structure or namespace")
+  in
+  Ok (List.sort_uniq Id.compare references)
+
 let[@warning "-4"] read ?(row_limit = max_int) ?(value_limit = max_value_bytes)
     ?(total_limit = max_int) repository ~namespace root =
   let* () = namespace_valid namespace in
