@@ -1071,3 +1071,22 @@ transport regression success does not establish the new Core exchange loop.
 No P03 completion report/receipt, original-phase completion, P4, push/release or
 deployment is claimed. Preserve schema-3 operation data and all recovery roots;
 source rollback cannot undo acceptance or restore user files.
+
+
+P3 integration-outcome correction: `e7b87673b218a3a39d486596959a3d8169e65070`
+preserves typed capture errors through the native adapter, maps missing repositories
+to the existing unavailable exit category, and reports conflicted previews as
+Incomplete. Native integration CLI8 passed, including independent same-path shared
+conflicts, refusal with --yes, malformed native rules, no reservation/history/file
+changes and bounded missing-root error handling. Build/lint passed. The first CI
+run exited 2: the unchanged existing 2.56 MB mixed-file share journey exceeded its
+20-second subprocess timeout. The fixture timeout/assertions were not changed.
+The same focused case passed in 11.2 seconds; a repeat `make ci` on committed
+`e7b8767` exited 0, with selected-share CLI8 taking 19.1 seconds and matching
+successful Dune actions cached. Host load and memory/swap pressure were observed;
+contention is an inference, not a proven performance root cause or fix. Retain the
+failure as flaky verification evidence. Exact outcomes are
+`integration-cli-outcomes-checks.json`, `share-timeout-repro-focused.log` and
+`integration-cli-ci-timeout-repeat.json` under the P3 external log directory.
+No accepted G01 measurements were rerun or modified. All outstanding P3 criteria
+listed above remain open; this correction is not a completion claim.
