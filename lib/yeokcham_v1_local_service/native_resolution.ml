@@ -159,6 +159,29 @@ let conflict_identity plan (conflict : Core.conflict) =
     |> Yeokcham_hash.Sha256.to_raw_string)
   |> model
 
+let recorded_decisions store loaded plan path =
+  let* local = local loaded in
+  let request = Plan.request plan in
+  let* decisions =
+    Core.records (Local.pool local)
+    |> traverse (fun (id, body) ->
+        match body.Core.payload with
+        | Core.Resolution_revision value
+          when Core.Branch_id.equal value.Core.branch request.Core.branch
+               && value.Core.accepted_heads = request.Core.accepted_heads
+               && value.Core.chosen_revisions = request.Core.selected_revisions
+          ->
+            let* scope =
+              Composition.Scope.load store value.Core.decision_scope_root
+              |> content
+            in
+            Ok (if scope = [ path ] then Some (id, value) else None)
+        | Core.Resolution_revision _ | Core.Shared_revision _
+        | Core.Accepted_version _ | Core.Branch_event _ ->
+            Ok None)
+  in
+  Ok (List.filter_map Fun.id decisions)
+
 let conflicts store loaded plan =
   match Plan.readiness plan with
   | Plan.Ready _ | Plan.Decision _ -> Ok []
@@ -217,7 +240,15 @@ let conflicts store loaded plan =
                     let name = prefix ^ ":" ^ Core.Record_id.to_hex id in
                     version store path name name snapshot)
               in
-              Ok (comparison :: versions)
+              let* recorded = recorded_decisions store loaded plan path in
+              let* recorded =
+                recorded
+                |> traverse (fun (id, value) ->
+                    version store path
+                      ("resolution:" ^ Core.Record_id.to_hex id)
+                      "recorded shared decision" value.Core.replacement_snapshot)
+              in
+              Ok ((comparison :: recorded) @ versions)
           in
           let* conflict_id = conflict_identity plan value in
           Ok
@@ -544,6 +575,35 @@ let resolve ~root ~plan ~conflict:identity ~choice:selection ~signer =
         in
         match selection with
         | Defer -> Ok (Done (result source true None true None))
+        | Use name
+          when String.starts_with ~prefix:"resolution:" name
+               && not conflict.private_workspace ->
+            let* id =
+              Core.Record_id.of_hex
+                (String.sub name 11 (String.length name - 11))
+              |> model
+            in
+            let* recorded =
+              recorded_decisions store loaded source conflict.path
+            in
+            let* () =
+              if
+                List.exists
+                  (fun (record, _) -> Core.Record_id.equal record id)
+                  recorded
+              then Ok ()
+              else
+                invalid
+                  "recorded resolution does not match this exact conflict; \
+                   inspect conflicts for current versions"
+            in
+            let* prepared =
+              fresh_plan ~root store loaded safety observed observation source
+                ~resolutions:(id :: (Plan.request source).Core.resolution_ids)
+                ~decisions:(Plan.workspace_decisions source)
+            in
+            let* () = Plan.retain ~store prepared |> plan_error in
+            Ok (Done (result prepared false (Some id) true None))
         | Use _ | File _ ->
             let* replacement, captured =
               replacement store loaded source conflict selection

@@ -52,4 +52,5 @@ val resolve :
     cursor or rewrites ordinary files. The signer runs outside the writer lock.
     A published proposal whose alias could not be retained returns
     retained=false with exact retry identities, rather than claiming completed
-    preparation. *)
+    preparation. Use "resolution:RECORD_ID" reuses a matching authenticated
+    proposal without a signer or the original replacement file. *)

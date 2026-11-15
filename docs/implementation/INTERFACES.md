@@ -1967,7 +1967,8 @@ and conflicts with exact identities, byte paths, shared/private scope, named
 versions, snapshot/content identities and an escaped contents preview bounded
 at 8192 bytes. Larger contents retain their identities and an explicit truncated
 marker; complete closure verification uses existing bounded streaming.
-Version names include `comparison`, `revision:RECORD_ID`, `accepted:RECORD_ID`
+Version names include `comparison`, `revision:RECORD_ID`, `accepted:RECORD_ID`,
+`resolution:RECORD_ID` for a stored decision matching the exact shared conflict,
 and, for a private conflict, `accepted` and `working`. Absence, directories,
 regular/executable files and symlinks remain distinct.
 
@@ -1996,8 +1997,11 @@ unchanged retained bodies reuse their signed identity without invoking a provide
 Unrelated receipts remain in the fresh root. The root publication preserves
 project/history/branch selection and accepts no work. If root publication succeeds
 but alias retention fails, the outcome includes the actual source/conflict,
-resolution/plan identities and `retained=false`; the CLI exits 8 with an exact
-retry action instead of claiming completed preparation.
+resolution/plan identities and `retained=false`; the CLI reports `ok=false`,
+`outcome=interrupted` and exits 8 with an exact retry action. That action uses
+`--use resolution:RECORD_ID` to retain a fresh plan from the authenticated stored
+proposal without another signature or access to the original replacement file.
+Inspection keeps competing stored decisions visible; it does not choose among them.
 
 Private choices use `Plan.make_workspace_decision ~path ~replacement_snapshot`
 and `prepare_decided ~workspace_decisions ~resolution_ids ...`. They require a

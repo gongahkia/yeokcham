@@ -7205,10 +7205,11 @@ let run_native_resolve arguments =
              Core.Plan_id.to_hex result.Native_conflicts.source;
            ]
           @
-          match choice with
-          | Native_conflicts.Use value -> [ "--use"; value ]
-          | Native_conflicts.File value -> [ "--file"; value ]
-          | Native_conflicts.Defer -> [ "--defer" ])
+          match (result.Native_conflicts.public_resolution, choice) with
+          | Some id, _ -> [ "--use"; "resolution:" ^ Core.Record_id.to_hex id ]
+          | None, Native_conflicts.Use value -> [ "--use"; value ]
+          | None, Native_conflicts.File value -> [ "--file"; value ]
+          | None, Native_conflicts.Defer -> [ "--defer" ])
           "The scoped proposal was recorded; retry the same explicit choice to \
            retain its integration plan.";
       ]
@@ -7236,40 +7237,54 @@ let run_native_resolve arguments =
       "Scoped shared resolution proposal recorded and a fresh plan retained; \
        files and accepted history are unchanged."
   in
+  let data =
+    `Assoc
+      [
+        ( "source_plan_id",
+          `String (Core.Plan_id.to_hex result.Native_conflicts.source) );
+        ("conflict_id", `String identity);
+        ("deferred", `Bool result.Native_conflicts.deferred);
+        ( "public_resolution",
+          json_optional
+            (fun id -> `String (Core.Record_id.to_hex id))
+            result.Native_conflicts.public_resolution );
+        ("retained", `Bool result.Native_conflicts.retained);
+        ( "retention_error",
+          json_optional
+            (fun value -> `String value)
+            result.Native_conflicts.retention_error );
+        ( "plan",
+          integration_plan_json
+            ~historical:(not result.Native_conflicts.retained)
+            ~root result.Native_conflicts.prepared );
+      ]
+  in
   if requested_format () = Json_format then
-    domain_json ~plan_id
-      ~outcome:
-        (if result.Native_conflicts.deferred then `Unchanged
-         else if result.Native_conflicts.retained then `Completed
-         else `Incomplete)
-      ~code:
-        (if result.Native_conflicts.deferred then "conflict-deferred"
-         else if result.Native_conflicts.retained then "resolution-prepared"
-         else "resolution-plan-incomplete")
-      ~message
-      ~data:
-        (`Assoc
-           [
-             ( "source_plan_id",
-               `String (Core.Plan_id.to_hex result.Native_conflicts.source) );
-             ("conflict_id", `String identity);
-             ("deferred", `Bool result.Native_conflicts.deferred);
-             ( "public_resolution",
-               json_optional
-                 (fun id -> `String (Core.Record_id.to_hex id))
-                 result.Native_conflicts.public_resolution );
-             ("retained", `Bool result.Native_conflicts.retained);
-             ( "retention_error",
-               json_optional
-                 (fun value -> `String value)
-                 result.Native_conflicts.retention_error );
-             ( "plan",
-               integration_plan_json ~root result.Native_conflicts.prepared );
-           ])
-      ~next_actions:actions ()
+    if not result.Native_conflicts.retained then
+      Cli_data.domain_failure ~command:(command_name ()) ~plan_id
+        ~outcome:`Interrupted
+        ~error:Cli_data.{ code = "resolution-plan-incomplete"; message }
+        ~data
+        ~warnings:(List.rev !public_warnings)
+        ~next_actions:actions ()
+      |> Cli_data.encode |> print_json
+    else
+      domain_json ~plan_id
+        ~outcome:
+          (if result.Native_conflicts.deferred then `Unchanged else `Completed)
+        ~code:
+          (if result.Native_conflicts.deferred then "conflict-deferred"
+           else "resolution-prepared")
+        ~message ~data ~next_actions:actions ()
   else (
     print_endline message;
-    render_integration_plan ~root result.Native_conflicts.prepared);
+    Option.iter
+      (fun id ->
+        Printf.printf "shared resolution %s\n" (Core.Record_id.to_hex id))
+      result.Native_conflicts.public_resolution;
+    render_integration_plan
+      ~historical:(not result.Native_conflicts.retained)
+      ~root result.Native_conflicts.prepared);
   if not result.Native_conflicts.retained then (
     flush_domain_output ();
     exit 8)
