@@ -1158,3 +1158,36 @@ with archive/preferences outside this scoped pilot. Preserve operation schema-2
 rows, linked attempt pages, proofs and staging when changing binaries; source
 rollback cannot undo accepted history or restore user files. No migration,
 current-data deletion, P4 work or P03 completion claim is made.
+
+P3 signing/identity checkpoint:
+`fa6a89f90526def2ec7a2ed8be6f8db70b42e0a5` moves selected-share provider callbacks
+outside the workspace writer lock. After immutable signing, the service reloads
+and checks both the state head and captured filesystem-fact digest before the
+atomic capture/history/receipt root. Provider-time edits or saved state changes
+refuse with a fresh-preview choice while preserving those changes. Concurrent GC
+can collect unrooted staging while signing; semantic verification then refuses
+without publishing, and a fresh attempt recaptures the live files. Forked lock
+probes and actual provider-time save/GC scenarios verify these boundaries.
+
+Publication entropy retries now reserve integration tokens and every current or
+superseded recovery-attempt token alongside publication tokens. A reproduced
+cross-kind collision previously failed after one draw rather than using the
+bounded retry contract; it now retries at most three times and can succeed after
+skipping a reserved recovery identity. Identical receipt retries are unchanged.
+
+Signed local-core69, native share CLI8, integration CLI8 and recovery CLI4 passed;
+`make build`/`make lint` passed. Default `make ci` exited 2 when the same existing
+2.56 MB share case exceeded its unchanged 20-second subprocess limit. Focused
+share CLI8 had passed in 13.017 seconds. Load/memory pressure was observed, but
+contention remains an inference. On the unchanged pending tree, `DUNE_JOBS=2
+make ci` exited 0 in 13.182 seconds; the failed share suite ran in 12.361 seconds,
+with matching successful Dune actions cached. No assertions/timeouts were
+relaxed. Exact commands, worktree hashes and outcomes are
+`share-provider-checkpoint-checks.json` and
+`share-provider-ci-bounded-check.json` under the P3 external log directory.
+Keep the default-run failure as flaky evidence, not a passing check.
+
+This corrects a required P3 writer/signing boundary; it does not establish native
+Core export/clone/exchange or conflict resolution. Those consumers, durable
+native outbound acknowledgement, the Alice/Bob relay loop and the complete
+criterion audit remain open. P3 stays in progress and P4 remains unstarted.
