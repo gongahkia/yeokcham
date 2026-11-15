@@ -68,17 +68,17 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | complete | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`, `7646362d80929e4f9cdccce0b90ac86beaa1a4a8`, `f924e0f480b4b5b7040b2ad3572790f171a8d745`; [attempt 07](implementation/reports/G01-attempt-07.md) | None for G01; next G02 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | in_progress | Partial via P1: `0c1f910dcd8a4f4a7d10db81a199d83fa9774043`, `06f526d9f6f09cd06bd3b57a7a348f64ea17817a`, `51c374f499372349b235e68b32e7bf3e748d2718`, `f900fbc3432e1d7134a547eda4f2ec7366d6c991`, `06b662a8bab5c783117e5fcf45e36b7d942cfc64`; [P1 report](implementation/reports/P01-attempt-01.md) | Review/request/event/policy and account/settings/archive records; request/member identity and proof; full policy/review/archive/journal and crypto interfaces; corresponding vectors/tests. P1 does not complete G02. |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Principal/review/policy evaluation, reconciliation/adoption and full review matrix; see criterion coverage below |
-| [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
+| [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | Partial P3 composition/plans; checkpoints below | Native resolution semantics, full criterion audit and formal phase acceptance remain |
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | — | All criteria in prompt |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | P3 public graph/storage prerequisites only | Core native export, clone/exchange, coverage, acknowledgement and full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
-| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | — | All criteria in prompt |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Verified clone, selected share/update, shared integration/archive, complete preferences and multi-person journeys |
+| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery; checkpoints below | Native outbound acknowledgement, conflict/policy integration, complete fault matrix and formal phase acceptance remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/local integration/recovery | Verified Core clone/exchange, native resolution, archive/preferences and complete multi-person journeys remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -101,6 +101,15 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
 ## Current-phase checkpoints
+
+- P3 recovery continuation `p3-recovery-resume-2026-11-15` resumes on main
+  `480ff7adc5e1518f76456927639355de11d53f18` with the existing thirteen modified
+  source/test files and two untracked recovery CLI fixtures preserved. P2/P1
+  prerequisite ancestry was rechecked. The latest build failed on the unused
+  copy-out loader argument; recovery CLI cases then errored because their test
+  executable had not been built. Earlier recovery-service results apply only to
+  their recorded worktree. Stabilizing this checkpoint before native conflict
+  resolution and Core clone/exchange; all seven P3 criteria remain binding.
 
 - P2 native-ignore checkpoint: root/nested byte-oriented glob/negation/escape
   matching, explicit parent re-inclusion and mandatory metadata exclusions now
@@ -1090,3 +1099,62 @@ failure as flaky verification evidence. Exact outcomes are
 `integration-cli-ci-timeout-repeat.json` under the P3 external log directory.
 No accepted G01 measurements were rerun or modified. All outstanding P3 criteria
 listed above remain open; this correction is not a completion claim.
+
+P3 private-recovery checkpoint:
+`8b37259e1089aaad48830fcb6feec461dfe22f48` adds private recovery attempts to the
+same paged operation root, explicit restore-safety/keep-current choices, immutable
+prior attempts, retryable phase/metadata execution and verified proof/GC ownership.
+Recovery closes only uncommitted integration; its single private child consumes
+the reserved sequence without admitting staged acceptance. External edits pause;
+Materialized retries do not replay files. Replanning retains earlier observations.
+The safe application engine now checks all expected target paths before claiming
+Materialized, including paths the operation did not write, while preserving
+noncolliding ignored extras.
+
+`2a0cc3650319c62ed0730447ffbd6ccd050a4989` adds ordinary
+`operation recover/forget`, exact preview/confirmation, default cancellation,
+provider-free resume and schema-2 facts/actions. Retained observations support
+ordinary diff and recovery copy-out. Completed historical retries report their
+recorded state without claiming a current-file inspection. Explicit root release
+leaves history/files/acceptance intact and reports potentially unavailable
+historical comparisons. Current interfaces and collaboration/undo guides describe
+the ordered private schemas, domain digests, ownership and consumers.
+
+Two actual GC regressions were reproduced and corrected: collecting a released
+unaccepted merged proposal previously made its cancelled operation unreadable;
+a pending recovery-observation copy-out was previously rejected as outside the
+ordinary checkpoint set. Released cancelled staging still verifies signed
+identity/references/inputs but does not require discarded composition contents;
+it cannot admit those records. The authoritative public pool retains full result
+validation. Journal/proof contents now have independent verified GC roots even
+when never captured as ordinary checkpoints. Collection/reload/resume and a
+copy-out interrupted before files, followed by original-root release and actual
+GC, are covered.
+
+Focused signed local-core67, safe-apply22, store-safety8, restore-proof3, GC11,
+local-service45 and inspection7 passed. Fresh-process recovery CLI4, integration
+CLI8, selected-share CLI8 and branch CLI17 passed. `make build`, `make lint` and
+`make ci` exited 0 on parent `480ff7a` with the exact pending source tree then
+committed in the two hashes above. CI took 24.057 seconds; successful unchanged
+Dune actions can be cached. Exact commands/exits are
+`native-recovery-checkpoint-checks.json`; CI includes the worktree file hashes in
+`native-recovery-ci-check.json`, both under the P3 external log directory.
+Initial build/strict-warning errors, formatter promotion (make exit 2), a focused
+filter that selected no tests, and both intentionally failing GC reproductions
+are preserved in the external logs. The final full focused run did not filter
+out cases. No assertion or timeout was relaxed. README, P2 handoff and accepted
+G01 file hashes still match the starting receipt. Tiny CI harness regressions
+ran; accepted G01 measurements did not.
+
+This checkpoint adds partial G02 private-operation schema, G04 exact-plan
+consumption, G13 execution/recovery and G14 ordinary recovery-CLI coverage. It
+does not complete any original phase. G03 still lacks complete required-policy/
+review/adoption evaluation; unsupported required semantics refuse. G04 still
+needs native resolutions and its full phase audit. G08 Core public export/native
+clone/exchange/coverage and real outbound acknowledgement remain open. G13 still
+needs those acknowledgement semantics, conflict/policy integration and the full
+two-person/fault audit. G14 still needs ordinary Core clone/exchange/resolution,
+with archive/preferences outside this scoped pilot. Preserve operation schema-2
+rows, linked attempt pages, proofs and staging when changing binaries; source
+rollback cannot undo accepted history or restore user files. No migration,
+current-data deletion, P4 work or P03 completion claim is made.
