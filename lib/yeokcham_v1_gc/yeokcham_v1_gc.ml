@@ -620,10 +620,16 @@ let plan_from_loaded ~root store loaded =
         traverse_snapshot store reasons snapshot_id reachable)
       (Ok Object_map.empty) roots
   in
-  let reachable = List.fold_left (fun reachable (operation, id) ->
-    let previous = Option.value ~default:[] (Object_map.find_opt id reachable) in
-    Object_map.add id (Publication_witness operation :: previous) reachable)
-    reachable (V1_store.local_publication_witnesses loaded) in
+  let reachable =
+    List.fold_left
+      (fun reachable (operation, id) ->
+        let previous =
+          Option.value ~default:[] (Object_map.find_opt id reachable)
+        in
+        Object_map.add id (Publication_witness operation :: previous) reachable)
+      reachable
+      (V1_store.local_publication_witnesses loaded)
+  in
   let* objects =
     Store.list_objects store
     |> Result.map_error (fun error -> Store_error error)

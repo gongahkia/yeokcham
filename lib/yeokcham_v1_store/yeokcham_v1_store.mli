@@ -79,7 +79,9 @@ val local_shared_snapshots : loaded -> Yeokcham_v1_model.Snapshot_id.t list
     including derived selected results absent from private checkpoints. *)
 
 val local_publication_witnesses :
-  loaded -> (Yeokcham_v1_model.Core.Operation_id.t * Yeokcham_store.Stored_object_id.t) list
+  loaded ->
+  (Yeokcham_v1_model.Core.Operation_id.t * Yeokcham_store.Stored_object_id.t)
+  list
 (** Exact snapshot/ancestor-tree witnesses, rooted without recursively retaining
     unselected private contents from the old source capture. *)
 

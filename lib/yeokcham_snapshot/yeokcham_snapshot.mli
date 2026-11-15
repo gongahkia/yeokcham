@@ -122,6 +122,11 @@ module Tree : sig
   val entries : t -> (string * entry) list
   val id : t -> (id, error) result
   val store : Yeokcham_store.repository -> t -> (id, error) result
+
+  val load_metadata : Yeokcham_store.repository -> id -> (t, error) result
+  (** Canonical object identity/schema only. Does not verify descendants or
+      content availability; scoped Merkle witnesses use this explicitly. *)
+
   val load : Yeokcham_store.repository -> id -> (t, error) result
 end
 
@@ -136,6 +141,10 @@ module Snapshot : sig
   val root : t -> Tree.id
   val id : t -> (id, error) result
   val store : Yeokcham_store.repository -> t -> (id, error) result
+
+  val load_metadata : Yeokcham_store.repository -> id -> (t, error) result
+  (** Canonical snapshot object only, without its referenced tree closure. *)
+
   val load : Yeokcham_store.repository -> id -> (t, error) result
 end
 

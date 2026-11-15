@@ -10,8 +10,15 @@
 (test
  (name test_metadata_pages)
  (modules test_metadata_pages)
- (libraries alcotest unix yeokcham_encoding yeokcham_envelope yeokcham_store yeokcham_v1_pages)
- (deps (source_tree golden)))
+ (libraries
+  alcotest
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_pages)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_store_safety)

@@ -34,14 +34,14 @@ val record_publication :
   observed:Core.Object_id.t ->
   contributed_scope:Core.Object_id.t ->
   title:string ->
-  t -> (t * publication, string) result
+  t ->
+  (t * publication, string) result
 (** Stages a private receipt and its exact source Merkle witnesses. The caller
     atomically publishes it with the source history node and signed revision.
     The receipt retains the revision as outbound work; it is not a transfer
     acknowledgement. Identical intent retries reuse the operation identity. *)
 
 val validate_history : Yeokcham_v1_undo.t -> t -> (unit, string) result
-
 val selected : t -> position
 val positions : t -> position list
 val branches : t -> Core.branch_state list
@@ -135,10 +135,14 @@ module For_test : sig
   val record_publication :
     random_bytes:(int -> (string, string) result) ->
     store:Yeokcham_store.repository ->
-    intent:Core.Digest.t -> revision:Core.Record_id.t ->
-    source:Core.History_id.t -> observed:Core.Object_id.t ->
-    contributed_scope:Core.Object_id.t -> title:string ->
-    t -> (t * publication, string) result
+    intent:Core.Digest.t ->
+    revision:Core.Record_id.t ->
+    source:Core.History_id.t ->
+    observed:Core.Object_id.t ->
+    contributed_scope:Core.Object_id.t ->
+    title:string ->
+    t ->
+    (t * publication, string) result
 
   val create_branch :
     random_bytes:(int -> (string, string) result) ->

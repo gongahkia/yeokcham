@@ -85,7 +85,7 @@ Future unbounded collections require paged records, not a larger unbounded parse
 
 ## Identities and local allocation ownership
 
-`Model.Core.Workspace_id`, `Branch_id`, and `Change_id` are distinct abstract
+`Model.Core.Workspace_id`, `Branch_id`, `Change_id`, and `Operation_id` are distinct abstract
 types implementing `Random_id`. Each exposes `of_raw`, `to_raw`, `of_hex`,
 `to_hex`, `equal`, `compare`, and:
 
@@ -806,9 +806,9 @@ Python scope envelope/identity fixtures are in `test/golden/composition/` and
 checked by `tools/generate_composition_vectors.py`. Focused profile/tree/scope
 and malformed-input/property cases are in `test/test_composition.ml`.
 
-This foundation does not yet implement accepted-result graph verification,
-publication correspondence, selected share CLI, clone/exchange, integration
-plans/execution or conflict resolution. P3 remains incomplete.
+The later P3 checkpoints below supply accepted-result graph verification and
+scoped publication receipts. Selected share CLI, clone/exchange, integration
+plans/execution and conflict resolution remain incomplete.
 
 
 ### P3 accepted-result graph and signed store boundary (in progress)
@@ -861,3 +861,74 @@ held, it reads the atomic saved metadata while marking capture incomplete and
 uncaptured/changes unknown. It does not scan partial live files or claim clean
 contents. The forked writer test plus foreground-watch and runtime journeys
 exercise this boundary; status remains useful while capture/application runs.
+
+### P3 publication receipts and metadata pages (in progress)
+
+`Yeokcham_v1_pages.store repository ~namespace rows` stores immutable byte-key/
+value collections; `load` and `closure` verify and return sorted rows or object
+identities. Registry **45** is `Core_metadata_page`. Every full envelope is at
+most 1 MiB and binds the same 1–128-byte namespace. Keys contain 1–1024 bytes;
+values contain at most 8 MiB. Constructor order is immaterial and duplicate keys
+refuse. The ordered payloads are:
+
+| Kind | Ordered payload |
+| --- | --- |
+| Collection leaf | `[1, namespace, 0, [[key, value_reference], ...]]` |
+| Collection index | `[1, namespace, 1, [[maximum_key, child_id], ...]]` |
+| Value chunk | `[1, namespace, 2, bytes]` |
+| Value index | `[1, namespace, 3, total_length, [chunk_id, ...]]` |
+
+References use raw 32-byte store identities. Values up to 4096 bytes use
+`[0, bytes]`; larger values use `[1, value_index_id]`. Chunks contain 512 KiB
+except the final nonempty chunk. Value indices are mandatory for chunked values,
+including a single chunk. Leaves/indices group consecutive sorted rows/children
+in sets of 128; a root leaf represents the empty collection. Each index level is
+built until one root remains. Readers bound input before decoding, verify object
+identity/type/namespace, lengths, child maxima, order and pagination, and
+reconstruct the canonical root without writes. Repeated collection pages refuse;
+identical value chunks may be reused. This adds collections for new metadata,
+not a replacement for the existing whole-history representation or a performance
+claim. Independent envelope/identity fixtures share the composition generator.
+
+`Store.Local.publications` exposes private `publication` receipts.
+`find_publication ~intent` locates a recorded retry; `record_publication` stages
+one under the selected branch and returns its generated typed 128-bit operation
+identity. Identical intent/inputs reuse the receipt without entropy; conflicting
+intent reuse refuses. New operation allocation allows at most three collisions.
+The source `History_id` and observed snapshot must match the authoritative local
+history before root publication. Existing receipts cannot be erased or altered.
+
+Local state with no receipt remains schema 1. Schema 2 appends the publication
+collection root to the existing fields:
+`[2, empty_snapshot, selected_branch, record_pairs, positions, publication_root]`.
+The namespace is `local-publications-v1\0` followed by raw repository identity;
+each key is the operation's 16 raw bytes. The value is the canonical array
+`[1, intent_digest, revision, branch, workspace, sequence, observed_snapshot,
+contributed_scope, title, witness_root]`. Titles are nonempty UTF-8 text, at most
+1024 bytes and without NUL. Other identities are raw bytes; sequence is a
+nonnegative int64. The receipt retains the exact signed revision as outbound
+work in the same state root; it does not acknowledge a remote transfer.
+
+The contribution is exactly the difference from the previous public revision's
+result (or the declared base for a new change), with corresponding values/absence
+proved at its private source observation. Carried-forward public fields are not
+claimed as observed local work. Concurrent predecessors currently need an
+explicit decision. The witness set uses namespace
+`local-publication-witness-v1\0` plus raw repository identity, raw object-ID keys,
+and empty values. It must equal the exact snapshot/ancestor trees used to query
+the contributed scope; unrelated content blobs are excluded.
+
+`Composition.Witness.inspect ~snapshot ~paths` returns selected entries/absence
+and these exact object identities. New `Snapshot.Tree.load_metadata` and
+`Snapshot.Snapshot.load_metadata` verify only the canonical referenced object,
+without descendant contents. Existing `load` functions still verify full closure.
+`Store.local_publication_witnesses` and `Gc.Publication_witness` root witness
+objects directly, without recursively retaining every private blob reachable
+from an old source snapshot. The GC regression actually removes an old unselected
+blob, then reloads and verifies the receipt successfully. Missing old private
+contents are not misreported as a complete restorable snapshot.
+
+These APIs stage metadata. The actual share service/CLI must still atomically
+publish capture/history, signed records and receipts; transport acknowledgements
+and recoverable integration operations remain later P3 work. No exchange or
+integration success follows from this checkpoint.

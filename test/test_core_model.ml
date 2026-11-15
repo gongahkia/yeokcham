@@ -64,6 +64,20 @@ let identifiers () =
   rejects "non-hex hash" (M.Record_id.of_hex (String.make 64 'g'));
   rejects "random source cannot return short bytes"
     (M.Change_id.generate ~random_bytes:(fun _ -> Ok "short") ());
+  rejects "operation entropy cannot return short bytes"
+    (M.Operation_id.generate ~random_bytes:(fun _ -> Ok "short") ());
+  let operation =
+    M.Operation_id.generate
+      ~random_bytes:(fun n ->
+        Alcotest.(check int) "128-bit operation allocation" 16 n;
+        Ok raw)
+      ()
+    |> ok
+  in
+  Alcotest.(check bool)
+    "operation round trip" true
+    (M.Operation_id.equal operation
+       (M.Operation_id.of_hex (M.Operation_id.to_hex operation) |> ok));
   rejects "entropy errors remain errors"
     (M.Branch_id.generate ~random_bytes:(fun _ -> Error "unavailable") ());
   let requested = ref 0 in

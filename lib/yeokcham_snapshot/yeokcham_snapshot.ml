@@ -863,7 +863,7 @@ module Tree = struct
           Ok tree
     | _ -> Error (Invalid_schema "tree must contain two values")
 
-  let rec load repository identity =
+  let load_metadata repository identity =
     let* object_ =
       Store.get repository (stored_object_id identity)
       |> Result.map_error (fun error -> Store_error error)
@@ -872,19 +872,21 @@ module Tree = struct
       Error
         (Unexpected_object_type
            { expected = Envelope.Tree; actual = Envelope.object_type object_ })
-    else
-      let* tree = decode (Envelope.payload object_) in
-      let rec validate_references = function
-        | [] -> Ok ()
-        | (_, File { content; _ }) :: rest ->
-            let* _ = Content.load repository content in
-            validate_references rest
-        | (_, Directory child) :: rest ->
-            let* _ = load repository child in
-            validate_references rest
-      in
-      let* () = validate_references tree in
-      Ok tree
+    else decode (Envelope.payload object_)
+
+  let rec load repository identity =
+    let* tree = load_metadata repository identity in
+    let rec validate_references = function
+      | [] -> Ok ()
+      | (_, File { content; _ }) :: rest ->
+          let* _ = Content.load repository content in
+          validate_references rest
+      | (_, Directory child) :: rest ->
+          let* _ = load repository child in
+          validate_references rest
+    in
+    let* () = validate_references tree in
+    Ok tree
 end
 
 module Snapshot = struct
@@ -932,7 +934,7 @@ module Snapshot = struct
           Ok snapshot
     | _ -> Error (Invalid_schema "snapshot must contain two values")
 
-  let load repository identity =
+  let load_metadata repository identity =
     let* object_ =
       Store.get repository (stored_object_id identity)
       |> Result.map_error (fun error -> Store_error error)
@@ -944,10 +946,12 @@ module Snapshot = struct
              expected = Envelope.Snapshot;
              actual = Envelope.object_type object_;
            })
-    else
-      let* snapshot = decode (Envelope.payload object_) in
-      let* _ = Tree.load repository snapshot.root in
-      Ok snapshot
+    else decode (Envelope.payload object_)
+
+  let load repository identity =
+    let* snapshot = load_metadata repository identity in
+    let* _ = Tree.load repository snapshot.root in
+    Ok snapshot
 end
 
 let snapshot_error_to_string = error_to_string

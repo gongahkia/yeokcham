@@ -1464,119 +1464,360 @@ let[@warning "-4"] signed_false_acceptance_cannot_enter_local_state () =
 
 let stage_publication root =
   let repository, capability, certificate, authority, _ = initialize root in
-  Out_channel.with_open_bin (root ^ "/note.txt") (fun out -> output_string out "selected D\n");
+  Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+      output_string out "selected D\n");
   Service.save ~root |> service |> ignore;
   let before = load repository in
   let store = S.underlying_store repository in
-  let content = Snapshot.Content.store store "selected D\n" |> ok Snapshot.error_to_string in
-  let result = Composition.tree [["note.txt"], Composition.File {mode=Snapshot.Regular;content}]
-    |> ok Composition.error_to_string |> Composition.store store |> ok Composition.error_to_string in
-  let scope = Composition.Scope.store store [["note.txt"]] |> ok Composition.error_to_string in
-  let staged, revision = L.prepare_revision ~store ~authority ~certificate ~signing_capability:capability
-    ~change:None ~previous_revisions:[] ~base_snapshot:(L.empty_snapshot (local before))
-    ~result_snapshot:result ~edit_scope_root:scope ~dependencies:[] (local before) |> ok Fun.id in
-  let source = H.identity before.S.history (H.current before.S.history) |> ok Fun.id in
-  let observed = C.Object_id.of_hex (M.Snapshot_id.to_string (H.current before.S.history).H.snapshot) |> model in
+  let content =
+    Snapshot.Content.store store "selected D\n" |> ok Snapshot.error_to_string
+  in
+  let result =
+    Composition.tree
+      [
+        ([ "note.txt" ], Composition.File { mode = Snapshot.Regular; content });
+      ]
+    |> ok Composition.error_to_string
+    |> Composition.store store
+    |> ok Composition.error_to_string
+  in
+  let scope =
+    Composition.Scope.store store [ [ "note.txt" ] ]
+    |> ok Composition.error_to_string
+  in
+  let staged, revision =
+    L.prepare_revision ~store ~authority ~certificate
+      ~signing_capability:capability ~change:None ~previous_revisions:[]
+      ~base_snapshot:(L.empty_snapshot (local before))
+      ~result_snapshot:result ~edit_scope_root:scope ~dependencies:[]
+      (local before)
+    |> ok Fun.id
+  in
+  let source =
+    H.identity before.S.history (H.current before.S.history) |> ok Fun.id
+  in
+  let observed =
+    C.Object_id.of_hex
+      (M.Snapshot_id.to_string (H.current before.S.history).H.snapshot)
+    |> model
+  in
   let intent = C.Digest.of_raw (String.make 32 'i') |> model in
-  repository, before, staged, revision, source, observed, scope, intent
+  (repository, before, staged, revision, source, observed, scope, intent)
 
-let publication_receipts_are_atomic_and_retryable () = with_root (fun root ->
-  let repository, before, staged, revision, source, observed, contributed_scope, intent = stage_publication root in
-  let store = S.underlying_store repository in
-  let publication_state, receipt = L.record_publication ~store ~intent ~revision ~source ~observed
-    ~contributed_scope ~title:"Selected note" staged |> ok Fun.id in
-  Alcotest.(check bool) "staging does not publish root" true
-    (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
-  let retry, repeated = L.For_test.record_publication ~random_bytes:(fun _ -> Alcotest.fail "retry requested entropy")
-    ~store ~intent ~revision ~source ~observed ~contributed_scope ~title:"Selected note" publication_state |> ok Fun.id in
-  Alcotest.(check bool) "same recorded operation" true (C.Operation_id.equal receipt.L.operation repeated.L.operation);
-  Alcotest.(check string) "identical receipt state" (L.encode publication_state |> ok Fun.id) (L.encode retry |> ok Fun.id);
-  reject "same intent retitled" (L.record_publication ~store ~intent ~revision ~source ~observed
-    ~contributed_scope ~title:"different" publication_state);
-  let attempts = ref 0 in
-  reject "operation collision reused identity for different intent"
-    (L.For_test.record_publication ~random_bytes:(fun n -> incr attempts;
-      Alcotest.(check int) "128-bit operation" 16 n; Ok (C.Operation_id.to_raw receipt.L.operation))
-      ~store ~intent:(C.Digest.of_raw (String.make 32 'j') |> model)
-      ~revision ~source ~observed ~contributed_scope ~title:"Selected note" publication_state);
-  Alcotest.(check int) "bounded operation collisions" 3 !attempts;
-  let committed = S.save_collaborative ~local:publication_state repository ~expected:before.S.head
-    ~project:before.S.project ~collaboration:(Option.get before.S.collaboration) |> ok S.error_to_string in
-  Alcotest.(check bool) "receipt and record share one root" true
-    (Option.is_some (C.find (L.pool (local committed)) revision));
-  reject "receipt erased by later update" (L.validate_update ~previous:(local committed) staged);
-  let child = Unix.fork () in
-  if child = 0 then (
-    let fresh = S.open_repository ~root |> ok S.error_to_string |> load in
-    let durable = L.find_publication (local fresh) ~intent |> Option.get in
-    if not (C.Operation_id.equal durable.L.operation receipt.L.operation) then Unix._exit 72;
-    Unix._exit 0);
-  let _, status = Unix.waitpid [] child in
-  Alcotest.(check bool) "fresh process retains exact publication/outbound identity" true (status=Unix.WEXITED 0))
+let publication_receipts_are_atomic_and_retryable () =
+  with_root (fun root ->
+      let ( repository,
+            before,
+            staged,
+            revision,
+            source,
+            observed,
+            contributed_scope,
+            intent ) =
+        stage_publication root
+      in
+      let store = S.underlying_store repository in
+      let publication_state, receipt =
+        L.record_publication ~store ~intent ~revision ~source ~observed
+          ~contributed_scope ~title:"Selected note" staged
+        |> ok Fun.id
+      in
+      Alcotest.(check bool)
+        "staging does not publish root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let retry, repeated =
+        L.For_test.record_publication
+          ~random_bytes:(fun _ -> Alcotest.fail "retry requested entropy")
+          ~store ~intent ~revision ~source ~observed ~contributed_scope
+          ~title:"Selected note" publication_state
+        |> ok Fun.id
+      in
+      Alcotest.(check bool)
+        "same recorded operation" true
+        (C.Operation_id.equal receipt.L.operation repeated.L.operation);
+      Alcotest.(check string)
+        "identical receipt state"
+        (L.encode publication_state |> ok Fun.id)
+        (L.encode retry |> ok Fun.id);
+      reject "same intent retitled"
+        (L.record_publication ~store ~intent ~revision ~source ~observed
+           ~contributed_scope ~title:"different" publication_state);
+      let attempts = ref 0 in
+      reject "operation collision reused identity for different intent"
+        (L.For_test.record_publication
+           ~random_bytes:(fun n ->
+             incr attempts;
+             Alcotest.(check int) "128-bit operation" 16 n;
+             Ok (C.Operation_id.to_raw receipt.L.operation))
+           ~store
+           ~intent:(C.Digest.of_raw (String.make 32 'j') |> model)
+           ~revision ~source ~observed ~contributed_scope ~title:"Selected note"
+           publication_state);
+      Alcotest.(check int) "bounded operation collisions" 3 !attempts;
+      let committed =
+        S.save_collaborative ~local:publication_state repository
+          ~expected:before.S.head ~project:before.S.project
+          ~collaboration:(Option.get before.S.collaboration)
+        |> ok S.error_to_string
+      in
+      Alcotest.(check bool)
+        "receipt and record share one root" true
+        (Option.is_some (C.find (L.pool (local committed)) revision));
+      reject "receipt erased by later update"
+        (L.validate_update ~previous:(local committed) staged);
+      let child = Unix.fork () in
+      if child = 0 then (
+        let fresh = S.open_repository ~root |> ok S.error_to_string |> load in
+        let durable = L.find_publication (local fresh) ~intent |> Option.get in
+        if not (C.Operation_id.equal durable.L.operation receipt.L.operation)
+        then Unix._exit 72;
+        Unix._exit 0);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "fresh process retains exact publication/outbound identity" true
+        (status = Unix.WEXITED 0))
 
-let publication_rejects_unwitnessed_or_foreign_sources () = with_root (fun root ->
-  let repository, before, staged, revision, source, observed, contributed_scope, intent = stage_publication root in
-  let store = S.underlying_store repository in
-  let wrong_observation = C.Object_id.of_hex (M.Snapshot_id.to_string (List.hd (H.nodes before.S.history)).H.snapshot) |> model in
-  reject "unobserved public path accepted" (L.record_publication ~store ~intent ~revision ~source
-    ~observed:wrong_observation ~contributed_scope ~title:"note" staged);
-  let wrong_scope = Composition.Scope.store store [["note.txt"];["private.bin"]] |> ok Composition.error_to_string in
-  reject "unselected private scope used as correspondence" (L.record_publication ~store ~intent ~revision ~source
-    ~observed ~contributed_scope:wrong_scope ~title:"note" staged);
-  let source = C.History_id.make ~workspace:(C.Workspace_id.of_raw (String.make 16 'z') |> model)
-    ~sequence:(C.History_id.sequence source) |> model in
-  let foreign, _ = L.record_publication ~store ~intent ~revision ~source ~observed ~contributed_scope ~title:"note" staged |> ok Fun.id in
-  reject "foreign history source committed" (S.save_collaborative ~local:foreign repository ~expected:before.S.head
-    ~project:before.S.project ~collaboration:(Option.get before.S.collaboration));
-  Alcotest.(check bool) "invalid correspondence leaves root unchanged" true
-    (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+let publication_rejects_unwitnessed_or_foreign_sources () =
+  with_root (fun root ->
+      let ( repository,
+            before,
+            staged,
+            revision,
+            source,
+            observed,
+            contributed_scope,
+            intent ) =
+        stage_publication root
+      in
+      let store = S.underlying_store repository in
+      let wrong_observation =
+        C.Object_id.of_hex
+          (M.Snapshot_id.to_string
+             (List.hd (H.nodes before.S.history)).H.snapshot)
+        |> model
+      in
+      reject "unobserved public path accepted"
+        (L.record_publication ~store ~intent ~revision ~source
+           ~observed:wrong_observation ~contributed_scope ~title:"note" staged);
+      let wrong_scope =
+        Composition.Scope.store store [ [ "note.txt" ]; [ "private.bin" ] ]
+        |> ok Composition.error_to_string
+      in
+      reject "unselected private scope used as correspondence"
+        (L.record_publication ~store ~intent ~revision ~source ~observed
+           ~contributed_scope:wrong_scope ~title:"note" staged);
+      let source =
+        C.History_id.make
+          ~workspace:(C.Workspace_id.of_raw (String.make 16 'z') |> model)
+          ~sequence:(C.History_id.sequence source)
+        |> model
+      in
+      let foreign, _ =
+        L.record_publication ~store ~intent ~revision ~source ~observed
+          ~contributed_scope ~title:"note" staged
+        |> ok Fun.id
+      in
+      reject "foreign history source committed"
+        (S.save_collaborative ~local:foreign repository ~expected:before.S.head
+           ~project:before.S.project
+           ~collaboration:(Option.get before.S.collaboration));
+      Alcotest.(check bool)
+        "invalid correspondence leaves root unchanged" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
 
-let publication_witness_survives_private_content_collection () = with_root (fun root ->
-  let repository, before, staged, revision, source, observed, contributed_scope, intent = stage_publication root in
-  let store = S.underlying_store repository in
-  let state, receipt = L.record_publication ~store ~intent ~revision ~source ~observed ~contributed_scope
-    ~title:"note" staged |> ok Fun.id in
-  S.save_collaborative ~local:state repository ~expected:before.S.head ~project:before.S.project
-    ~collaboration:(Option.get before.S.collaboration) |> ok S.error_to_string |> ignore;
-  let original = Composition.load store observed |> ok Composition.error_to_string |> Composition.entries in
-  let private_content = match List.assoc ["private.bin"] original with
-    | Composition.File file -> Snapshot.Content.stored_object_id file.content
-    | Composition.Directory -> Alcotest.fail "private file expected" in
-  write_private root "later unselected private contents";
-  Service.save ~root |> service |> ignore;
-  Service.compact ~root ~keep_recent:0 ~dry_run:false |> service |> ignore;
-  let plan = Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string in
-  let private_entry = List.find (fun entry -> Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id private_content)
-    plan.Yeokcham_v1_gc.objects in
-  Alcotest.(check bool) "old unselected blob is collectible" true (private_entry.Yeokcham_v1_gc.disposition=Yeokcham_v1_gc.Collect);
-  List.iter (fun id ->
-    let entry = List.find (fun entry -> Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id id) plan.Yeokcham_v1_gc.objects in
-    Alcotest.(check bool) "exact witness retained" true (entry.Yeokcham_v1_gc.disposition<>Yeokcham_v1_gc.Collect)) receipt.L.witnesses;
-  Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
-  List.iter (fun id -> Raw.get store id |> ok Raw.error_to_string |> ignore) receipt.L.witnesses;
-  let revision = match C.find (L.pool state) revision with
-    | Some { C.payload = C.Shared_revision revision; _ } -> revision
-    | _ -> Alcotest.fail "expected shared revision" in
-  Composition.load store revision.C.base_snapshot |> ok Composition.error_to_string |> ignore;
-  Composition.load store revision.C.result_snapshot |> ok Composition.error_to_string |> ignore;
-  reject "old private capture unexpectedly complete after collection" (Composition.load store observed);
-  let fresh = load repository in
-  let durable = L.find_publication (local fresh) ~intent |> Option.get in
-  Alcotest.(check bool) "selected correspondence survives unrelated blob collection" true
-    (C.Operation_id.equal receipt.L.operation durable.L.operation);
-  Alcotest.(check string) "later working bytes intact" "later unselected private contents" (read_private root))
+let publication_witness_survives_private_content_collection () =
+  with_root (fun root ->
+      let ( repository,
+            before,
+            staged,
+            revision,
+            source,
+            observed,
+            contributed_scope,
+            intent ) =
+        stage_publication root
+      in
+      let store = S.underlying_store repository in
+      let state, receipt =
+        L.record_publication ~store ~intent ~revision ~source ~observed
+          ~contributed_scope ~title:"note" staged
+        |> ok Fun.id
+      in
+      S.save_collaborative ~local:state repository ~expected:before.S.head
+        ~project:before.S.project
+        ~collaboration:(Option.get before.S.collaboration)
+      |> ok S.error_to_string |> ignore;
+      let original =
+        Composition.load store observed
+        |> ok Composition.error_to_string
+        |> Composition.entries
+      in
+      let private_content =
+        match List.assoc [ "private.bin" ] original with
+        | Composition.File file ->
+            Snapshot.Content.stored_object_id file.content
+        | Composition.Directory -> Alcotest.fail "private file expected"
+      in
+      write_private root "later unselected private contents";
+      Service.save ~root |> service |> ignore;
+      Service.compact ~root ~keep_recent:0 ~dry_run:false |> service |> ignore;
+      let plan =
+        Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string
+      in
+      let private_entry =
+        List.find
+          (fun entry ->
+            Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id
+              private_content)
+          plan.Yeokcham_v1_gc.objects
+      in
+      Alcotest.(check bool)
+        "old unselected blob is collectible" true
+        (private_entry.Yeokcham_v1_gc.disposition = Yeokcham_v1_gc.Collect);
+      List.iter
+        (fun id ->
+          let entry =
+            List.find
+              (fun entry ->
+                Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id id)
+              plan.Yeokcham_v1_gc.objects
+          in
+          Alcotest.(check bool)
+            "exact witness retained" true
+            (entry.Yeokcham_v1_gc.disposition <> Yeokcham_v1_gc.Collect))
+        receipt.L.witnesses;
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      List.iter
+        (fun id -> Raw.get store id |> ok Raw.error_to_string |> ignore)
+        receipt.L.witnesses;
+      let revision =
+        match C.find (L.pool state) revision with
+        | Some { C.payload = C.Shared_revision revision; _ } -> revision
+        | None | Some { C.payload = C.Accepted_version _ | C.Branch_event _; _ }
+          ->
+            Alcotest.fail "expected shared revision"
+      in
+      Composition.load store revision.C.base_snapshot
+      |> ok Composition.error_to_string
+      |> ignore;
+      Composition.load store revision.C.result_snapshot
+      |> ok Composition.error_to_string
+      |> ignore;
+      reject "old private capture unexpectedly complete after collection"
+        (Composition.load store observed);
+      let fresh = load repository in
+      let durable = L.find_publication (local fresh) ~intent |> Option.get in
+      Alcotest.(check bool)
+        "selected correspondence survives unrelated blob collection" true
+        (C.Operation_id.equal receipt.L.operation durable.L.operation);
+      Alcotest.(check string)
+        "later working bytes intact" "later unselected private contents"
+        (read_private root))
+
+let publication_update_witnesses_only_newly_selected_edits () =
+  with_root (fun root ->
+      let repository, before, _, _, source, observed, contributed_scope, intent
+          =
+        stage_publication root
+      in
+      let capability, _, certificate, authority, _ = fixture () in
+      let store = S.underlying_store repository in
+      let file text =
+        let content =
+          Snapshot.Content.store store text |> ok Snapshot.error_to_string
+        in
+        Composition.File { mode = Snapshot.Regular; content }
+      in
+      let previous_tree =
+        Composition.tree
+          [
+            ([ "note.txt" ], file "old remote note\n");
+            ([ "remote.txt" ], file "remote carried work\n");
+          ]
+        |> ok Composition.error_to_string
+      in
+      let previous_result =
+        Composition.store store previous_tree |> ok Composition.error_to_string
+      in
+      let whole_scope =
+        Composition.Scope.store store [ [ "note.txt" ]; [ "remote.txt" ] ]
+        |> ok Composition.error_to_string
+      in
+      let staged, previous =
+        L.prepare_revision ~store ~authority ~certificate
+          ~signing_capability:capability ~change:None ~previous_revisions:[]
+          ~base_snapshot:(L.empty_snapshot (local before))
+          ~result_snapshot:previous_result ~edit_scope_root:whole_scope
+          ~dependencies:[] (local before)
+        |> ok Fun.id
+      in
+      let change =
+        match C.find (L.pool staged) previous with
+        | Some { C.payload = C.Shared_revision value; _ } -> value.C.change
+        | None | Some { C.payload = C.Accepted_version _ | C.Branch_event _; _ }
+          ->
+            Alcotest.fail "expected revision"
+      in
+      let updated =
+        Composition.tree
+          [
+            ([ "note.txt" ], file "selected D\n");
+            ([ "remote.txt" ], file "remote carried work\n");
+          ]
+        |> ok Composition.error_to_string
+        |> Composition.store store
+        |> ok Composition.error_to_string
+      in
+      let staged, revision =
+        L.prepare_revision ~store ~authority ~certificate
+          ~signing_capability:capability ~change:(Some change)
+          ~previous_revisions:[ previous ]
+          ~base_snapshot:(L.empty_snapshot staged) ~result_snapshot:updated
+          ~edit_scope_root:whole_scope ~dependencies:[] staged
+        |> ok Fun.id
+      in
+      reject "carried remote path claimed as locally observed"
+        (L.record_publication ~store ~intent ~revision ~source ~observed
+           ~contributed_scope:whole_scope ~title:"Update note" staged);
+      let state, receipt =
+        L.record_publication ~store ~intent ~revision ~source ~observed
+          ~contributed_scope ~title:"Update note" staged
+        |> ok Fun.id
+      in
+      let committed =
+        S.save_collaborative ~local:state repository ~expected:before.S.head
+          ~project:before.S.project
+          ~collaboration:(Option.get before.S.collaboration)
+        |> ok S.error_to_string
+      in
+      let reloaded =
+        L.find_publication (local committed) ~intent |> Option.get
+      in
+      Alcotest.(check bool)
+        "carried remote fields are not local correspondence" true
+        (C.Object_id.equal reloaded.L.contributed_scope
+           receipt.L.contributed_scope);
+      Alcotest.(check bool)
+        "private source never contained carried remote file" false
+        (Sys.file_exists (root ^ "/remote.txt")))
 
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
-          Alcotest.test_case "publication receipts commit and retry with exact identity" `Quick
+          Alcotest.test_case
+            "publication receipts commit and retry with exact identity" `Quick
             publication_receipts_are_atomic_and_retryable;
-          Alcotest.test_case "publication refuses unwitnessed and foreign sources" `Quick
+          Alcotest.test_case
+            "publication refuses unwitnessed and foreign sources" `Quick
             publication_rejects_unwitnessed_or_foreign_sources;
-          Alcotest.test_case "publication witnesses survive private blob collection" `Quick
+          Alcotest.test_case
+            "publication witnesses survive private blob collection" `Quick
             publication_witness_survives_private_content_collection;
+          Alcotest.test_case
+            "publication updates witness only newly selected work" `Quick
+            publication_update_witnesses_only_newly_selected_edits;
           Alcotest.test_case
             "snapshot selection reserves provisional target with atomic root"
             `Quick snapshot_selection_reserves_provisional_target_atomically;

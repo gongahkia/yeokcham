@@ -68,7 +68,9 @@ module Witness : sig
     Yeokcham_store.repository ->
     snapshot:Core.Object_id.t ->
     paths:path list ->
-    (((path * entry option) list * Yeokcham_store.Stored_object_id.t list), error) result
+    ( (path * entry option) list * Yeokcham_store.Stored_object_id.t list,
+      error )
+    result
   (** Proves selected entries/absence using only snapshot and ancestor tree
       objects. Does not read or retain unrelated private content blobs. *)
 end
