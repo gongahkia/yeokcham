@@ -10,6 +10,7 @@ type verified
 type artifact
 type prepared
 
+
 type error =
   | Io_error of { path : string; operation : string; message : string }
   | Destination_exists of string
@@ -23,6 +24,68 @@ type error =
   | Model_error of Model.error
 
 val error_to_string : error -> string
+
+module Core : sig
+  type manifest
+  type prepared
+
+  val schema_version : int64
+  val max_manifest_bytes : int
+  val max_object_bytes : int
+
+  val encode_manifest : manifest -> (string, error) result
+
+  val decode_manifest :
+    repository:Model.Core.Repository_id.t -> string -> (manifest, error) result
+
+  val manifest_repository : manifest -> Model.Core.Repository_id.t
+  val manifest_branch : manifest -> Model.Core.Branch_id.t
+
+  val metadata_roots :
+    manifest -> (string * Yeokcham_store.Stored_object_id.t) list
+
+  val inventory :
+    Yeokcham_store.repository ->
+    manifest ->
+    ((Yeokcham_store.Stored_object_id.t * int) list, error) result
+
+  val create :
+    source:Yeokcham_store.repository ->
+    destination:string ->
+    authority:Trust.authority ->
+    records:(Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list ->
+    selected_branch:Model.Core.Branch_id.t ->
+    titles:(Model.Core.Record_id.t * string) list ->
+    (artifact, error) result
+  (** Public Core records, authority, courier labels and their exact verified
+      dependency closure. Never traverses private history or the whole store.
+      Creates a new directory artifact; no mutable head or file application. *)
+
+  val prepare :
+    package:string ->
+    repository:Model.Core.Repository_id.t ->
+    known_authority:Trust.authority option ->
+    (prepared, error) result
+  (** Verifies bytes in an isolated store, including exact public inventory and
+      actual composition. Known authority pins its causal root; without it the
+      caller must independently verify the public root before using the result.
+      Historical signature checks are not current new-record admission. *)
+
+  val prepared_artifact : prepared -> artifact
+  val prepared_authority : prepared -> Trust.authority
+  val prepared_pool : prepared -> Model.Core.pool
+  val prepared_records :
+    prepared -> (Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list
+  val prepared_titles : prepared -> (Model.Core.Record_id.t * string) list
+  val prepared_branch : prepared -> Model.Core.Branch_id.t
+
+  val import_prepared :
+    destination:Yeokcham_store.repository -> prepared -> (unit, error) result
+  (** Copies verified immutable bytes only. The service must separately perform
+      current trust admission and atomic metadata receipt; no cursor/files move.
+  *)
+end
+
 
 val manifest_object_ids :
   string -> (Yeokcham_store.Stored_object_id.t list, error) result

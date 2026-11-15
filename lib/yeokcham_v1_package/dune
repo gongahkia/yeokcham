@@ -6,5 +6,8 @@
   yeokcham_envelope
   yeokcham_snapshot
   yeokcham_store
+  yeokcham_v1_composition
   yeokcham_v1_model
+  yeokcham_v1_pages
+  yeokcham_v1_record
   yeokcham_v1_trust))

@@ -1219,3 +1219,9 @@ results. Unknown remote branches must remain distinct from private working
 positions. Native conflict resolutions and the full Alice/Bob privacy/fault audit
 also remain required. Preserve all current operation schemas/roots and the P2
 journeys while implementing those consumers.
+
+P3 native public-package continuation `p3-core-exchange-2026-11-15` starts on
+clean main `30e01afcddc411ef2d7f4fc0aaaf1d09d4602744`. Extending the existing
+package boundary with a paged public Core manifest/verified closure, then its
+actual store/relay/clone consumers. The original full P3 scope remains binding;
+public-only packages are necessary evidence, not completion of native exchange.

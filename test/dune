@@ -423,6 +423,14 @@
   yeokcham_v1_trust))
 
 (test
+ (name test_core_package)
+ (modules test_core_package)
+ (libraries alcotest unix yeokcham_encoding yeokcham_envelope yeokcham_snapshot
+  yeokcham_store yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust
+  yeokcham_v1_store yeokcham_v1_local_service yeokcham_v1_integration
+  yeokcham_v1_composition yeokcham_v1_pages yeokcham_v1_package))
+
+(test
  (name test_v1_transport)
  (modules test_v1_transport)
  (libraries
