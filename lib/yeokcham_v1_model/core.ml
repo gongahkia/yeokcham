@@ -124,6 +124,10 @@ module Change_id = Make_random_id (struct
   let name = "change"
 end)
 
+module Operation_id = Make_random_id (struct
+  let name = "operation"
+end)
+
 module Repository_id = Make_id (struct
   let bytes = 32
   let name = "repository"

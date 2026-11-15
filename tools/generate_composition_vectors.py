@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent scope-page envelope and store identity; no OCaml imports."""
+"""Independent scope/metadata page envelopes and store identities; no OCaml imports."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -20,19 +20,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
-    payload = cbor([1, 0, [[b"a", b"b"], [b"bad-\xff"], [b"z"]]])
-    prefix = b"YEOK" + bytes([1, 44]) + struct.pack(">HQBQ", 1, 0, 1, len(payload))
-    envelope = prefix + hashlib.sha256(prefix + payload).digest() + payload
-    identity = hashlib.sha256(b"yeokcham:object:v1\0" + envelope).digest()
     directory = Path(__file__).resolve().parents[1] / "test/golden/composition"
-    for name, data in [("edit-scope-envelope.hex", envelope), ("edit-scope-id.hex", identity)]:
+    vectors = []
+    for name, code, value in [
+        ("edit-scope", 44, [1, 0, [[b"a", b"b"], [b"bad-\xff"], [b"z"]]]),
+        ("metadata-page", 45, [1, b"pages-v1", 0, [[b"a", [0, b"A"]], [b"bad-\xff", [0, b"B"]]]]),
+    ]:
+        payload = cbor(value)
+        prefix = b"YEOK" + bytes([1, code]) + struct.pack(">HQBQ", 1, 0, 1, len(payload))
+        envelope = prefix + hashlib.sha256(prefix + payload).digest() + payload
+        identity = hashlib.sha256(b"yeokcham:object:v1\0" + envelope).digest()
+        vectors.extend([(name + "-envelope.hex", envelope), (name + "-id.hex", identity)])
+    for name, data in vectors:
         path = directory / name
         expected = data.hex() + "\n"
         if args.write:
             path.write_text(expected)
         elif path.read_text() != expected:
             raise SystemExit("composition golden differs: " + name)
-    print("independent composition scope vectors verified (2)")
+    print("independent composition/metadata vectors verified (4)")
 
 
 if __name__ == "__main__":

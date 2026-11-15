@@ -8,6 +8,12 @@
   (run python3 %{dep:../tools/generate_local_vectors.py})))
 
 (test
+ (name test_metadata_pages)
+ (modules test_metadata_pages)
+ (libraries alcotest unix yeokcham_encoding yeokcham_envelope yeokcham_store yeokcham_v1_pages)
+ (deps (source_tree golden)))
+
+(test
  (name test_store_safety)
  (modules test_store_safety)
  (libraries

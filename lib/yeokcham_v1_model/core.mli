@@ -39,6 +39,7 @@ end
 module Workspace_id : Random_id
 module Branch_id : Random_id
 module Change_id : Random_id
+module Operation_id : Random_id
 module Repository_id : Id
 module Record_id : Id
 module Object_id : Id

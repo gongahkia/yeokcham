@@ -583,6 +583,8 @@ let authority_for_local = function
            "local core state requires signed collaboration")
 
 let validate_local_history ~project history local =
+  let* () = Local.validate_history history local
+    |> Result.map_error (fun e -> History_error e) in
   let* () =
     match History.workspace history with
     | Some _ -> Ok ()
@@ -793,6 +795,13 @@ let[@warning "-42"] local_shared_snapshots loaded =
           Model.Snapshot_id.of_string (Model.Core.Object_id.to_hex id)
           |> Result.get_ok)
       |> List.sort_uniq Model.Snapshot_id.compare
+
+let local_publication_witnesses loaded =
+  match loaded.local with
+  | None -> []
+  | Some local -> Local.publications local
+      |> List.concat_map (fun receipt ->
+          List.map (fun id -> receipt.Local.operation, id) receipt.Local.witnesses)
 
 let initialize_workspace_lock ~root =
   let path =

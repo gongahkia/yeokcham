@@ -860,3 +860,10 @@ only the owned graph/store/GC/status/test/documentation changes; inspected and
 preserved without reset/amend. Worktree was clean afterward. P3 remains
 incomplete; next implement durable publication correspondence and operation/outbox
 bookkeeping in the existing root before the actual share/integrate consumers.
+
+P3 continuation starts at clean main
+`5435659187e840adb04f1cf73d3430030350492c`, session
+`p3-shared-continuation-2026-11-15`. The existing full P3 task and all seven
+criteria remain binding. Implementing scoped publication correspondence and
+durable retry/outbound facts under the existing root, then their actual CLI
+consumers. No later pilot slice or independent original phase started.

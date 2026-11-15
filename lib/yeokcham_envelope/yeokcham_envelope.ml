@@ -54,6 +54,7 @@ type object_type =
   | Core_accepted_version
   | Core_branch_event
   | Core_edit_scope
+  | Core_metadata_page
 
 let object_type_code = function
   | Content -> 1
@@ -100,6 +101,7 @@ let object_type_code = function
   | Core_accepted_version -> 42
   | Core_branch_event -> 43
   | Core_edit_scope -> 44
+  | Core_metadata_page -> 45
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -146,6 +148,7 @@ let object_type_of_code = function
   | 42 -> Some Core_accepted_version
   | 43 -> Some Core_branch_event
   | 44 -> Some Core_edit_scope
+  | 45 -> Some Core_metadata_page
   | _ -> None
 
 type creation_error =

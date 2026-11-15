@@ -531,6 +531,41 @@ let validate_revision repository revision =
     Error
       (Integrity "declared edit scope differs from actual base/result contents")
 
+module Witness = struct
+  let inspect repository ~snapshot:identity ~paths =
+    let* () = List.fold_left (fun acc path -> let* () = acc in valid_path path) (Ok ()) paths in
+    let* value = S.Snapshot.load repository
+      (S.Snapshot.of_stored_object_id (raw_id identity)) |> snapshot in
+    let objects = Hashtbl.create 32 in
+    Hashtbl.add objects (raw_id identity) ();
+    let trees = Hashtbl.create 32 in
+    let get_tree id =
+      let raw = S.Tree.stored_object_id id in
+      match Hashtbl.find_opt trees raw with
+      | Some tree -> Ok tree
+      | None ->
+          let* tree = S.Tree.load repository id |> snapshot in
+          Hashtbl.add trees raw tree;
+          Hashtbl.replace objects raw ();
+          Ok tree
+    in
+    let rec find id = function
+      | [] -> Error (Invalid_input "witness path is empty")
+      | name :: rest ->
+          let* tree = get_tree id in
+          match List.assoc_opt name (S.Tree.entries tree), rest with
+          | None, _ | Some (S.Tree.File _), _ :: _ -> Ok None
+          | Some (S.Tree.Directory _), [] -> Ok (Some Directory)
+          | Some (S.Tree.File { mode; content }), [] -> Ok (Some (File { mode; content }))
+          | Some (S.Tree.Directory id), _ :: _ -> find id rest
+    in
+    let* entries = List.fold_left (fun acc path ->
+      let* entries = acc in
+      let* entry = find (S.Snapshot.root value) path in
+      Ok ((path, entry) :: entries)) (Ok []) paths |> Result.map List.rev in
+    Ok (entries, Hashtbl.to_seq_keys objects |> List.of_seq |> List.sort Raw.Stored_object_id.compare)
+end
+
 module Graph = struct
   type failure =
     | Content_error of error

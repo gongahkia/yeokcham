@@ -11,6 +11,7 @@ module V1_store = Yeokcham_v1_store
 type root_reason =
   | State_head
   | Shared_history of Yeokcham_v1_model.Snapshot_id.t
+  | Publication_witness of Model.Core.Operation_id.t
   | Checkpoint of {
       snapshot : Model.Snapshot_id.t;
       reasons : Model.protection_reason list;
@@ -77,6 +78,8 @@ let root_reason_to_string = function
   | State_head -> "state-head"
   | Shared_history snapshot ->
       "shared-history " ^ Model.Snapshot_id.to_string snapshot
+  | Publication_witness operation ->
+      "publication-witness " ^ Model.Core.Operation_id.to_hex operation
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
@@ -182,7 +185,8 @@ let is_collectible_type = function
   | Envelope.Peer_identity | Envelope.Peer_contact | Envelope.Peer_advertisement
   | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
   | Envelope.Core_shared_revision | Envelope.Core_accepted_version
-  | Envelope.Core_branch_event | Envelope.Core_edit_scope ->
+  | Envelope.Core_branch_event | Envelope.Core_edit_scope
+  | Envelope.Core_metadata_page ->
       false
 
 let classify ~state_head ~objects ~reachable =
@@ -555,7 +559,7 @@ let traverse_content store reasons content_id reachable =
     | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
     | Envelope.V1_project_state | Envelope.Core_shared_revision
     | Envelope.Core_accepted_version | Envelope.Core_branch_event
-    | Envelope.Core_edit_scope ) as object_type ->
+    | Envelope.Core_edit_scope | Envelope.Core_metadata_page ) as object_type ->
       Error
         (Invalid_schema
            (Printf.sprintf "tree file refers to object type %d"
@@ -616,6 +620,10 @@ let plan_from_loaded ~root store loaded =
         traverse_snapshot store reasons snapshot_id reachable)
       (Ok Object_map.empty) roots
   in
+  let reachable = List.fold_left (fun reachable (operation, id) ->
+    let previous = Option.value ~default:[] (Object_map.find_opt id reachable) in
+    Object_map.add id (Publication_witness operation :: previous) reachable)
+    reachable (V1_store.local_publication_witnesses loaded) in
   let* objects =
     Store.list_objects store
     |> Result.map_error (fun error -> Store_error error)

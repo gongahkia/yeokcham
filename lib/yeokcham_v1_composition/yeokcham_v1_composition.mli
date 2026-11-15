@@ -63,6 +63,16 @@ val validate_revision :
 (** Full base/result/scope validation. A declared scope must equal the actual
     changed path set; no metadata path or undeclared private difference. *)
 
+module Witness : sig
+  val inspect :
+    Yeokcham_store.repository ->
+    snapshot:Core.Object_id.t ->
+    paths:path list ->
+    (((path * entry option) list * Yeokcham_store.Stored_object_id.t list), error) result
+  (** Proves selected entries/absence using only snapshot and ancestor tree
+      objects. Does not read or retain unrelated private content blobs. *)
+end
+
 module Graph : sig
   type failure =
     | Content_error of error

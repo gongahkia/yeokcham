@@ -49,6 +49,7 @@ type object_type =
   | Core_accepted_version
   | Core_branch_event
   | Core_edit_scope
+  | Core_metadata_page
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

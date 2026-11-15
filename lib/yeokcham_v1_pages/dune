@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v1_pages)
+ (libraries yeokcham_encoding yeokcham_envelope yeokcham_store))

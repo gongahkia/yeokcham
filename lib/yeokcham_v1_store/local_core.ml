@@ -24,12 +24,27 @@ type position = {
   basis : Core.Record_id.t;
 }
 
+type publication = Publication_receipt.t = {
+  operation : Core.Operation_id.t;
+  intent : Core.Digest.t;
+  revision : Core.Record_id.t;
+  publication_branch : Core.Branch_id.t;
+  source : Core.History_id.t;
+  observed : Core.Object_id.t;
+  contributed_scope : Core.Object_id.t;
+  title : string;
+  witness_root : Store.Stored_object_id.t;
+  witnesses : Store.Stored_object_id.t list;
+}
+
 type t = {
   pool : Core.pool;
   records : (Core.Record_id.t * Store.Stored_object_id.t) list;
   empty : Core.Object_id.t;
   selected_branch : Core.Branch_id.t;
   positions : position list;
+  publications : publication list;
+  publication_root : Store.Stored_object_id.t option;
 }
 
 let positions state = state.positions
@@ -37,6 +52,20 @@ let branches state = Core.branch_states state.pool
 let empty_snapshot state = state.empty
 let pool state = state.pool
 let record_objects state = state.records
+let publications state = state.publications
+let find_publication state ~intent =
+  List.find_opt (fun p -> Core.Digest.equal p.intent intent) state.publications
+
+let record_publication_using ~random_bytes ~store ~intent ~revision ~source
+    ~observed ~contributed_scope ~title state =
+  let* publications, receipt = Publication_receipt.add ~random_bytes store state.pool
+    ~branch:state.selected_branch ~intent ~revision ~source ~observed
+    ~contributed_scope ~title state.publications in
+  let* root = Publication_receipt.store store ~scope:(Core.pool_repository state.pool) publications in
+  Ok ({ state with publications; publication_root = Some root }, receipt)
+
+let record_publication = record_publication_using ~random_bytes:Trust.random_bytes
+let validate_history history state = Publication_receipt.validate_history history state.publications
 
 let selected state =
   List.find
@@ -251,6 +280,8 @@ let initialize ~store ~authority ~certificate ~signing_capability ~cursor =
       empty;
       selected_branch = temporary;
       positions = [];
+      publications = [];
+      publication_root = None;
     }
   in
   let* state, branch =
@@ -324,21 +355,33 @@ let encode state =
       (Ok []) state.positions
   in
   let* positions = array (List.rev positions) in
-  let* value =
-    array
+  let fields =
       [
-        Encoding.integer 1L;
         Encoding.bytes (Core.Object_id.to_raw state.empty);
         Encoding.bytes (Core.Branch_id.to_raw state.selected_branch);
         records;
         positions;
       ]
   in
+  let* value = match state.publication_root, state.publications with
+    | None, [] -> array (Encoding.integer 1L :: fields)
+    | Some root, _ :: _ -> array (Encoding.integer 2L :: fields @
+        [Encoding.bytes (Store.Stored_object_id.to_raw_bytes root)])
+    | _ -> Error "publication root and receipts disagree"
+  in
   Ok (Encoding.encode value)
 
 let[@warning "-4"] decode ~store ~authority bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string
+  in
+  let* value, publication_root = match value with
+    | Encoding.Array [Encoding.Integer 2L; empty; selected; ids; positions; Encoding.Bytes root] ->
+        let* root = Store.Stored_object_id.of_raw_bytes root
+          |> Option.to_result ~none:"invalid publication collection root" in
+        let* value = array [Encoding.integer 1L; empty; selected; ids; positions] in
+        Ok (value, Some root)
+    | value -> Ok (value, None)
   in
   let* empty, selected_branch, ids, positions =
     match value with
@@ -442,7 +485,12 @@ let[@warning "-4"] decode ~store ~authority bytes =
       Composition.Graph.validate store pool
       |> Result.map_error Composition.Graph.error_to_string
     in
-    let state = { pool; records = ids; empty; selected_branch; positions } in
+    let* publications = match publication_root with
+      | None -> Ok []
+      | Some root -> Publication_receipt.load store ~scope:repository root
+    in
+    let* () = Publication_receipt.validate store pool publications in
+    let state = { pool; records = ids; empty; selected_branch; positions; publications; publication_root } in
     let branch_ids =
       branches state |> List.map (fun row -> row.Core.branch_id)
     in
@@ -514,7 +562,10 @@ let validate_update ~previous state =
           ~some:(Store.Stored_object_id.equal stored)
           (Ids.find_opt id retained))
       previous.records
-  then Ok ()
+  then
+    if List.for_all (fun receipt -> List.exists ((=) receipt) state.publications) previous.publications
+    then Ok ()
+    else Error "cannot erase or alter durable publication receipts"
   else Error "cannot erase authenticated branch records"
 
 let admit_update ~store ~authority ~previous state =
@@ -672,4 +723,5 @@ let prepare_acceptance ~store ~authority ~certificate ~signing_capability
 module For_test = struct
   let create_branch = create_branch_using
   let fresh_change = fresh_change_using
+  let record_publication = record_publication_using
 end
