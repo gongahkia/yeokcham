@@ -1553,6 +1553,12 @@ let publication_witness_survives_private_content_collection () = with_root (fun 
     let entry = List.find (fun entry -> Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id id) plan.Yeokcham_v1_gc.objects in
     Alcotest.(check bool) "exact witness retained" true (entry.Yeokcham_v1_gc.disposition<>Yeokcham_v1_gc.Collect)) receipt.L.witnesses;
   Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+  List.iter (fun id -> Raw.get store id |> ok Raw.error_to_string |> ignore) receipt.L.witnesses;
+  let revision = match C.find (L.pool state) revision with
+    | Some { C.payload = C.Shared_revision revision; _ } -> revision
+    | _ -> Alcotest.fail "expected shared revision" in
+  Composition.load store revision.C.base_snapshot |> ok Composition.error_to_string |> ignore;
+  Composition.load store revision.C.result_snapshot |> ok Composition.error_to_string |> ignore;
   reject "old private capture unexpectedly complete after collection" (Composition.load store observed);
   let fresh = load repository in
   let durable = L.find_publication (local fresh) ~intent |> Option.get in
