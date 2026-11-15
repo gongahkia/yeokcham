@@ -478,7 +478,58 @@ let apply_with ~observe ~store ~root t =
               List.iter
                 (fun a ->
                   if not (checked a) then refuse "application is incomplete")
-                t.actions)))
+                t.actions;
+              match t.destination_parent with
+              | Some _ -> ()
+              | None ->
+                  let rec verify_expected fd tree =
+                    List.iter
+                      (fun (name, entry) ->
+                        match entry with
+                        | S.Tree.Directory id -> (
+                            match inspect fd name with
+                            | Some (F.Directory, stamp) ->
+                                close (F.open_at (Some fd) name true)
+                                  (fun child ->
+                                    if
+                                      F.identity (F.fingerprint child)
+                                      <> F.identity stamp
+                                    then
+                                      refuse
+                                        "expected target directory changed \
+                                         while opening";
+                                    verify_expected child id;
+                                    if
+                                      Option.map
+                                        (fun (_, actual) -> F.identity actual)
+                                        (inspect fd name)
+                                      <> Some (F.identity stamp)
+                                    then
+                                      refuse
+                                        "expected target directory changed \
+                                         while verifying")
+                            | None
+                            | Some (F.File, _)
+                            | Some (F.Link, _)
+                            | Some (F.Fifo, _)
+                            | Some (F.Socket, _)
+                            | Some (F.Character, _)
+                            | Some (F.Block, _) ->
+                                refuse
+                                  "expected target directory changed before \
+                                   materialization")
+                        | S.Tree.File _ ->
+                            if
+                              not (entry_bytes_match store fd name (Some entry))
+                            then
+                              refuse
+                                (Printf.sprintf
+                                   "expected target bytes changed before \
+                                    materialization: %S"
+                                   name))
+                      (entries store tree)
+                  in
+                  verify_expected rootfd (S.Snapshot.root target_snapshot))))
 
 let apply ~root ~store t = apply_with ~observe:(fun _ _ -> ()) ~root ~store t
 

@@ -12,6 +12,10 @@ type error =
 
 val error_to_string : error -> string
 
+val observation_digest :
+  Yeokcham_snapshot.Observation.t -> (Core.Digest.t, error) result
+(** Canonical digest of the captured entry/rule/directory identities. *)
+
 type readiness =
   | Ready of Core.composition_result
   | Conflicted of Core.conflict list

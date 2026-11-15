@@ -15,6 +15,16 @@ type outcome = {
   operation : Operation.t option;
   no_op : bool;
   resumed : bool;
+  recovered : bool;
+}
+
+type recovery_outcome = {
+  recovery_plan : Core.Digest.t;
+  recovery_operation : Operation.t;
+  recovery_observed : Core.Object_id.t;
+  recovery_target : Core.Object_id.t;
+  recovery_preview : bool;
+  recovery_resumed : bool;
 }
 
 type boundary =
@@ -26,6 +36,12 @@ type boundary =
   | Before_root
   | After_root
   | Mutation of Safe_apply.boundary * string list
+  | Recovery_prepared_root
+  | Recovery_applying_root
+  | Recovery_materialized_root
+  | Recovery_committed_root
+  | Recovery_completed_root
+  | Recovery_mutation of Safe_apply.boundary * string list
 
 val prepare :
   root:string ->
@@ -47,7 +63,33 @@ val apply :
 val resume :
   root:string -> operation:Core.Operation_id.t -> (outcome, error) result
 
+val recover :
+  root:string ->
+  operation:Core.Operation_id.t ->
+  dry_run:bool ->
+  mode:Operation.recovery_mode option ->
+  replan:bool ->
+  expected_plan:Core.Digest.t option ->
+  (recovery_outcome, error) result
+(** Explicit private safety restoration for an uncommitted integration. Current
+    disk contents receive their own protected recovery observation, without a
+    normal history capture of the partial application. No acceptance is made.
+    Confirmation/preview occurs outside the writer lock. *)
+
+val forget_recovery_roots :
+  root:string -> operation:Core.Operation_id.t -> (Operation.t, error) result
+
 module For_test : sig
+  val recover :
+    observe:(boundary -> unit) ->
+    root:string ->
+    operation:Core.Operation_id.t ->
+    dry_run:bool ->
+    mode:Operation.recovery_mode option ->
+    replan:bool ->
+    expected_plan:Core.Digest.t option ->
+    (recovery_outcome, error) result
+
   val apply_with_entropy :
     random_bytes:(int -> (string, string) result) ->
     observe:(boundary -> unit) ->

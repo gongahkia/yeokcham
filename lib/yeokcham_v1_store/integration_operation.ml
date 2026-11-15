@@ -33,6 +33,28 @@ type phase =
   | Completed
   | Paused of stage * string
 
+type recovery_phase =
+  | Recovery_prepared
+  | Recovery_applying
+  | Recovery_materialized
+  | Recovery_committed
+  | Recovery_completed
+
+type recovery_mode = Restore_safety | Keep_current
+
+type recovery = {
+  attempt : Core.Operation_id.t;
+  plan_id : Core.Digest.t;
+  observed : Core.Object_id.t;
+  application_digest : Core.Digest.t;
+  started_at : int64;
+  progress : recovery_phase;
+  retained : bool;
+  mode : recovery_mode;
+  pause_reason : string option;
+  previous : Raw.Stored_object_id.t option;
+}
+
 type t = {
   token : Core.Operation_id.t;
   plan : Core.Plan_id.t;
@@ -54,15 +76,35 @@ type t = {
   phase : phase;
   serial : int64;
   acknowledged : bool;
+  recovery : recovery option;
+  previous_recoveries : recovery list;
 }
 
 let committed t =
+  t.recovery = None
+  &&
   match t.phase with
   | Committed | Completed -> true
   | Prepared | Applying | Materialized | Paused _ -> false
 
 let pending t = t.phase <> Completed
-let retention_roots t = if pending t then t.protected else []
+let recovered t = t.phase = Completed && Option.is_some t.recovery
+
+let retention_roots t =
+  if pending t then
+    List.sort_uniq Core.Object_id.compare
+      (t.protected
+      @ List.map (fun earlier -> earlier.observed) t.previous_recoveries
+      @ Option.fold ~none:[]
+          ~some:(fun recovery -> [ recovery.observed ])
+          t.recovery)
+  else
+    match t.recovery with
+    | Some recovery when recovery.retained ->
+        List.sort_uniq Core.Object_id.compare
+          (t.safety :: t.target :: recovery.observed
+          :: List.map (fun earlier -> earlier.observed) t.previous_recoveries)
+    | None | Some _ -> []
 
 let stage = function
   | Prepared -> Some Before_apply
@@ -92,6 +134,8 @@ let[@warning "-4"] transition previous next =
 
 let advance t phase =
   if phase = t.phase then Ok t
+  else if Option.is_some t.recovery then
+    Error "recovery owns this operation's remaining phase transitions"
   else if not (transition t.phase phase) then
     Error "invalid integration operation phase transition"
   else if t.serial = Int64.max_int then
@@ -106,6 +150,217 @@ let acknowledge t =
     Error "integration operation generation exhausted"
   else Ok { t with acknowledged = true; serial = Int64.succ t.serial }
 
+let recovery_code = function
+  | Recovery_prepared -> 0L
+  | Recovery_applying -> 1L
+  | Recovery_materialized -> 2L
+  | Recovery_committed -> 3L
+  | Recovery_completed -> 4L
+
+let recovery_private_committed (recovery : recovery) =
+  recovery_code recovery.progress >= 3L
+
+let recovery_namespace repository token =
+  "integration-recovery-history-v1\000"
+  ^ Core.Repository_id.to_raw repository
+  ^ Core.Operation_id.to_raw token
+
+let encode_recovery recovery =
+  let* pause =
+    match recovery.pause_reason with
+    | None -> Ok E.null
+    | Some reason ->
+        E.text reason |> Result.map_error E.construction_error_to_string
+  in
+  array
+    [
+      E.integer 1L;
+      E.bytes (Core.Operation_id.to_raw recovery.attempt);
+      E.bytes (Core.Digest.to_raw recovery.plan_id);
+      E.bytes (Core.Object_id.to_raw recovery.observed);
+      E.bytes (Core.Digest.to_raw recovery.application_digest);
+      E.integer recovery.started_at;
+      E.integer (recovery_code recovery.progress);
+      E.bool recovery.retained;
+      E.integer
+        (match recovery.mode with Restore_safety -> 0L | Keep_current -> 1L);
+      pause;
+      Option.fold ~none:E.null
+        ~some:(fun id -> E.bytes (Raw.Stored_object_id.to_raw_bytes id))
+        recovery.previous;
+    ]
+
+let start_recovery ~store ~repository ~attempt ~plan ~observed ~mode
+    ~physical_digest ~created_at t =
+  if committed t || t.phase = Completed then
+    Error
+      "committed integration cannot be cancelled; select a private history \
+       alternative instead"
+  else if Option.fold ~none:false ~some:recovery_private_committed t.recovery
+  then Error "private recovery already committed; resume cleanup instead"
+  else if
+    Option.fold ~none:false
+      ~some:(fun recovery -> Core.Digest.equal recovery.plan_id plan)
+      t.recovery
+  then Error "the same recovery plan must resume its recorded intent"
+  else if created_at < 0L then Error "negative recovery timestamp"
+  else if t.serial = Int64.max_int then
+    Error "integration operation generation exhausted"
+  else
+    let* previous, previous_recoveries =
+      match t.recovery with
+      | None -> Ok (None, [])
+      | Some recovery ->
+          let* value = encode_recovery recovery in
+          let* id =
+            Pages.store store
+              ~namespace:(recovery_namespace repository t.token)
+              [ ("attempt", E.encode value) ]
+            |> Result.map_error Pages.error_to_string
+          in
+          Ok (Some id, recovery :: t.previous_recoveries)
+    in
+    Ok
+      {
+        t with
+        recovery =
+          Some
+            {
+              attempt;
+              plan_id = plan;
+              observed;
+              application_digest = physical_digest;
+              started_at = created_at;
+              progress = Recovery_prepared;
+              retained = true;
+              mode;
+              pause_reason = None;
+              previous;
+            };
+        previous_recoveries;
+        serial = Int64.succ t.serial;
+      }
+
+let advance_recovery t phase =
+  let* recovery =
+    t.recovery |> Option.to_result ~none:"operation has no recovery intent"
+  in
+  if recovery.progress = phase then Ok t
+  else if recovery.pause_reason <> None then
+    Error "recovery is paused; resume its exact intent or explicitly replan"
+  else if recovery_code phase <> Int64.succ (recovery_code recovery.progress)
+  then Error "invalid recovery phase transition"
+  else if t.serial = Int64.max_int then
+    Error "integration operation generation exhausted"
+  else
+    Ok
+      {
+        t with
+        recovery = Some { recovery with progress = phase };
+        phase = (if phase = Recovery_completed then Completed else t.phase);
+        serial = Int64.succ t.serial;
+      }
+
+let pause_recovery t reason =
+  let* recovery =
+    t.recovery |> Option.to_result ~none:"operation has no recovery intent"
+  in
+  if recovery.pause_reason = reason then Ok t
+  else if recovery_private_committed recovery then
+    Error "committed recovery needs cleanup, not a pause"
+  else if
+    Option.fold ~none:false
+      ~some:(fun reason -> reason = "" || String.length reason > 4096)
+      reason
+  then Error "invalid recovery pause reason"
+  else if t.serial = Int64.max_int then
+    Error "integration operation generation exhausted"
+  else
+    Ok
+      {
+        t with
+        recovery = Some { recovery with pause_reason = reason };
+        serial = Int64.succ t.serial;
+      }
+
+let forget_recovery_roots t =
+  let* recovery =
+    t.recovery |> Option.to_result ~none:"operation has no recovered target"
+  in
+  if not (recovered t) then
+    Error "incomplete recovery still owns its proposed target"
+  else if not recovery.retained then Ok t
+  else if t.serial = Int64.max_int then
+    Error "integration operation generation exhausted"
+  else
+    Ok
+      {
+        t with
+        recovery = Some { recovery with retained = false };
+        serial = Int64.succ t.serial;
+      }
+
+let validate_recovery_update ~previous t =
+  match (previous.recovery, t.recovery) with
+  | None, None when t.previous_recoveries = [] -> Ok ()
+  | None, Some recovery
+    when (not (committed previous))
+         && previous.phase <> Completed
+         && recovery.progress = Recovery_prepared
+         && recovery.retained && recovery.started_at >= 0L
+         && recovery.previous = None
+         && recovery.pause_reason = None
+         && t.previous_recoveries = [] && t.phase = previous.phase
+         && not t.acknowledged ->
+      Ok ()
+  | Some earlier, Some recovery ->
+      if
+        recovery.progress = Recovery_prepared
+        && recovery.retained
+        && recovery.pause_reason = None
+        && recovery.previous <> None
+        && (not (recovery_private_committed earlier))
+        && t.previous_recoveries = earlier :: previous.previous_recoveries
+        && t.phase = previous.phase && not t.acknowledged
+      then Ok ()
+      else if
+        {
+          recovery with
+          progress = earlier.progress;
+          retained = earlier.retained;
+          pause_reason = earlier.pause_reason;
+        }
+        <> earlier
+        || t.previous_recoveries <> previous.previous_recoveries
+      then Error "recovery intent cannot be rewritten"
+      else if recovery = earlier && t.phase = previous.phase then Ok ()
+      else if
+        recovery.progress = earlier.progress
+        && recovery.retained = earlier.retained
+        && t.phase = previous.phase
+        && (not (recovery_private_committed earlier))
+        && recovery.pause_reason <> earlier.pause_reason
+      then Ok ()
+      else if
+        recovery.progress = earlier.progress
+        && earlier.retained && (not recovery.retained) && recovered previous
+        && t.phase = previous.phase
+      then Ok ()
+      else if
+        recovery.retained = earlier.retained
+        && recovery.pause_reason = None
+        && earlier.pause_reason = None
+        && recovery_code recovery.progress
+           = Int64.succ (recovery_code earlier.progress)
+        && t.phase
+           =
+           if recovery.progress = Recovery_completed then Completed
+           else previous.phase
+      then Ok ()
+      else Error "invalid recovery phase/retention transition"
+  | None, None | None, Some _ | Some _, None ->
+      Error "cannot erase or replace a recovery intent"
+
 let validate_update ~previous t =
   if
     {
@@ -113,6 +368,8 @@ let validate_update ~previous t =
       phase = previous.phase;
       serial = previous.serial;
       acknowledged = previous.acknowledged;
+      recovery = previous.recovery;
+      previous_recoveries = previous.previous_recoveries;
     }
     <> previous
   then Error "integration operation identity collision or rewritten intent"
@@ -122,9 +379,12 @@ let validate_update ~previous t =
   then Error "integration operation generation is not consecutive"
   else if previous.acknowledged && not t.acknowledged then
     Error "cannot erase outbound acknowledgement"
-  else if previous.phase = t.phase && previous.acknowledged = t.acknowledged
+  else if
+    previous.phase = t.phase
+    && previous.acknowledged = t.acknowledged
+    && previous.recovery = t.recovery
   then Error "operation generation changed without a new durable fact"
-  else if not (transition previous.phase t.phase) then
+  else if t.recovery = None && not (transition previous.phase t.phase) then
     Error "invalid integration operation phase transition"
   else if
     t.acknowledged <> previous.acknowledged
@@ -132,7 +392,7 @@ let validate_update ~previous t =
   then
     Error
       "acknowledgement must follow an independent committed-state transition"
-  else Ok ()
+  else validate_recovery_update ~previous t
 
 let[@warning "-4"] plan_outputs store scope plan plan_object =
   let* envelope =
@@ -265,6 +525,8 @@ let make ~store ~repository ~token ~plan ~plan_object ~source ~target_sequence
         phase = Prepared;
         serial = 0L;
         acknowledged = false;
+        recovery = None;
+        previous_recoveries = [];
       }
 
 let phase_value = function
@@ -298,28 +560,33 @@ let encode t =
       t.staged
   in
   let* staged = array staged in
+  let fields =
+    [
+      E.bytes (Core.Plan_id.to_raw t.plan);
+      E.bytes (Raw.Stored_object_id.to_raw_bytes t.plan_object);
+      E.bytes (Core.Branch_id.to_raw t.branch);
+      E.bytes (Core.Workspace_id.to_raw (Core.History_id.workspace t.source));
+      E.integer (Core.History_id.sequence t.source);
+      E.integer t.target_sequence;
+      E.bytes (Core.Object_id.to_raw t.safety);
+      E.bytes (Core.Object_id.to_raw t.target);
+      E.bytes (Core.Record_id.to_raw t.accepted);
+      staged;
+      E.bytes (Core.Digest.to_raw t.physical_digest);
+      E.integer t.expected_generation;
+      E.bytes (Raw.Stored_object_id.to_raw_bytes t.expected_root);
+      E.integer t.created_at;
+      phase;
+      E.integer t.serial;
+      E.bool t.acknowledged;
+    ]
+  in
   let* value =
-    array
-      [
-        E.integer 1L;
-        E.bytes (Core.Plan_id.to_raw t.plan);
-        E.bytes (Raw.Stored_object_id.to_raw_bytes t.plan_object);
-        E.bytes (Core.Branch_id.to_raw t.branch);
-        E.bytes (Core.Workspace_id.to_raw (Core.History_id.workspace t.source));
-        E.integer (Core.History_id.sequence t.source);
-        E.integer t.target_sequence;
-        E.bytes (Core.Object_id.to_raw t.safety);
-        E.bytes (Core.Object_id.to_raw t.target);
-        E.bytes (Core.Record_id.to_raw t.accepted);
-        staged;
-        E.bytes (Core.Digest.to_raw t.physical_digest);
-        E.integer t.expected_generation;
-        E.bytes (Raw.Stored_object_id.to_raw_bytes t.expected_root);
-        E.integer t.created_at;
-        phase;
-        E.integer t.serial;
-        E.bool t.acknowledged;
-      ]
+    match t.recovery with
+    | None -> array (E.integer 1L :: fields)
+    | Some recovery ->
+        let* recovery = encode_recovery recovery in
+        array ((E.integer 2L :: fields) @ [ recovery ])
   in
   Ok (E.encode value)
 
@@ -337,8 +604,126 @@ let minimum_serial = function
   | Paused (During_apply, _) -> 2L
   | Paused (Before_commit, _) -> 3L
 
+let[@warning "-4"] decode_recovery = function
+  | E.Array
+      [
+        E.Integer 1L;
+        E.Bytes attempt;
+        E.Bytes plan;
+        E.Bytes observed;
+        E.Bytes physical_digest;
+        E.Integer created_at;
+        E.Integer phase;
+        E.Bool retained;
+        E.Integer mode;
+        pause;
+        previous;
+      ] ->
+      let* attempt = Core.Operation_id.of_raw attempt |> model in
+      let* plan_id = Core.Digest.of_raw plan |> model in
+      let* observed = Core.Object_id.of_raw observed |> model in
+      let* application_digest = Core.Digest.of_raw physical_digest |> model in
+      let* progress =
+        match phase with
+        | 0L -> Ok Recovery_prepared
+        | 1L -> Ok Recovery_applying
+        | 2L -> Ok Recovery_materialized
+        | 3L -> Ok Recovery_committed
+        | 4L -> Ok Recovery_completed
+        | _ -> Error "unsupported recovery phase"
+      in
+      let* mode =
+        match mode with
+        | 0L -> Ok Restore_safety
+        | 1L -> Ok Keep_current
+        | _ -> Error "unsupported recovery mode"
+      in
+      let* pause_reason =
+        match pause with
+        | E.Null -> Ok None
+        | E.Text reason when reason <> "" && String.length reason <= 4096 ->
+            Ok (Some reason)
+        | _ -> Error "invalid recovery pause reason"
+      in
+      let* previous =
+        match previous with
+        | E.Null -> Ok None
+        | E.Bytes raw -> object_id raw |> Result.map Option.some
+        | _ -> Error "invalid prior recovery reference"
+      in
+      let recovery =
+        {
+          attempt;
+          plan_id;
+          observed;
+          application_digest;
+          started_at = created_at;
+          progress;
+          retained;
+          mode;
+          pause_reason;
+          previous;
+        }
+      in
+      if
+        created_at < 0L
+        || (recovery_private_committed recovery && pause_reason <> None)
+      then Error "invalid recovery timestamp/committed pause"
+      else Ok recovery
+  | _ -> Error "malformed recovery operation schema"
+
+let load_previous_recoveries store scope token recovery =
+  let rec loop count seen reversed = function
+    | None -> Ok (List.rev reversed)
+    | Some id
+      when count = 100000 || List.exists (Raw.Stored_object_id.equal id) seen ->
+        Error "oversized or cyclic recovery history"
+    | Some id ->
+        let* rows =
+          Pages.load_bounded store
+            ~namespace:(recovery_namespace scope token)
+            ~max_rows:1 ~max_value_bytes:8192 ~max_total_value_bytes:8192 id
+          |> Result.map_error Pages.error_to_string
+        in
+        let* bytes =
+          match rows with
+          | [ ("attempt", bytes) ] -> Ok bytes
+          | _ -> Error "invalid recovery history page"
+        in
+        let* value =
+          E.decode bytes |> Result.map_error E.decode_error_to_string
+        in
+        let* earlier = decode_recovery value in
+        let* canonical = encode_recovery earlier in
+        if
+          E.encode canonical <> bytes
+          || recovery_private_committed earlier
+          || not earlier.retained
+        then Error "invalid superseded recovery intent"
+        else
+          loop (count + 1) (id :: seen) (earlier :: reversed) earlier.previous
+  in
+  match recovery with
+  | None -> Ok []
+  | Some recovery -> loop 0 [] [] recovery.previous
+
 let[@warning "-4"] decode store scope token bytes =
   let* value = E.decode bytes |> Result.map_error E.decode_error_to_string in
+  let* value, recovery =
+    match value with
+    | E.Array (E.Integer 2L :: fields) -> (
+        match List.rev fields with
+        | recovery :: rest when List.length rest = 17 ->
+            let* recovery = decode_recovery recovery in
+            let* value = array (E.integer 1L :: List.rev rest) in
+            Ok (value, Some recovery)
+        | _ -> Error "malformed recovery operation schema")
+    | value -> Ok (value, None)
+  in
+  let* previous_recoveries =
+    load_previous_recoveries store scope token recovery
+  in
+
   match value with
   | E.Array
       [
@@ -431,6 +816,8 @@ let[@warning "-4"] decode store scope token bytes =
           phase;
           serial;
           acknowledged;
+          recovery;
+          previous_recoveries;
         }
       in
       let* canonical = encode t in
@@ -451,6 +838,15 @@ let[@warning "-4"] decode store scope token bytes =
                 (fun (a, _) (b, _) -> Core.Record_id.compare a b)
                 staged
         || (acknowledged && not (committed t))
+        ||
+        match recovery with
+        | None -> false
+        | Some recovery ->
+            recovery.started_at < 0L
+            || serial < Int64.succ (recovery_code recovery.progress)
+            || phase = Committed
+            || phase = Completed <> (recovery.progress = Recovery_completed)
+            || ((not recovery.retained) && phase <> Completed)
       then Error "noncanonical or inconsistent integration operation"
       else Ok t
   | _ -> Error "unsupported integration operation schema"
@@ -500,6 +896,24 @@ let validate_history history operations =
                 <> Some (Core.History_id.sequence t.plan_cursor)
         then
           Error "integration safety history payload/namespace/ancestry mismatch"
+        else if
+          Option.fold ~none:false ~some:recovery_private_committed t.recovery
+        then
+          let recovery = Option.get t.recovery in
+          let* target = History.find history t.target_sequence in
+          if
+            target.History.parent <> Some source.History.id
+            || Yeokcham_v1_model.Snapshot_id.to_string target.History.snapshot
+               <> Core.Object_id.to_hex
+                    (match recovery.mode with
+                    | Restore_safety -> t.safety
+                    | Keep_current -> recovery.observed)
+            || target.History.created_at <> recovery.started_at
+            || pending t
+               && (History.current history).History.id <> target.History.id
+          then
+            Error "recovered private history does not match its exact operation"
+          else Ok ()
         else if not (committed t) then
           if
             (History.current history).History.id = source.History.id
@@ -633,8 +1047,18 @@ let[@warning "-4"] validate ~store ~authority pool operations =
           |> Result.map_error Composition.Graph.error_to_string
         in
         let* () =
-          Composition.Graph.validate store candidate
-          |> Result.map_error Composition.Graph.error_to_string
+          if
+            recovered t
+            && Option.fold ~none:false
+                 ~some:(fun recovery -> not recovery.retained)
+                 t.recovery
+          then
+            (* cancelled staging is never authoritative; released proposal
+               contents may be gone while signed intent stays inspectable. *)
+            Ok ()
+          else
+            Composition.Graph.validate store candidate
+            |> Result.map_error Composition.Graph.error_to_string
         in
         let* events, heads, revisions = control_inputs store t in
         let* () =
@@ -712,7 +1136,20 @@ let[@warning "-4"] validate ~store ~authority pool operations =
       operations
   in
   let plans = List.map (fun t -> t.plan) operations in
+  let tokens =
+    List.concat_map
+      (fun t ->
+        t.token
+        :: List.map
+             (fun recovery -> recovery.attempt)
+             (Option.to_list t.recovery @ t.previous_recoveries))
+      operations
+  in
   if
     List.length plans <> List.length (List.sort_uniq Core.Plan_id.compare plans)
   then Error "integration plan is associated with more than one operation"
+  else if
+    List.length tokens
+    <> List.length (List.sort_uniq Core.Operation_id.compare tokens)
+  then Error "duplicate integration/recovery operation token"
   else Ok ()

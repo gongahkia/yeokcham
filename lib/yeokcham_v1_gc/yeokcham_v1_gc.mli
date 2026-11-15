@@ -11,6 +11,7 @@ type root_reason =
   | Publication_witness of Yeokcham_v1_model.Core.Operation_id.t
   | Integration_proposal of Yeokcham_v1_model.Core.Plan_id.t
   | Integration_operation of Yeokcham_v1_model.Core.Operation_id.t
+  | Recovery_contents of Yeokcham_v1_model.Snapshot_id.t
   | Checkpoint of {
       snapshot : Yeokcham_v1_model.Snapshot_id.t;
       reasons : Yeokcham_v1_model.protection_reason list;

@@ -657,7 +657,13 @@ let[@warning "-4"] decode ~store ~authority bytes =
             List.exists
               (fun publication ->
                 Core.Operation_id.equal operation.Operation.token
-                  publication.operation)
+                  publication.operation
+                || List.exists
+                     (fun recovery ->
+                       Core.Operation_id.equal recovery.Operation.attempt
+                         publication.operation)
+                     (Option.to_list operation.Operation.recovery
+                     @ operation.Operation.previous_recoveries))
               publications)
           operations
       then Error "duplicate operation token across publication/integration"

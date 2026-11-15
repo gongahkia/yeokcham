@@ -8,6 +8,8 @@ module Snapshot = Yeokcham_snapshot
 module H = Yeokcham_v1_undo
 module R = Yeokcham_v1_record.Core
 module Composition = Yeokcham_v1_composition
+module Encoding = Yeokcham_encoding
+module Pages = Yeokcham_v1_pages
 
 [@@@warning "-42"]
 
@@ -3423,11 +3425,662 @@ let native_integration_entropy_and_collision_refuse_before_files () =
         "failure did not persist operation" true
         (L.operations (local (load repository)) = []))
 
+let recovery_fixture root =
+  let repository, capability, certificate, authority, _ = initialize root in
+  let revision, _ =
+    add_incoming_revision repository capability certificate authority
+      "remote.txt" "shared target D\n"
+  in
+  let plan = native_plan root [ revision ] in
+  interrupt_native root plan capability
+    (Native_integrate.Mutation (Service.Safe_apply.After_sync, []));
+  write_file root "remote.txt" "external X\n";
+  write_private root "private Y\000";
+  reject "original integration overwrote external edits"
+    (Native_integrate.apply ~root ~plan:(I.id plan) ~signing_capability:None);
+  let loaded = load repository in
+  let operation = Option.get (L.pending_operation (local loaded)) in
+  (repository, capability, revision, plan, operation)
+
+let recover_native root token ~preview ~mode ~replan ~expected =
+  Native_integrate.recover ~root ~operation:token ~dry_run:preview ~mode ~replan
+    ~expected_plan:expected
+  |> integrate_ok
+
+let[@warning "-4"] interrupt_recovery root token boundary =
+  let child = Unix.fork () in
+  if child = 0 then (
+    let observe seen =
+      match (seen, boundary) with
+      | ( Native_integrate.Recovery_mutation (a, _),
+          Native_integrate.Recovery_mutation (b, _) )
+        when a = b ->
+          Unix._exit 73
+      | a, b when a = b -> Unix._exit 73
+      | _ -> ()
+    in
+    ignore
+      (Native_integrate.For_test.recover ~observe ~root ~operation:token
+         ~dry_run:false ~mode:None ~replan:false ~expected_plan:None);
+    Unix._exit 74);
+  let _, status = Unix.waitpid [] child in
+  Alcotest.(check bool)
+    "recovery reached actual requested boundary" true (status = Unix.WEXITED 73)
+
+let native_recovery_restores_safety_without_acceptance_or_losing_observations ()
+    =
+  with_root (fun root ->
+      let repository, capability, revision, plan, operation =
+        recovery_fixture root
+      in
+      let before = load repository in
+      let preview =
+        recover_native root operation.Op.token ~preview:true ~mode:None
+          ~replan:false ~expected:None
+      in
+      Alcotest.(check bool)
+        "recovery preview leaves root unchanged" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "recovery preview leaves external bytes" "external X\n"
+        (read_file root "remote.txt");
+      let result =
+        recover_native root operation.Op.token ~preview:false ~mode:None
+          ~replan:false ~expected:(Some preview.Native_integrate.recovery_plan)
+      in
+      let recovered = result.Native_integrate.recovery_operation in
+      let loaded = load repository in
+      Alcotest.(check bool) "closed as recovered" true (Op.recovered recovered);
+      Alcotest.(check bool)
+        "recovery did not publish acceptance" false (Op.committed recovered);
+      Alcotest.(check bool)
+        "basis unchanged" true
+        ((L.selected (local before)).L.basis
+       = (L.selected (local loaded)).L.basis);
+      Alcotest.(check int)
+        "no signed records admitted"
+        (List.length (L.record_objects (local before)))
+        (List.length (L.record_objects (local loaded)));
+      Alcotest.(check int)
+        "one explicit safety-restoration child"
+        (List.length (H.nodes before.S.history) + 1)
+        (List.length (H.nodes loaded.S.history));
+      Alcotest.(check string)
+        "original safety restored" "private\000bytes\255" (read_private root);
+      Alcotest.(check bool)
+        "unaccepted introduced file removed recoverably" false
+        (Sys.file_exists (root ^ "/remote.txt"));
+      let store = S.underlying_store repository in
+      Alcotest.(check string)
+        "unexpected X retained in recovery observation" "external X\n"
+        (preserved_entry store result.Native_integrate.recovery_observed
+           [ "remote.txt" ]);
+      Alcotest.(check string)
+        "unexpected Y retained in recovery observation" "private Y\000"
+        (preserved_entry store result.Native_integrate.recovery_observed
+           [ "private.bin" ]);
+      let repeated =
+        Native_integrate.resume ~root ~operation:operation.Op.token
+        |> integrate_ok
+      in
+      Alcotest.(check bool)
+        "normal resume acknowledges recovered outcome" true
+        repeated.Native_integrate.recovered;
+      let again = native_apply root plan None in
+      Alcotest.(check bool)
+        "old plan retry never resurrects cancelled acceptance" true
+        again.Native_integrate.recovered;
+      Alcotest.(check bool)
+        "recovered retry does not advance root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      let fresh = native_plan root [ revision ] in
+      Alcotest.(check bool)
+        "recovery cursor gives a fresh exact plan" false
+        (C.Plan_id.equal (I.id plan) (I.id fresh));
+      native_apply root fresh (Some capability) |> ignore;
+      Alcotest.(check string)
+        "fresh confirmed integration still usable" "shared target D\n"
+        (read_file root "remote.txt"))
+
+let native_recovery_resumes_file_and_metadata_boundaries () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, _, _, _, operation = recovery_fixture root in
+          let before = load repository in
+          interrupt_recovery root operation.Op.token boundary;
+          let interrupted = load repository in
+          let saved = List.hd (L.operations (local interrupted)) in
+          let recovery = Option.get saved.Op.recovery in
+          let private_committed =
+            match recovery.Op.progress with
+            | Op.Recovery_committed | Op.Recovery_completed -> true
+            | Op.Recovery_prepared | Op.Recovery_applying
+            | Op.Recovery_materialized ->
+                false
+          in
+          Alcotest.(check int)
+            "no partial recovery history before commit"
+            (List.length (H.nodes before.S.history)
+            + if private_committed then 1 else 0)
+            (List.length (H.nodes interrupted.S.history));
+          let resumed =
+            Native_integrate.resume ~root ~operation:operation.Op.token
+            |> integrate_ok
+          in
+          Alcotest.(check bool)
+            "recovery resumed without signer" true
+            resumed.Native_integrate.recovered;
+          let loaded = load repository in
+          Alcotest.(check int)
+            "exactly one recovery navigation"
+            (List.length (H.nodes before.S.history) + 1)
+            (List.length (H.nodes loaded.S.history));
+          Alcotest.(check bool)
+            "recovery never admitted original acceptance" false
+            (Option.is_some
+               (C.find (L.pool (local loaded)) operation.Op.accepted));
+          Alcotest.(check string)
+            "exact safety restored after restart" "private\000bytes\255"
+            (read_private root);
+          let repeated =
+            recover_native root operation.Op.token ~preview:false ~mode:None
+              ~replan:false ~expected:(Some recovery.Op.plan_id)
+          in
+          Alcotest.(check bool)
+            "same recovery plan on repeated acknowledgement" true
+            (repeated.Native_integrate.recovery_plan = recovery.Op.plan_id)))
+    [
+      Native_integrate.Recovery_prepared_root;
+      Native_integrate.Recovery_applying_root;
+      Native_integrate.Recovery_mutation (Service.Safe_apply.Before_mutation, []);
+      Native_integrate.Recovery_mutation (Service.Safe_apply.After_mutation, []);
+      Native_integrate.Recovery_mutation (Service.Safe_apply.After_sync, []);
+      Native_integrate.Recovery_materialized_root;
+      Native_integrate.Recovery_committed_root;
+      Native_integrate.Recovery_completed_root;
+    ]
+
+let native_recovery_materialized_retry_preserves_later_edits () =
+  with_root (fun root ->
+      let repository, _, _, _, operation = recovery_fixture root in
+      interrupt_recovery root operation.Op.token
+        Native_integrate.Recovery_materialized_root;
+      write_private root "late after recovery materialization\000";
+      Native_integrate.resume ~root ~operation:operation.Op.token
+      |> integrate_ok |> ignore;
+      Alcotest.(check string)
+        "recovery never replays after Materialized"
+        "late after recovery materialization\000" (read_private root);
+      let loaded = load repository in
+      Alcotest.(check string)
+        "history records verified safety result" "private\000bytes\255"
+        (preserved_entry
+           (S.underlying_store repository)
+           (C.Object_id.of_hex
+              (M.Snapshot_id.to_string (H.current loaded.S.history).H.snapshot)
+           |> model)
+           [ "private.bin" ]))
+
+let native_recovery_replans_without_erasing_prior_observations () =
+  with_root (fun root ->
+      let repository, _, _, _, operation = recovery_fixture root in
+      interrupt_recovery root operation.Op.token
+        (Native_integrate.Recovery_mutation (Service.Safe_apply.After_sync, []));
+      write_private root "new edit during recovery\000";
+      reject "recovery blindly overwrote a newer edit"
+        (Native_integrate.resume ~root ~operation:operation.Op.token);
+      let paused = List.hd (L.operations (local (load repository))) in
+      let old = Option.get paused.Op.recovery in
+      Alcotest.(check bool)
+        "recovery pause reason is durable" true
+        (Option.is_some old.Op.pause_reason);
+      let preview =
+        recover_native root operation.Op.token ~preview:true
+          ~mode:(Some Op.Keep_current) ~replan:true ~expected:None
+      in
+      let kept =
+        recover_native root operation.Op.token ~preview:false
+          ~mode:(Some Op.Keep_current) ~replan:true
+          ~expected:(Some preview.Native_integrate.recovery_plan)
+      in
+      let closed = kept.Native_integrate.recovery_operation in
+      Alcotest.(check int)
+        "old recovery intent retained in paged history" 1
+        (List.length closed.Op.previous_recoveries);
+      Alcotest.(check bool)
+        "prior intent preserved exactly" true
+        (List.hd closed.Op.previous_recoveries = old);
+      Alcotest.(check string)
+        "newer external bytes kept" "new edit during recovery\000"
+        (read_private root);
+      let store = S.underlying_store repository in
+      Alcotest.(check string)
+        "older unexpected bytes remain available" "private Y\000"
+        (preserved_entry store old.Op.observed [ "private.bin" ]);
+      Snapshot.Content.store store "unrooted recovery GC exercise"
+      |> ok Snapshot.error_to_string
+      |> ignore;
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      Alcotest.(check string)
+        "older observation survives actual GC" "private Y\000"
+        (preserved_entry store old.Op.observed [ "private.bin" ]);
+      Native_integrate.forget_recovery_roots ~root ~operation:operation.Op.token
+      |> integrate_ok |> ignore;
+      let released = load repository in
+      let again =
+        Native_integrate.forget_recovery_roots ~root
+          ~operation:operation.Op.token
+        |> integrate_ok
+      in
+      Alcotest.(check bool)
+        "explicit release is idempotent" false
+        (Option.get again.Op.recovery).Op.retained;
+      Alcotest.(check bool)
+        "release retry does not republish root" true
+        (Raw.Mutable_ref.equal released.S.head (load repository).S.head))
+
+let native_recovery_released_proposal_can_be_collected_and_reopened () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let first, _ =
+        add_incoming_revision repository capability certificate authority
+          "first.txt" "first public change\n"
+      in
+      let second, _ =
+        add_incoming_revision repository capability certificate authority
+          "second.txt" "second public change\n"
+      in
+      let plan = native_plan root [ first; second ] in
+      interrupt_native root plan capability Native_integrate.Prepared_root;
+      let operation =
+        Option.get (L.pending_operation (local (load repository)))
+      in
+      recover_native root operation.Op.token ~preview:false ~mode:None
+        ~replan:false ~expected:None
+      |> ignore;
+      Native_integrate.forget_recovery_roots ~root ~operation:operation.Op.token
+      |> integrate_ok |> ignore;
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      let store = S.underlying_store repository in
+      let proposed =
+        Raw.Stored_object_id.of_raw_bytes
+          (C.Object_id.to_raw operation.Op.target)
+        |> Option.get
+      in
+      reject "released unaccepted merged target remains retained"
+        (Raw.get store proposed);
+      let reopened = load repository in
+      let recovered = List.hd (L.operations (local reopened)) in
+      Alcotest.(check bool)
+        "cancelled operation remains inspectable after GC" true
+        (Op.recovered recovered);
+      Alcotest.(check bool)
+        "collected proposal never became acceptance" false
+        (Op.committed recovered);
+      Native_integrate.resume ~root ~operation:operation.Op.token
+      |> integrate_ok |> ignore)
+
+let[@warning "-4"] native_recovery_decode_rejects_malformed_intents_and_history
+    () =
+  with_root (fun root ->
+      let repository, _, _, _, operation = recovery_fixture root in
+      recover_native root operation.Op.token ~preview:false ~mode:None
+        ~replan:false ~expected:None
+      |> ignore;
+      let loaded = load repository in
+      let state = local loaded in
+      let store = S.underlying_store repository in
+      let pool = L.pool state in
+      let scope = C.pool_repository pool in
+      let authority =
+        Option.get (S.authority (Option.get loaded.S.collaboration))
+      in
+      let value =
+        L.encode state |> ok Fun.id |> Encoding.decode
+        |> ok Encoding.decode_error_to_string
+      in
+      let fields =
+        match value with Encoding.Array xs -> xs | _ -> assert false
+      in
+      let operation_root =
+        match List.hd (List.rev fields) with
+        | Encoding.Bytes raw ->
+            Raw.Stored_object_id.of_raw_bytes raw |> Option.get
+        | _ -> assert false
+      in
+      let namespace =
+        "local-integration-operations-v1\000" ^ C.Repository_id.to_raw scope
+      in
+      let rows =
+        Pages.load store ~namespace operation_root |> ok Pages.error_to_string
+      in
+      let key, bytes = List.hd rows in
+      let row = Encoding.decode bytes |> ok Encoding.decode_error_to_string in
+      let row_fields =
+        match row with Encoding.Array xs -> xs | _ -> assert false
+      in
+      let recovery = List.hd (List.rev row_fields) in
+      let recovery_fields =
+        match recovery with Encoding.Array xs -> xs | _ -> assert false
+      in
+      let array xs =
+        Encoding.array xs |> ok Encoding.construction_error_to_string
+      in
+      let replace index value xs =
+        List.mapi (fun at original -> if at = index then value else original) xs
+      in
+      let local_with_root root =
+        array
+          (List.rev
+             (Encoding.bytes (Raw.Stored_object_id.to_raw_bytes root)
+             :: List.tl (List.rev fields)))
+        |> Encoding.encode
+      in
+      let reject_recovery label recovery =
+        let altered =
+          array (List.rev (recovery :: List.tl (List.rev row_fields)))
+        in
+        let root =
+          Pages.store store ~namespace [ (key, Encoding.encode altered) ]
+          |> ok Pages.error_to_string
+        in
+        reject label (L.decode ~store ~authority (local_with_root root))
+      in
+      List.iter
+        (fun (index, value, label) ->
+          reject_recovery label (array (replace index value recovery_fields)))
+        [
+          (0, Encoding.integer 2L, "unsupported recovery schema accepted");
+          (1, Encoding.bytes "short", "malformed attempt accepted");
+          ( 1,
+            Encoding.bytes (C.Operation_id.to_raw operation.Op.token),
+            "main/recovery token collision accepted" );
+          (2, Encoding.bytes "short", "malformed recovery plan accepted");
+          (3, Encoding.bytes "short", "malformed observation accepted");
+          (5, Encoding.integer (-1L), "negative recovery timestamp accepted");
+          (6, Encoding.integer 9L, "unsupported recovery phase accepted");
+          ( 6,
+            Encoding.integer 0L,
+            "completed operation with uncommitted recovery accepted" );
+          (8, Encoding.integer 9L, "unsupported recovery mode accepted");
+          ( 9,
+            Encoding.text "paused after completion"
+            |> ok Encoding.construction_error_to_string,
+            "committed paused recovery accepted" );
+        ];
+      let previous_value =
+        array (replace 6 (Encoding.integer 2L) recovery_fields)
+      in
+      let prior namespace =
+        Pages.store store ~namespace
+          [ ("attempt", Encoding.encode previous_value) ]
+        |> ok Pages.error_to_string
+      in
+      let wrong = prior "another-recovery-namespace" in
+      reject_recovery "foreign recovery history namespace accepted"
+        (array
+           (replace 10
+              (Encoding.bytes (Raw.Stored_object_id.to_raw_bytes wrong))
+              recovery_fields));
+      let proper =
+        prior
+          ("integration-recovery-history-v1\000"
+          ^ C.Repository_id.to_raw scope
+          ^ C.Operation_id.to_raw operation.Op.token)
+      in
+      reject_recovery "duplicate historical recovery attempt accepted"
+        (array
+           (replace 10
+              (Encoding.bytes (Raw.Stored_object_id.to_raw_bytes proper))
+              recovery_fields));
+      Alcotest.(check bool)
+        "invalid immutable controls never published" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head))
+
+let native_recovery_copyout_resume_owns_released_observation () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, _, _, _, operation = recovery_fixture root in
+          let recovered =
+            recover_native root operation.Op.token ~preview:false ~mode:None
+              ~replan:false ~expected:None
+          in
+          let target =
+            snapshot
+              (C.Object_id.to_hex recovered.Native_integrate.recovery_observed)
+          in
+          let child = Unix.fork () in
+          if child = 0 then (
+            Service.For_test.copy_out ~root ~checkpoint:target ~destination
+              ~dry_run:false ~expected_plan:None ~observe:(fun stage ->
+                if stage = Service.Prepared_journal then Unix._exit 73)
+            |> ignore;
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "copy-out intent persisted before files" true
+            (status = Unix.WEXITED 73);
+          Native_integrate.forget_recovery_roots ~root
+            ~operation:operation.Op.token
+          |> integrate_ok |> ignore;
+          Yeokcham_v1_gc.apply ~root
+          |> ok Yeokcham_v1_gc.error_to_string
+          |> ignore;
+          let journal =
+            J.latest_pending ~root |> ok J.error_to_string |> Option.get
+          in
+          let before = load repository in
+          Service.recover_operation ~root
+            ~operation:(Some (J.operation_id journal))
+          |> service |> ignore;
+          Alcotest.(check string)
+            "recorded export survives original root release" "private Y\000"
+            (In_channel.with_open_bin
+               (destination ^ "/private.bin")
+               In_channel.input_all);
+          Alcotest.(check bool)
+            "export resume does not move source history" true
+            (Raw.Mutable_ref.equal before.S.head (load repository).S.head)))
+
+let native_recovery_stale_preview_and_missing_safety_refuse_before_writes () =
+  with_root (fun root ->
+      let repository, _, _, _, operation = recovery_fixture root in
+      let preview =
+        recover_native root operation.Op.token ~preview:true ~mode:None
+          ~replan:false ~expected:None
+      in
+      write_private root "edit after recovery preview\000";
+      let before = load repository in
+      reject "stale recovery applied"
+        (Native_integrate.recover ~root ~operation:operation.Op.token
+           ~dry_run:false ~mode:None ~replan:false
+           ~expected_plan:(Some preview.Native_integrate.recovery_plan));
+      Alcotest.(check bool)
+        "stale recovery did not reserve intent" true
+        ((List.hd (L.operations (local (load repository)))).Op.recovery = None);
+      let store = S.underlying_store repository in
+      let safety =
+        Composition.load store operation.Op.safety
+        |> ok Composition.error_to_string
+        |> Composition.entries
+      in
+      let content =
+        match List.assoc [ "private.bin" ] safety with
+        | Composition.File file -> file.content
+        | Composition.Directory -> Alcotest.fail "expected safety file"
+      in
+      Unix.unlink
+        (Raw.object_path store (Snapshot.Content.stored_object_id content));
+      reject "unavailable safety was materialized"
+        (Native_integrate.recover ~root ~operation:operation.Op.token
+           ~dry_run:false ~mode:None ~replan:false ~expected_plan:None);
+      Alcotest.(check bool)
+        "missing safety did not change metadata" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "missing safety leaves live bytes" "edit after recovery preview\000"
+        (read_private root))
+
+let native_materialization_verifies_untouched_target_paths () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let revision, _ =
+        add_incoming_revision repository capability certificate authority
+          "remote.txt" "D\n"
+      in
+      let plan = native_plan root [ revision ] in
+      let changed = ref false in
+      let observe stage =
+        if stage = Native_integrate.Applying_root then (
+          changed := true;
+          write_private root "external untouched path edit\000")
+      in
+      reject "Materialized falsely accepted changed untouched target bytes"
+        (Native_integrate.For_test.apply ~observe ~root ~plan:(I.id plan)
+           ~signing_capability:(Some capability));
+      Alcotest.(check bool) "edit injected after Prepared" true !changed;
+      Alcotest.(check string)
+        "untouched-path edit preserved" "external untouched path edit\000"
+        (read_private root);
+      Alcotest.(check int)
+        "no target history falsely committed" 1
+        (List.length (H.nodes (load repository).S.history)))
+
+let native_recovery_root_cas_faults_and_cleanup_are_idempotent () =
+  List.iter
+    (fun before_root ->
+      List.iter
+        (fun target_root ->
+          with_root (fun root ->
+              let repository, _, _, _, operation = recovery_fixture root in
+              let child = Unix.fork () in
+              if child = 0 then (
+                let count = ref 0 in
+                let observe seen =
+                  if seen = Native_integrate.Before_root then (
+                    incr count;
+                    if before_root && !count = target_root then Unix._exit 73);
+                  if
+                    seen = Native_integrate.After_root
+                    && (not before_root) && !count = target_root
+                  then Unix._exit 73
+                in
+                ignore
+                  (Native_integrate.For_test.recover ~observe ~root
+                     ~operation:operation.Op.token ~dry_run:false ~mode:None
+                     ~replan:false ~expected_plan:None);
+                Unix._exit 74);
+              let _, status = Unix.waitpid [] child in
+              Alcotest.(check bool)
+                "recovery stopped before/after actual root CAS" true
+                (status = Unix.WEXITED 73);
+              let result =
+                recover_native root operation.Op.token ~preview:false ~mode:None
+                  ~replan:false ~expected:None
+              in
+              Alcotest.(check bool)
+                "one closed recovery" true
+                (Op.recovered result.Native_integrate.recovery_operation);
+              Alcotest.(check int)
+                "one private recovery child" 2
+                (List.length (H.nodes (load repository).S.history));
+              Native_integrate.forget_recovery_roots ~root
+                ~operation:operation.Op.token
+              |> integrate_ok |> ignore;
+              Alcotest.(check int)
+                "owned restore proof released explicitly" 0
+                (List.length
+                   (Yeokcham_v1_restore_proof.scan ~root
+                   |> ok Yeokcham_v1_restore_proof.error_to_string));
+              let released = load repository in
+              Native_integrate.forget_recovery_roots ~root
+                ~operation:operation.Op.token
+              |> integrate_ok |> ignore;
+              Alcotest.(check bool)
+                "release retry has no extra root update" true
+                (Raw.Mutable_ref.equal released.S.head (load repository).S.head)))
+        [ 1; 2; 3; 4; 5 ])
+    [ true; false ]
+
+let native_recovery_can_cancel_materialized_but_not_committed_acceptance () =
+  List.iter
+    (fun committed ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let revision, _ =
+            add_incoming_revision repository capability certificate authority
+              "remote.txt" "D\n"
+          in
+          let plan = native_plan root [ revision ] in
+          interrupt_native root plan capability
+            (if committed then Native_integrate.Committed_root
+             else Native_integrate.Materialized_root);
+          let before = load repository in
+          let operation = List.hd (L.operations (local before)) in
+          if committed then (
+            reject "recovery unaccepted committed shared history"
+              (Native_integrate.recover ~root ~operation:operation.Op.token
+                 ~dry_run:false ~mode:None ~replan:false ~expected_plan:None);
+            Alcotest.(check bool)
+              "commit refusal preserves root" true
+              (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+          else (
+            recover_native root operation.Op.token ~preview:false ~mode:None
+              ~replan:false ~expected:None
+            |> ignore;
+            Alcotest.(check bool)
+              "materialized acceptance never published on recovery" false
+              (Option.is_some
+                 (C.find
+                    (L.pool (local (load repository)))
+                    operation.Op.accepted));
+            Alcotest.(check bool)
+              "pre-integration ordinary tree restored" false
+              (Sys.file_exists (root ^ "/remote.txt")))))
+    [ false; true ]
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "native recovery root CAS faults preserve intent and cleanup" `Quick
+            native_recovery_root_cas_faults_and_cleanup_are_idempotent;
+          Alcotest.test_case "native recovery cannot unaccept committed history"
+            `Quick
+            native_recovery_can_cancel_materialized_but_not_committed_acceptance;
+          Alcotest.test_case
+            "native recovery restores safety and preserves observations" `Quick
+            native_recovery_restores_safety_without_acceptance_or_losing_observations;
+          Alcotest.test_case
+            "native recovery resumes file and metadata boundaries" `Quick
+            native_recovery_resumes_file_and_metadata_boundaries;
+          Alcotest.test_case
+            "native recovery Materialized retry preserves later edits" `Quick
+            native_recovery_materialized_retry_preserves_later_edits;
+          Alcotest.test_case
+            "native recovery replans with immutable prior observations" `Quick
+            native_recovery_replans_without_erasing_prior_observations;
+          Alcotest.test_case
+            "released unaccepted proposal collects without losing operation"
+            `Quick
+            native_recovery_released_proposal_can_be_collected_and_reopened;
+          Alcotest.test_case
+            "recovery decoding rejects malformed and colliding intents" `Quick
+            native_recovery_decode_rejects_malformed_intents_and_history;
+          Alcotest.test_case
+            "copy-out journal owns released recovery observation" `Quick
+            native_recovery_copyout_resume_owns_released_observation;
+          Alcotest.test_case
+            "native recovery stale/missing safety refuses before writes" `Quick
+            native_recovery_stale_preview_and_missing_safety_refuse_before_writes;
+          Alcotest.test_case
+            "native Materialized fact verifies untouched target paths" `Quick
+            native_materialization_verifies_untouched_target_paths;
           Alcotest.test_case
             "native integration provider never holds writer lock and \
              revalidates"

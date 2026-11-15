@@ -15,6 +15,7 @@ type root_reason =
   | Publication_witness of Model.Core.Operation_id.t
   | Integration_proposal of Model.Core.Plan_id.t
   | Integration_operation of Model.Core.Operation_id.t
+  | Recovery_contents of Model.Snapshot_id.t
   | Checkpoint of {
       snapshot : Model.Snapshot_id.t;
       reasons : Model.protection_reason list;
@@ -88,6 +89,8 @@ let root_reason_to_string = function
       "integration-proposal " ^ Model.Core.Plan_id.to_hex plan
   | Integration_operation token ->
       "integration-operation " ^ Model.Core.Operation_id.to_hex token
+  | Recovery_contents snapshot ->
+      "recovery-contents " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
@@ -440,7 +443,7 @@ let proof_matches_journal proof journal =
   && Model.Snapshot_id.equal (Proof.safety proof) (Journal.safety journal)
   && Model.Snapshot_id.equal (Proof.target proof) (Journal.target journal)
 
-let retention_snapshots ~root project =
+let retention_snapshots ~root =
   let* journals =
     Journal.scan ~root |> Result.map_error (fun error -> Journal_error error)
   in
@@ -462,30 +465,20 @@ let retention_snapshots ~root project =
     |> List.sort_uniq Model.Snapshot_id.compare
   in
   let proof_snapshots = Proof.snapshots proofs in
-  let retained snapshot =
+  Ok (journal_snapshots, proof_snapshots)
+
+let checkpoint_roots project ~branch_snapshots ~journal_snapshots
+    ~proof_snapshots =
+  let checkpoint snapshot =
     List.exists
       (fun checkpoint ->
         Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot snapshot)
       (Model.checkpoints project)
   in
-  let* () =
-    List.fold_left
-      (fun result snapshot ->
-        let* () = result in
-        if retained snapshot then Ok ()
-        else
-          Error
-            (Invalid_schema "journal or proof names an unretained checkpoint"))
-      (Ok ())
-      (journal_snapshots @ proof_snapshots)
-  in
-  Ok (journal_snapshots, proof_snapshots)
-
-let checkpoint_roots project ~branch_snapshots ~journal_snapshots
-    ~proof_snapshots =
   let* compacted =
-    Model.compact ~branch_snapshots project ~keep_recent:0 ~journal_snapshots
-      ~proof_snapshots
+    Model.compact ~branch_snapshots project ~keep_recent:0
+      ~journal_snapshots:(List.filter checkpoint journal_snapshots)
+      ~proof_snapshots:(List.filter checkpoint proof_snapshots)
     |> Result.map_error (fun error -> Model_error error)
   in
   let* named =
@@ -508,7 +501,19 @@ let checkpoint_roots project ~branch_snapshots ~journal_snapshots
           ((object_id, [ Checkpoint { snapshot; reasons } ]) :: reversed)
           rest
   in
-  roots [] (Model.checkpoints project)
+  let* roots = roots [] (Model.checkpoints project) in
+  (* journals and proofs also own native recovery observations that were never
+     ordinary checkpoints, including an export after its source root releases. *)
+  List.fold_left
+    (fun result snapshot ->
+      let* roots = result in
+      if checkpoint snapshot then Ok roots
+      else
+        let* id = snapshot_object_id snapshot in
+        Ok ((id, [ Recovery_contents snapshot ]) :: roots))
+    (Ok roots)
+    (List.sort_uniq Model.Snapshot_id.compare
+       (journal_snapshots @ proof_snapshots))
 
 let add_reachable object_id reasons reachable =
   add_reasons object_id reasons reachable
@@ -605,9 +610,7 @@ let traverse_snapshot store reasons snapshot_id reachable =
   traverse_tree store reasons (Snapshot.Snapshot.root snapshot) reachable
 
 let plan_from_loaded ~root store loaded =
-  let* journal_snapshots, proof_snapshots =
-    retention_snapshots ~root loaded.V1_store.project
-  in
+  let* journal_snapshots, proof_snapshots = retention_snapshots ~root in
   let* roots =
     checkpoint_roots loaded.V1_store.project
       ~branch_snapshots:(V1_store.local_branch_snapshots loaded)

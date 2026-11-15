@@ -136,6 +136,8 @@ let filesystem_digest observation =
           ("yeokcham/integration-observation/v1\000" ^ E.encode value)))
   |> model
 
+let observation_digest = filesystem_digest
+
 let proof_row p =
   let* value =
     array

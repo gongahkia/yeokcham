@@ -1467,6 +1467,20 @@ let advance_journal ~root journal phase =
   let* () = append_journal ~root next in
   Ok next
 
+let protected_snapshot loaded snapshot =
+  retained loaded.Store.project snapshot
+  || Option.fold ~none:false
+       ~some:(fun local ->
+         List.exists
+           (fun operation ->
+             List.exists
+               (fun id ->
+                 Model.Snapshot_id.to_string snapshot
+                 = Model.Core.Object_id.to_hex id)
+               (Store.Local.Operation.retention_roots operation))
+           (Store.Local.operations local))
+       loaded.Store.local
+
 let ensure_retained project snapshot =
   if retained project snapshot then Ok ()
   else Error (Unknown_checkpoint snapshot)
@@ -1732,7 +1746,7 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
               ^ "; rerun the requested restore")))
   | None ->
       with_repository ~root (fun repository loaded ->
-          if not (retained loaded.Store.project checkpoint) then
+          if not (protected_snapshot loaded checkpoint) then
             Error (Unknown_checkpoint checkpoint)
           else
             let store = Store.underlying_store repository in
@@ -1868,7 +1882,7 @@ let canonical_copy_destination destination =
 let within_directory path directory =
   path = directory || String.starts_with ~prefix:(directory ^ "/") path
 
-let perform_copyout ~observe ~root repository loaded journal ~resumed =
+let perform_copyout ~observe ~root repository journal ~resumed =
   let* destination =
     match Journal.destination journal with
     | Some destination -> Ok destination
@@ -1887,7 +1901,6 @@ let perform_copyout ~observe ~root repository loaded journal ~resumed =
   if Journal.phase journal = Journal.Published then Ok result
   else
     let store = Store.underlying_store repository in
-    let* () = ensure_retained loaded.Store.project (Journal.target journal) in
     let* () = validate_snapshot_closure store (Journal.target journal) in
     let* target = load_snapshot store (Journal.target journal) in
     let* target_id =
@@ -2005,8 +2018,7 @@ let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
                            "local selection plan is stale; its copy-out scope \
                             differs")
               in
-              perform_copyout ~observe ~root repository loaded journal
-                ~resumed:true
+              perform_copyout ~observe ~root repository journal ~resumed:true
           | None when copies <> [] ->
               Error
                 (History_error
@@ -2027,7 +2039,10 @@ let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
                 else Ok ()
               in
               let store = Store.underlying_store repository in
-              let* () = ensure_retained loaded.Store.project checkpoint in
+              let* () =
+                if protected_snapshot loaded checkpoint then Ok ()
+                else Error (Unknown_checkpoint checkpoint)
+              in
               let* () = validate_snapshot_closure store checkpoint in
               let* target = load_snapshot store checkpoint in
               let* target_id =
@@ -2099,8 +2114,7 @@ let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
                 in
                 let* () = append_journal ~root journal in
                 observe Prepared_journal;
-                perform_copyout ~observe ~root repository loaded journal
-                  ~resumed:false))
+                perform_copyout ~observe ~root repository journal ~resumed:false))
 
 let preview_copy_out ~root ~checkpoint ~destination =
   copy_out_with ~observe:no_application_observer ~root ~checkpoint ~destination
@@ -2220,7 +2234,7 @@ let recover_operation_with ~expected_plan ~root ~operation =
                 match Journal.destination journal with
                 | Some _ ->
                     perform_copyout ~observe:no_application_observer ~root
-                      repository loaded journal ~resumed:true
+                      repository journal ~resumed:true
                     |> Result.map (fun result -> Recovered_copy_out result)
                 | None when already_completed ->
                     Ok
@@ -5021,7 +5035,7 @@ let resolve_state loaded observed = function
           Error
             (History_error "history identity belongs to a different workspace"))
   | Snapshot_state snapshot ->
-      if retained loaded.Store.project snapshot then
+      if protected_snapshot loaded snapshot then
         Ok
           {
             state_name = Model.Snapshot_id.to_string snapshot;
@@ -5035,7 +5049,7 @@ let validate_view loaded store observed view =
     Option.fold ~none:false
       ~some:(Model.Snapshot_id.equal view.state_snapshot)
       observed
-    || retained loaded.Store.project view.state_snapshot
+    || protected_snapshot loaded view.state_snapshot
   then validate_snapshot_closure store view.state_snapshot
   else Error (Unknown_checkpoint view.state_snapshot)
 
