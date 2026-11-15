@@ -5,6 +5,7 @@
     post-receive upload failure as pending work. *)
 
 module Core = Native_sync
+module Clone = Native_clone
 
 type upload = Uploaded of int | Pending of string
 

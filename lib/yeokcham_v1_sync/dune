@@ -10,6 +10,8 @@
   yeokcham_v1_store
   yeokcham_v1_pages
   yeokcham_v1_undo
+  yeokcham_v1_recovery
+  yeokcham_v1_integration
   yeokcham_v1_local_service
   yeokcham_v1_package
   yeokcham_v1_transport

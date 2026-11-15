@@ -127,6 +127,13 @@ module Core : sig
       disclose them again. Unadmitted remote references do not declassify
       private local bytes merely because their hashes happen to match. *)
 
+  val verify_public_records :
+    source:Yeokcham_store.repository -> authority:Trust.authority ->
+    records:(Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list ->
+    (Model.Core.pool, error) result
+  (** Historical signatures and full composition proof; current new-record
+      admission remains the owning store/service's responsibility. *)
+
   val restore_artifact :
     source:Yeokcham_store.repository ->
     destination:string ->

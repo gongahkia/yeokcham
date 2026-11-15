@@ -1,4 +1,5 @@
 module Core = Native_sync
+module Clone = Native_clone
 module Package = Yeokcham_v1_package
 module Service = Yeokcham_v1_local_service
 module Store = Yeokcham_store
