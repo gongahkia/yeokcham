@@ -4,6 +4,8 @@
     staged receipt boundary and transport publication adapters, and reports
     post-receive upload failure as pending work. *)
 
+module Core = Native_sync
+
 type upload = Uploaded of int | Pending of string
 
 type report = {

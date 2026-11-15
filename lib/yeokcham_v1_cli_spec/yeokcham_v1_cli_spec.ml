@@ -294,6 +294,7 @@ let commands =
     command [ "semantic"; "server"; "disable" ];
     command [ "semantic"; "server"; "remove" ];
     command [ "sync" ];
+    command [ "exchange" ];
     command [ "relay"; "serve" ]
       ~options:
         [ path "--config"; path "--storage"; option "--listen" Free_argument ];

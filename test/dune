@@ -463,6 +463,7 @@
  (modules test_v1_transport)
  (libraries
   alcotest
+  yojson
   unix
   yeokcham_testkit
   yeokcham_store
@@ -475,6 +476,8 @@
   yeokcham_v1_relay_config
   yeokcham_v1_relay_http
   yeokcham_v1_store
+  yeokcham_v1_sync
+  yeokcham_v1_undo
   yeokcham_v1_transport
   yeokcham_v1_transport_config
   yeokcham_v1_transport_http

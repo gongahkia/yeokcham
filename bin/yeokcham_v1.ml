@@ -125,6 +125,7 @@ let native_json_command command =
   || List.mem command
        [
          "status";
+         "exchange";
          "integrate";
          "operation";
          "operation-show";
@@ -177,6 +178,7 @@ let domain_command command =
   || List.mem command
        [
          "status";
+         "exchange";
          "integrate";
          "operation";
          "operation-show";
@@ -583,6 +585,7 @@ let usage_text =
    --overlap same-symbol|nearby-ranges|references\n\
   \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
   \  yeokcham sync [--root PATH] NAME\n\
+  \  yeokcham exchange [--root PATH] NAME [--format text|json]\n\
   \  yeokcham relay serve --config PATH\n\
   \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
   \  yeokcham relay access issue --storage PATH --repository ID --scope \
@@ -971,6 +974,14 @@ let help_for = function
         "usage: yeokcham sync [--root PATH] NAME\n\n\
          Use one configured relay alias for staged receive-first \
          synchronization. It does not materialise source or select authority."
+  | [ "exchange" ] ->
+      Some
+        "usage: yeokcham exchange [--root PATH] NAME [--format text|json]\n\n\
+         Receive verified shared work and send the exact durable outgoing batch \
+         through a configured native HTTPS relay. Requires existing enrollment \
+         and remote login. Receipt preserves working files/private history. \
+         Transfers run in the foreground; retry this command after interruption. \
+         Local acceptance and relay acknowledgement are separate facts."
   | [ "relay" ] ->
       Some
         "usage: yeokcham relay serve|access issue|rotate|revoke|list ...\n\n\
@@ -7633,6 +7644,69 @@ let run_bootstrap arguments =
   Printf.printf
     "bootstrap verified %s; no working-tree materialization occurred\n" basis_id
 
+let[@warning "-4"] fail_exchange error =
+  let module Native = Sync.Core in
+  let status, code = match error with
+    | Native.Receipt_error (Service.Core_receive.Admission_error
+        (Local.Receive_trust _))
+    | Native.Receipt_error (Service.Core_receive.Trust_error _)
+    | Native.Package_error (Package.Core_trust_error _ | Package.Trust_error _)
+    | Native.Receipt_error (Service.Core_receive.Package_error
+        (Package.Core_trust_error _ | Package.Trust_error _)) -> 7, "exchange-authority-blocked"
+    | Native.Http_error (Transport_http.Unexpected_status (401 | 403)) -> 7, "exchange-access-blocked"
+    | Native.Http_error _ | Native.Invalid _ | Native.Store_error _ | Native.Raw_error _ -> 5, "exchange-unavailable"
+    | _ -> 6, "exchange-integrity-failure" in
+  fail_with_status status code (Native.error_to_string error)
+
+let run_exchange arguments =
+  let module Native = Sync.Core in
+  let root, remote = parse_remote_name arguments in
+  let report = match Native.run ~root ~remote ~load_signing_capability:(fun device ->
+      V1_signer.load ~root device |> Result.map_error V1_signer.error_to_string) with
+    | Ok report -> report | Error error -> fail_exchange error in
+  let outgoing = match report.Native.upload with
+    | Native.No_outgoing -> `Assoc [ "state", `String "none" ]
+    | Native.Pending reason -> `Assoc [ "state", `String "pending"; "reason", `String (public_error_message reason) ]
+    | Native.Acknowledged sent -> `Assoc [ "state", `String "acknowledged";
+        "publication_id", `String sent.publication; "manifest_id", `String sent.manifest;
+        "objects_offered", `Int sent.objects_offered; "reused_batch", `Bool sent.reused ] in
+  let data = `Assoc [ "remote", `String remote;
+      "relay_inventory_publications", `Int report.Native.remote_publications;
+      "received_publications", `Int report.Native.received_publications;
+      "received_records", `Int report.Native.received_records;
+      "received_branches", `Int report.Native.received_branches;
+      "legacy_received_revisions", `Int report.Native.legacy_received_revisions;
+      "known_shared_records", `Int report.Native.local_shared_records;
+      "selected_branch", `String (Core.Branch_id.to_hex report.Native.selected_branch);
+      "working_basis", `String (Core.Record_id.to_hex report.Native.working_basis);
+      "cursor", json_history_identity report.Native.cursor;
+      "coverage", `Assoc [ "scope", `String "locally_known_shared_closure";
+        "verified_complete", `Bool true; "relay_inventory_checked", `Bool true;
+        "remote_disclosure_proven", `Bool false; "managed_downloads", `Bool false ];
+      "outgoing", outgoing ] in
+  let next_actions = [ Cli_data.{ arguments = [ "yeokcham"; "exchange"; "--root"; root; remote ];
+      explanation = "Retry pending transfers or check for new shared work.";
+      applicable = true; confirmation_required = false } ] in
+  let pending = match report.Native.upload with Native.Pending _ -> true | Native.No_outgoing | Native.Acknowledged _ -> false in
+  (match requested_format () with
+  | Json_format ->
+      if pending then (
+        Cli_data.domain_failure ~command:(command_name ()) ~outcome:`Incomplete
+          ~error:Cli_data.{ code = "exchange-outgoing-pending"; message = "Receipt completed; outgoing transfer remains pending." }
+          ~data ~warnings:[] ~next_actions () |> Cli_data.encode |> print_json)
+      else domain_json ~outcome:`Completed ~code:"shared-work-exchanged"
+          ~message:"Shared receipt and foreground transfer completed." ~data ~next_actions ()
+  | Text_format ->
+      Printf.printf "received publications %d; Core records %d; branches %d\n"
+        report.Native.received_publications report.Native.received_records report.Native.received_branches;
+      Printf.printf "verified local shared closure: %d records; relay inventory checked: %d couriers\n"
+        report.Native.local_shared_records report.Native.remote_publications;
+      (match report.Native.upload with
+       | Native.No_outgoing -> print_endline "outgoing: none"
+       | Native.Pending reason -> Printf.printf "outgoing: pending; %s\n" (public_error_message reason)
+       | Native.Acknowledged sent -> Printf.printf "outgoing: acknowledged %s; manifest %s\n" sent.publication sent.manifest));
+  if pending then exit 5
+
 let run_sync arguments =
   let root, remote_name = parse_remote_name arguments in
   let report =
@@ -7773,6 +7847,7 @@ let dispatch () =
   | _ :: "remote" :: "login" :: arguments -> run_remote_login arguments
   | _ :: "semantic" :: "server" :: arguments -> run_semantic_server arguments
   | _ :: "sync" :: arguments -> run_sync arguments
+  | _ :: "exchange" :: arguments -> run_exchange arguments
   | _ :: "relay" :: "access" :: "issue" :: arguments ->
       run_relay_access_issue arguments
   | _ :: "relay" :: "access" :: "rotate" :: arguments ->

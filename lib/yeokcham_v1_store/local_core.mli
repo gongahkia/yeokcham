@@ -102,6 +102,15 @@ val initialize :
 (** Creates authenticated empty accepted genesis and the generated main branch.
     Existing workspace files are not passed to or accepted by this operation. *)
 
+val initialize_received :
+  store:Yeokcham_store.repository -> authority:Yeokcham_v1_trust.authority ->
+  records:(Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list ->
+  selected_branch:Core.Branch_id.t -> cursor:int64 -> (t, receive_error) result
+(** Admits a complete verified public graph and selects a private empty basis
+    without signing a second shared genesis. Requires one event/accepted head and
+    a unique empty accepted ancestor. Caller atomically initializes matching empty
+    private history, then uses verified integration to materialize the target. *)
+
 val create_branch :
   store:Yeokcham_store.repository ->
   authority:Yeokcham_v1_trust.authority ->

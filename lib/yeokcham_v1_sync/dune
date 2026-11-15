@@ -3,6 +3,13 @@
  (libraries
   unix
   yeokcham_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_snapshot
+  yeokcham_v1_model
+  yeokcham_v1_store
+  yeokcham_v1_pages
+  yeokcham_v1_undo
   yeokcham_v1_local_service
   yeokcham_v1_package
   yeokcham_v1_transport
