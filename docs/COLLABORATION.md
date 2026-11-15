@@ -114,7 +114,7 @@ root identity before initializing a new/empty destination. It copies only that
 verified public closure, creates fresh private empty history, and materializes the
 selected accepted version with the existing safe integration engine. It signs no
 new shared genesis/acceptance and copies no source private history, files or keys.
-Other received branches remain known-only until supported local selection.
+Other received branches remain known-only until explicit local selection below.
 
 ```sh
 yeokcham clone --resume my-project
@@ -138,8 +138,34 @@ is provided. Preserve unexpected staging contents for inspection.
 All transfers run in the foreground. Reported closure covers verified locally
 known shared work, not proof that a relay disclosed every remote record. Automated
 TLS tests use disposable explicit signing capabilities; they do not qualify native
-custody onboarding or human usability. Known-only branch switching, complete
-conflict resolution and the remaining P3 audit are still outstanding.
+custody onboarding or human usability. Complete conflict resolution and the
+remaining P3 audit are still outstanding.
+
+## Select a received branch (P3 in progress)
+
+```sh
+yeokcham branch list
+yeokcham switch feature --preview
+yeokcham switch feature --yes --plan PLAN_ID
+yeokcham switch main --yes
+```
+
+Names come from branch listing. A first selection uses the branch's unique verified
+accepted version, preserving the source branch's unsaved work as a private history
+alternative before replacement. Preview allocates no history or position; JSON marks
+proposed target identities provisional. Incomparable heads or duplicate names need
+an explicit decision and are never chosen by `--yes`. No signer or network is needed
+for selection of already verified local contents.
+
+Returning to a saved branch restores that branch's private position. Newer known
+shared heads stay visible separately; use `integrate --preview` to inspect catch-up.
+Switching does not integrate or publish private work. A new named branch forks the
+current private working basis, including when a newer shared head has arrived.
+
+An interrupted switch reuses the recorded target and private basis rather than a
+later received head. Existing local selection journals, safety roots and recovery
+commands apply. Late external edits after materialization remain private disk
+changes. See [local undo](LOCAL_UNDO.md) for exact history selection and copy-out.
 
 ## Local shared acceptance (P3 in progress)
 

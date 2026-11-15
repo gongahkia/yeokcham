@@ -126,11 +126,42 @@ val create_branch :
   (t, string) result
 
 val lookup : t -> string -> (position, string) result
+
+type selection_target = private
+  | Saved_position of position
+  | Accepted_head of {
+      branch : Core.Branch_id.t;
+      basis : Core.Record_id.t;
+      snapshot : Core.Object_id.t;
+    }
+
+val selection_target : t -> string -> (selection_target, string) result
+(** Unique current branch/name/head selection. Existing private positions retain
+    their historical basis; known-only branches propose the exact accepted head.
+*)
+
+val register_position :
+  t ->
+  history:Yeokcham_v1_undo.t ->
+  branch:Core.Branch_id.t ->
+  basis:Core.Record_id.t ->
+  cursor:int64 ->
+  (t, string) result
+(** Pure staging of a verified shared target in private history. Refuses a
+    changed accepted head or replacement of an existing private position.
+    Publish with the matching history and safety checkpoint under the owning
+    state root. *)
+
 val remember : t -> cursor:int64 -> (t, string) result
 
 val select : t -> Core.Branch_id.t -> (t, string) result
 (** Metadata selection only. The service must complete verified journaled
     materialization before publishing this with the target history cursor. *)
+
+val select_saved : t -> Core.Branch_id.t -> (t, string) result
+(** Resume an already frozen private position without choosing a current shared
+    head. Caller must bind its exact cursor/snapshot through the durable
+    journal. *)
 
 val encode : t -> (string, string) result
 

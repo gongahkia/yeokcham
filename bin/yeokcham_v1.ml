@@ -404,6 +404,10 @@ let[@warning "-4"] fail_local = function
             && String.ends_with ~suffix:"explicitly" message ->
       fail_with_status 3 "branch-choice-required" message
   | Service.History_error message
+    when String.starts_with
+           ~prefix:"branch creation inputs changed while signing" message ->
+      fail_with_status 3 "branch-creation-stale" message
+  | Service.History_error message
     when String.starts_with ~prefix:"local selection plan is stale" message
          || String.starts_with ~prefix:"working files changed after preview"
               message ->
@@ -702,7 +706,9 @@ let help_for = function
          lists effects without moving files/history. Noninteractive \
          application requires --yes; ignored obstructions and unavailable \
          targets refuse before replacement. Interrupted switches resume their \
-         exact target."
+         exact target. First selection of a received branch uses its verified \
+         accepted contents. Returning to a saved branch restores its private \
+         position; inspect newer shared work with integrate --preview."
   | [ "restore" ] ->
       Some
         "usage: yeokcham restore STATE [--to DIRECTORY] [--root PATH] \
@@ -3832,7 +3838,13 @@ let switch_json ~root result =
     Service.local_history ~root |> require_local |> fun h -> h.Service.undo_tree
   in
   let identity =
-    History.identity history result.Service.switch_target |> Result.to_option
+    if result.Service.switch_target_provisional then
+      Option.bind (History.workspace history) (fun workspace ->
+          Core.History_id.make ~workspace
+            ~sequence:result.Service.switch_target.History.id
+          |> Result.to_option)
+    else
+      History.identity history result.Service.switch_target |> Result.to_option
   in
   `Assoc
     [
@@ -3846,6 +3858,17 @@ let switch_json ~root result =
       ( "target_branch_id",
         `String (Core.Branch_id.to_hex result.Service.switch_to) );
       ("target_history", json_optional json_history_identity identity);
+      ( "target_history_provisional",
+        `Bool result.Service.switch_target_provisional );
+      ( "creates_private_position",
+        `Bool result.Service.switch_registers_position );
+      ( "target_working_basis",
+        `String (Core.Record_id.to_hex result.Service.switch_basis) );
+      ( "known_accepted_heads",
+        `List
+          (List.map
+             (fun id -> `String (Core.Record_id.to_hex id))
+             result.Service.switch_known_heads) );
       ( "target_snapshot_id",
         `String
           (Model.Snapshot_id.to_string
@@ -3883,6 +3906,18 @@ let render_switch_text result =
     (Model.Snapshot_id.to_string result.Service.switch_target.History.snapshot);
   if result.Service.switch_captures_unsaved then
     print_endline "Preserve unsaved disk edits on the source branch.";
+  if result.Service.switch_registers_position then
+    print_endline
+      "Select this branch's verified accepted contents; keep source work on \
+       its private history.";
+  if result.Service.switch_target_provisional then
+    print_endline
+      "The proposed history position is allocated only when this selection is \
+       recorded.";
+  if result.Service.switch_known_heads <> [ result.Service.switch_basis ] then
+    print_endline
+      "This selects your saved private position. Shared updates are available; \
+       preview integration to inspect them.";
   List.iter
     (fun d ->
       Printf.printf "%s: %s -> %s\n"
@@ -3994,7 +4029,18 @@ let run_switch arguments =
       ~next_actions:
         (if flags.selection_preview then next_actions result
          else
-           [ action ~root [ "status" ] "Inspect local work after selection." ])
+           [ action ~root [ "status" ] "Inspect local work after selection." ]
+           @
+           if
+             result.Service.switch_known_heads
+             <> [ result.Service.switch_basis ]
+           then
+             [
+               action ~root
+                 [ "integrate"; "--preview" ]
+                 "Inspect shared updates against this saved private position.";
+             ]
+           else [])
       ()
   else if cancelled then
     print_endline "Selection cancelled; files and history are unchanged."

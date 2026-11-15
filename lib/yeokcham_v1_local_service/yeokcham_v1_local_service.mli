@@ -858,6 +858,10 @@ type branch_switch = {
   switch_from : Yeokcham_v1_model.Core.Branch_id.t;
   switch_to : Yeokcham_v1_model.Core.Branch_id.t;
   switch_target : Yeokcham_v1_undo.node;
+  switch_target_provisional : bool;
+  switch_basis : Yeokcham_v1_model.Core.Record_id.t;
+  switch_known_heads : Yeokcham_v1_model.Core.Record_id.t list;
+  switch_registers_position : bool;
   switch_changes : path_difference list;
   switch_captures_unsaved : bool;
   switch_applied : bool;

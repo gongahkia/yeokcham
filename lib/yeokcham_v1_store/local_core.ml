@@ -290,31 +290,13 @@ let unambiguous state branch =
          reconciliation is required"
   | None -> Error "unknown branch identity"
 
-let lookup state name =
+let named_branch state name =
   let matching =
     branches state
     |> List.filter (fun row -> List.mem name row.Core.display_names)
   in
   match matching with
-  | [ row ] -> (
-      let* basis = unambiguous state row.Core.branch_id in
-      match
-        List.find_opt
-          (fun p -> Core.Branch_id.equal p.branch row.Core.branch_id)
-          state.positions
-      with
-      | Some position when Core.Record_id.equal position.basis basis ->
-          Ok position
-      | Some _ ->
-          Error
-            "private branch basis differs from the accepted head; integration \
-             is required"
-      | None ->
-          Error
-            (Printf.sprintf
-               "shared branch %S has no private working position; its files \
-                have not been selected"
-               name))
+  | [ row ] -> Ok row
   | [] -> Error (Printf.sprintf "unknown branch %S; inspect branch list" name)
   | _ ->
       Error
@@ -322,6 +304,92 @@ let lookup state name =
            "branch name %S is ambiguous; select/reconcile its identities \
             explicitly"
            name)
+
+type selection_target =
+  | Saved_position of position
+  | Accepted_head of {
+      branch : Core.Branch_id.t;
+      basis : Core.Record_id.t;
+      snapshot : Core.Object_id.t;
+    }
+
+let selection_target state name =
+  let* row = named_branch state name in
+  let* basis = unambiguous state row.Core.branch_id in
+  match
+    List.find_opt
+      (fun p -> Core.Branch_id.equal p.branch row.Core.branch_id)
+      state.positions
+  with
+  | Some position -> Ok (Saved_position position)
+  | None -> (
+      match Core.find state.pool basis with
+      | Some { Core.payload = Core.Accepted_version version; _ } ->
+          Ok
+            (Accepted_head
+               {
+                 branch = row.Core.branch_id;
+                 basis;
+                 snapshot = version.Core.result_snapshot;
+               })
+      | None
+      | Some { Core.payload = Core.Shared_revision _ | Core.Branch_event _; _ }
+        ->
+          Error "branch accepted head is not retained")
+
+let lookup state name =
+  let* row = named_branch state name in
+  let* basis = unambiguous state row.Core.branch_id in
+  match
+    List.find_opt
+      (fun p -> Core.Branch_id.equal p.branch row.Core.branch_id)
+      state.positions
+  with
+  | Some position when Core.Record_id.equal position.basis basis -> Ok position
+  | Some _ ->
+      Error
+        "private branch basis differs from the accepted head; integration is \
+         required"
+  | None ->
+      Error
+        (Printf.sprintf
+           "shared branch %S has no private working position; its files have \
+            not been selected"
+           name)
+
+let register_position state ~history ~branch ~basis ~cursor =
+  let* head = unambiguous state branch in
+  if not (Core.Record_id.equal head basis) then
+    Error "shared branch target changed; inspect a fresh selection"
+  else
+    let* target = Yeokcham_v1_undo.find history cursor in
+    let* version =
+      Composition.Graph.accepted state.pool basis
+      |> Result.map_error Composition.Graph.error_to_string
+    in
+    if
+      Yeokcham_v1_model.Snapshot_id.to_string target.Yeokcham_v1_undo.snapshot
+      <> Core.Object_id.to_hex version.Core.result_snapshot
+    then
+      Error "private branch target does not match the verified accepted version"
+    else
+      let position = { branch; basis; cursor } in
+      match
+        List.find_opt
+          (fun p -> Core.Branch_id.equal p.branch branch)
+          state.positions
+      with
+      | Some old when old = position -> Ok state
+      | Some _ -> Error "cannot replace a saved private branch position"
+      | None ->
+          Ok
+            {
+              state with
+              positions =
+                List.sort
+                  (fun a b -> Core.Branch_id.compare a.branch b.branch)
+                  (position :: state.positions);
+            }
 
 let add_branch ~random_bytes ~store ~authority ~certificate ~signing_capability
     ~name ~cursor ~parents state =
@@ -395,7 +463,8 @@ let initialize ~store ~authority ~certificate ~signing_capability ~cursor =
 
 let create_branch_using ~random_bytes ~store ~authority ~certificate
     ~signing_capability ~name ~cursor state =
-  let* basis = unambiguous state state.selected_branch in
+  let* _ = unambiguous state state.selected_branch in
+  let basis = (selected state).basis in
   add_branch ~random_bytes ~store ~authority ~certificate ~signing_capability
     ~name ~cursor ~parents:[ basis ] state
   |> Result.map fst
@@ -422,6 +491,11 @@ let remember state ~cursor =
 
 let select state branch =
   let* _ = unambiguous state branch in
+  if List.exists (fun p -> Core.Branch_id.equal p.branch branch) state.positions
+  then Ok { state with selected_branch = branch }
+  else Error "branch has no private position"
+
+let select_saved state branch =
   if List.exists (fun p -> Core.Branch_id.equal p.branch branch) state.positions
   then Ok { state with selected_branch = branch }
   else Error "branch has no private position"

@@ -3216,10 +3216,9 @@ let[@warning "-4-40-42"] native_clone_verifies_materializes_and_resumes () =
                 (List.length (History.nodes cloned.Store.history));
               Alcotest.(check bool)
                 "fresh workspace namespace" false
-                (History.identity source_loaded.Store.history
-                   (History.current source_loaded.Store.history)
-                = History.identity cloned.Store.history
-                    (History.current cloned.Store.history));
+                (Core.Workspace_id.equal
+                   (Option.get (History.workspace source_loaded.Store.history))
+                   (Option.get (History.workspace cloned.Store.history)));
               let before =
                 History.encode cloned.Store.history |> require_ok Fun.id
               in
@@ -3440,6 +3439,234 @@ let[@warning "-4-40-42"] native_clone_verifies_materializes_and_resumes () =
                 [ "exchange"; "--root"; destination; "origin" ]
               |> ignore)))
 
+let[@warning "-4-40-42"] native_shared_branch_selection_and_nondefault_clone ()
+    =
+  let module Core = Model.Core in
+  let module Local = Store.Local in
+  let module History = Yeokcham_v1_undo in
+  let load repository =
+    Store.load repository |> require_ok Store.error_to_string
+  in
+  let cli label args =
+    let output, errors, status = run_cli args in
+    require_cli_success label (errors ^ output) status;
+    output
+  in
+  let write path bytes =
+    Out_channel.with_open_bin path (fun out -> output_string out bytes)
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  with_https_relay (fun _ project url ->
+      with_directory "yeokcham-native-shared-branches-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let ( source,
+                    destination,
+                    source_repository,
+                    destination_repository,
+                    _,
+                    bob,
+                    _ ) =
+                native_core_replicas parent signer_directory
+              in
+              List.iter
+                (fun root ->
+                  Transport_config.add ~root ~name:"team" ~url
+                  |> require_ok Transport_config.error_to_string)
+                [ source; destination ];
+              write
+                (source ^ "/alice-private.txt")
+                "ALICE UNSHARED BRANCH SENTINEL";
+              cli "Alice shares main file"
+                [ "share"; "--root"; source; "main.ml" ]
+              |> ignore;
+              cli "Alice accepts shared main"
+                [ "integrate"; "--root"; source; "--all"; "--yes" ]
+              |> ignore;
+              cli "Alice creates named shared branch"
+                [ "branch"; "create"; "feature"; "--root"; source ]
+              |> ignore;
+              cli "Alice publishes both branches over real TLS"
+                [ "exchange"; "--root"; source; "team" ]
+              |> ignore;
+              let sender = load source_repository in
+              let sender_local = Option.get sender.Store.local in
+              let feature =
+                Local.branches sender_local
+                |> List.find (fun branch ->
+                    branch.Core.display_names = [ "feature" ])
+              in
+              let feature_basis = List.hd feature.Core.accepted_heads in
+              write
+                (destination ^ "/bob-private.txt")
+                "BOB PRIVATE SOURCE ALTERNATIVE";
+              let before = load destination_repository in
+              cli "Bob receives named branch without moving files"
+                [ "exchange"; "--root"; destination; "team" ]
+              |> ignore;
+              let received = load destination_repository in
+              Alcotest.(check string)
+                "TLS receipt does not allocate private history"
+                (History.encode before.Store.history |> require_ok Fun.id)
+                (History.encode received.Store.history |> require_ok Fun.id);
+              Alcotest.(check bool)
+                "received branch has no fabricated private position" false
+                (List.exists
+                   (fun position ->
+                     Core.Branch_id.equal position.Local.branch
+                       feature.Core.branch_id)
+                   (Local.positions (Option.get received.Store.local)));
+              let preview =
+                cli "Bob previews first shared branch selection"
+                  [
+                    "switch";
+                    "feature";
+                    "--root";
+                    destination;
+                    "--preview";
+                    "--format";
+                    "json";
+                  ]
+              in
+              let open Yojson.Safe.Util in
+              let preview = Yojson.Safe.from_string preview in
+              Alcotest.(check bool)
+                "first target identity is marked provisional" true
+                (preview |> member "data"
+                |> member "target_history_provisional"
+                = `Bool true);
+              Alcotest.(check bool)
+                "preview preserves source root" true
+                (Object_store.Mutable_ref.equal received.Store.head
+                   (load destination_repository).Store.head);
+              let plan = preview |> member "plan_id" |> to_string in
+              let bob_id =
+                Model.Device_id.to_string (Trust.device_id (device bob))
+              in
+              let key = Filename.concat signer_directory bob_id in
+              Unix.rename key (key ^ ".hidden");
+              Fun.protect
+                ~finally:(fun () -> Unix.rename (key ^ ".hidden") key)
+                (fun () ->
+                  cli "Bob selects received branch without signer"
+                    [
+                      "switch";
+                      "feature";
+                      "--root";
+                      destination;
+                      "--yes";
+                      "--plan";
+                      plan;
+                      "--format";
+                      "json";
+                    ]
+                  |> ignore;
+                  let selected = load destination_repository in
+                  let local = Option.get selected.Store.local in
+                  Alcotest.(check bool)
+                    "exact authenticated branch selected" true
+                    (Core.Branch_id.equal feature.Core.branch_id
+                       (Local.selected local).Local.branch);
+                  Alcotest.(check bool)
+                    "known accepted head reused" true
+                    (Core.Record_id.equal feature_basis
+                       (Local.selected local).Local.basis);
+                  Alcotest.(check string)
+                    "verified branch contents materialized" "let version = 1\n"
+                    (read (destination ^ "/main.ml"));
+                  Alcotest.(check bool)
+                    "private source stays on its branch" false
+                    (Sys.file_exists (destination ^ "/bob-private.txt"));
+                  Alcotest.(check bool)
+                    "selection creates no public records" true
+                    (Local.record_objects sender_local
+                    = Local.record_objects local);
+                  let returned =
+                    cli "Bob returns to saved main before catch-up"
+                      [
+                        "switch";
+                        "main";
+                        "--root";
+                        destination;
+                        "--yes";
+                        "--format";
+                        "json";
+                      ]
+                    |> Yojson.Safe.from_string |> member "data"
+                  in
+                  Alcotest.(check bool)
+                    "saved main basis is distinct from its new shared head" true
+                    (returned
+                    |> member "known_accepted_heads"
+                    <> `List [ member "target_working_basis" returned ]);
+                  Alcotest.(check string)
+                    "private source bytes restored across fresh processes"
+                    "BOB PRIVATE SOURCE ALTERNATIVE"
+                    (read (destination ^ "/bob-private.txt"));
+                  cli
+                    "Bob explicitly catches up shared main without new \
+                     signature"
+                    [ "integrate"; "--root"; destination; "--all"; "--yes" ]
+                  |> ignore;
+                  Alcotest.(check string)
+                    "private continuation retained by explicit shared catch-up"
+                    "BOB PRIVATE SOURCE ALTERNATIVE"
+                    (read (destination ^ "/bob-private.txt")));
+              cli "Bob exchanges after local branch selection"
+                [ "exchange"; "--root"; destination; "team" ]
+              |> ignore;
+              let authority =
+                Option.get
+                  (Store.authority (Option.get sender.Store.collaboration))
+              in
+              let root_cert =
+                Trust.certificates (Trust.authority_membership authority)
+                |> List.find (fun cert -> Trust.certificate_issuer cert = None)
+              in
+              let phrase = Yeokcham_v1_recovery.verification_phrase root_cert in
+              let cloned_root = parent ^ "/feature-clone" in
+              cli "clone selects a nondefault authenticated branch"
+                [
+                  "clone";
+                  url ^ "/v1/repositories/" ^ project;
+                  cloned_root;
+                  "--branch";
+                  "feature";
+                  "--device";
+                  bob_id;
+                  "--verify-phrase";
+                  phrase;
+                  "--format";
+                  "json";
+                ]
+              |> ignore;
+              let cloned_repository =
+                Store.open_repository ~root:cloned_root
+                |> require_ok Store.error_to_string
+              in
+              let cloned = load cloned_repository in
+              let cloned_local = Option.get cloned.Store.local in
+              Alcotest.(check bool)
+                "nondefault clone retains branch identity" true
+                (Core.Branch_id.equal feature.Core.branch_id
+                   (Local.selected cloned_local).Local.branch);
+              Alcotest.(check string)
+                "nondefault clone materializes exact accepted bytes"
+                "let version = 1\n"
+                (read (cloned_root ^ "/main.ml"));
+              Alcotest.(check bool)
+                "Alice private work is not cloned" false
+                (Sys.file_exists (cloned_root ^ "/alice-private.txt"));
+              Alcotest.(check bool)
+                "Bob private work is not cloned" false
+                (Sys.file_exists (cloned_root ^ "/bob-private.txt"));
+              Alcotest.(check bool)
+                "clone has a new workspace namespace" false
+                (Core.Workspace_id.equal
+                   (Option.get
+                      (History.workspace
+                         (load destination_repository).Store.history))
+                   (Option.get (History.workspace cloned.Store.history))))))
+
 let () =
   Alcotest.run "V1 transport"
     [
@@ -3466,6 +3693,9 @@ let () =
         ] );
       ( "relay",
         [
+          Alcotest.test_case
+            "received shared branches and nondefault clone work through TLS CLI"
+            `Slow native_shared_branch_selection_and_nondefault_clone;
           Alcotest.test_case
             "native clone verifies contents and resumes real application \
              boundaries"

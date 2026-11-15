@@ -619,18 +619,21 @@ let[@warning "-4"] native_receipt_preserves_history_files_and_private_positions
         "plain branch CLI identifies known-only work" true
         (status = Unix.WEXITED 0 && contains plain "local:known-shared");
       let status, json =
-        cli root [ "switch"; "received-shared"; "--yes"; "--format"; "json" ]
+        cli root
+          [ "switch"; "received-shared"; "--preview"; "--format"; "json" ]
       in
       Alcotest.(check bool)
-        "unmaterialized branch choice refuses before files" true
-        (status = Unix.WEXITED 3);
+        "known-only branch has a real read-only selection preview" true
+        (status = Unix.WEXITED 0);
       Alcotest.(check bool)
-        "choice has actionable domain error" true
+        "preview explains new private position" true
         (Yojson.Safe.from_string json
-        |> member "error" |> member "code"
-        = `String "shared-branch-not-materialized");
-      reject
-        (Service.branch_switch ~root ~name:"received-shared" ~dry_run:false);
+        |> member "data"
+        |> member "creates_private_position"
+        = `Bool true);
+      let plan =
+        Yojson.Safe.from_string json |> member "plan_id" |> to_string
+      in
       let repeated =
         Service.Core_receive.receive ~root ~package:directory
         |> ok Service.Core_receive.error_to_string
@@ -640,7 +643,40 @@ let[@warning "-4"] native_receipt_preserves_history_files_and_private_positions
         repeated.Service.Core_receive.unchanged;
       Alcotest.(check bool)
         "retry publishes no additional root" true
-        (Raw.Mutable_ref.equal after.S.head (load repository).S.head))
+        (Raw.Mutable_ref.equal after.S.head (load repository).S.head);
+      let status, result =
+        cli root
+          [
+            "switch";
+            "received-shared";
+            "--yes";
+            "--plan";
+            plan;
+            "--format";
+            "json";
+          ]
+      in
+      Alcotest.(check bool)
+        "fresh CLI materializes received branch without signer" true
+        (status = Unix.WEXITED 0);
+      Alcotest.(check bool)
+        "JSON records actual selection" true
+        (Yojson.Safe.from_string result
+        |> member "data" |> member "applied" = `Bool true);
+      Alcotest.(check bool)
+        "private source files are absent in selected empty branch" false
+        (Sys.file_exists (root ^ "/private.txt"));
+      Alcotest.(check bool)
+        "selection creates no public acceptance" true
+        (L.record_objects (local (load repository))
+        = L.record_objects (local after));
+      let status, _ = cli root [ "switch"; "main"; "--yes" ] in
+      Alcotest.(check bool)
+        "fresh CLI returns to private source alternative" true
+        (status = Unix.WEXITED 0);
+      Alcotest.(check string)
+        "private source bytes restored" "UNSAVED RECEIVER PRIVATE WORK"
+        (read (root ^ "/private.txt")))
 
 let[@warning "-4"] native_receipt_cannot_erase_working_positions_or_bypass_admission
     () =

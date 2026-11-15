@@ -2959,6 +2959,542 @@ let native_apply root plan capability =
   Native_integrate.apply ~root ~plan:(I.id plan) ~signing_capability:capability
   |> integrate_ok
 
+let received_nonempty_branch repository capability certificate authority =
+  let revision, result =
+    add_incoming_revision repository capability certificate authority
+      "shared.txt" "received branch D\r\n"
+  in
+  let before = load repository in
+  let store = S.underlying_store repository in
+  let staged =
+    L.create_branch ~store ~authority ~certificate
+      ~signing_capability:capability ~name:"received"
+      ~cursor:(H.current before.S.history).H.id (local before)
+    |> ok Fun.id
+  in
+  let position = L.lookup staged "received" |> ok Fun.id in
+  let staged = L.select staged position.L.branch |> ok Fun.id in
+  let staged, basis =
+    L.prepare_acceptance ~store ~authority ~certificate
+      ~signing_capability:capability ~parents:[ position.L.basis ]
+      ~chosen_revisions:[ revision ] ~result_snapshot:result
+      ~cursor:position.L.cursor staged
+    |> ok Fun.id
+  in
+  let received =
+    L.receive_records ~store ~authority ~records:(L.record_objects staged)
+      (local before)
+    |> ok L.receive_error_to_string
+  in
+  S.save_collaborative ~local:received repository ~expected:before.S.head
+    ~project:before.S.project
+    ~collaboration:(Option.get before.S.collaboration)
+  |> ok S.error_to_string |> ignore;
+  (position.L.branch, basis, result)
+
+let received_branch_selection_preserves_private_work () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let branch, basis, _ =
+        received_nonempty_branch repository capability certificate authority
+      in
+      write_private root "unsaved source alternative\000";
+      let before = load repository in
+      let preview =
+        Service.branch_switch ~root ~name:"received" ~dry_run:true |> service
+      in
+      Alcotest.(check bool)
+        "preview proposes a private position" true
+        preview.Service.switch_registers_position;
+      Alcotest.(check bool)
+        "future history identity is explicitly provisional" true
+        preview.Service.switch_target_provisional;
+      Alcotest.(check bool)
+        "preview does not allocate history" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "preview preserves unsaved files" "unsaved source alternative\000"
+        (read_private root);
+      let selected =
+        Service.branch_switch_confirmed ~root ~name:"received" ~preview
+        |> service
+      in
+      let after = load repository in
+      Alcotest.(check bool)
+        "actual selection resolves provisional identity" false
+        selected.Service.switch_target_provisional;
+      Alcotest.(check bool)
+        "known branch identity selected" true
+        (C.Branch_id.equal branch (L.selected (local after)).L.branch);
+      Alcotest.(check bool)
+        "exact known accepted version reused" true
+        (C.Record_id.equal basis (L.selected (local after)).L.basis);
+      Alcotest.(check string)
+        "received target files installed" "received branch D\r\n"
+        (read_file root "shared.txt");
+      Alcotest.(check bool)
+        "source private files stay on their alternative" false
+        (Sys.file_exists (root ^ "/private.bin"));
+      Alcotest.(check bool)
+        "no public branch/acceptance records created" true
+        (L.record_objects (local before) = L.record_objects (local after));
+      Alcotest.(check int)
+        "one safety observation and one imported target" 3
+        (List.length (H.nodes after.S.history));
+      let saved = H.encode after.S.history |> ok Fun.id in
+      ignore (switch root "received");
+      Alcotest.(check string)
+        "same selected branch does not duplicate navigation" saved
+        (H.encode (load repository).S.history |> ok Fun.id);
+      ignore (switch root "main");
+      Alcotest.(check string)
+        "unsaved source alternative remains recoverable"
+        "unsaved source alternative\000" (read_private root);
+      ignore (switch root "received");
+      Alcotest.(check int)
+        "switching back uses the existing private target" 3
+        (List.length (H.nodes (load repository).S.history)))
+
+let received_branch_switch_resumes_mutation_and_metadata_boundaries () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let _, basis, _ =
+            received_nonempty_branch repository capability certificate authority
+          in
+          write_private root "source recovery alternative";
+          let records = L.record_objects (local (load repository)) in
+          let child = Unix.fork () in
+          if child = 0 then (
+            let result =
+              Service.For_test.branch_switch
+                ~observe:(fun actual -> if actual = boundary then Unix._exit 73)
+                ~root ~name:"received" ~dry_run:false
+            in
+            (match result with
+            | Error error -> prerr_endline (Service.error_to_string error)
+            | Ok _ -> ());
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "actual first-selection boundary reached" true
+            (status = Unix.WEXITED 73);
+          let resumed = switch root "received" in
+          let after = load repository in
+          Alcotest.(check bool)
+            "received branch eventually selected" true
+            (C.Record_id.equal basis (L.selected (local after)).L.basis);
+          Alcotest.(check string)
+            "exact received target" "received branch D\r\n"
+            (read_file root "shared.txt");
+          Alcotest.(check int)
+            "one source observation and one target across retry" 3
+            (List.length (H.nodes after.S.history));
+          Alcotest.(check bool)
+            "resume signs no new public records" true
+            (records = L.record_objects (local after));
+          (match resumed.Service.switch_restore with
+          | Some result
+            when boundary <> Service.Before_safety_publish
+                 && boundary <> Service.After_safety_publish ->
+              Alcotest.(check bool)
+                "durable journal resumes same operation" true
+                result.Service.resumed
+          | _ -> ());
+          ignore (switch root "main");
+          Alcotest.(check string)
+            "source remains available after interrupted first selection"
+            "source recovery alternative" (read_private root)))
+    [
+      Service.Before_safety_publish;
+      Service.After_safety_publish;
+      Service.Prepared_journal;
+      Service.Applying_journal;
+      Service.Filesystem_mutation
+        (Service.Safe_apply.After_mutation, [ "private.bin" ]);
+      Service.Materialized_journal;
+      Service.Before_metadata_publish;
+      Service.After_metadata_publish;
+      Service.Published_journal;
+    ]
+
+let received_branch_selection_refuses_obstructions_and_stale_preview () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      ignore
+        (received_nonempty_branch repository capability certificate authority);
+      write_file root ".yeokchamignore" "*.private\n";
+      Unix.mkdir (root ^ "/shared.txt") 0o700;
+      write_file root "shared.txt/keep.private" "ignored source obstruction";
+      let before = load repository in
+      reject "first selection replaced an ignored obstruction"
+        (Service.branch_switch ~root ~name:"received" ~dry_run:false);
+      Alcotest.(check bool)
+        "failed preflight does not register target or capture source" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "ignored source data preserved" "ignored source obstruction"
+        (read_file root "shared.txt/keep.private");
+      Unix.unlink (root ^ "/shared.txt/keep.private");
+      Unix.rmdir (root ^ "/shared.txt");
+      let preview =
+        Service.branch_switch ~root ~name:"received" ~dry_run:true |> service
+      in
+      write_private root "edits after preview";
+      reject "stale first selection was applied"
+        (Service.branch_switch_confirmed ~root ~name:"received" ~preview);
+      Alcotest.(check bool)
+        "stale plan preserves root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "stale plan preserves latest edits" "edits after preview"
+        (read_private root))
+
+let advance_received_branch repository capability certificate authority branch
+    bytes =
+  let loaded = load repository in
+  let store = S.underlying_store repository in
+  let staged = L.select (local loaded) branch |> ok Fun.id in
+  let position = L.selected staged in
+  let accepted =
+    Composition.Graph.accepted (L.pool staged) position.L.basis
+    |> ok Composition.Graph.error_to_string
+  in
+  let staged, chosen, result =
+    match bytes with
+    | None -> (staged, [], accepted.C.result_snapshot)
+    | Some bytes ->
+        let content =
+          Snapshot.Content.store store bytes |> ok Snapshot.error_to_string
+        in
+        let result =
+          Composition.tree
+            [
+              ( [ "shared.txt" ],
+                Composition.File { mode = Snapshot.Regular; content } );
+            ]
+          |> ok Composition.error_to_string
+          |> Composition.store store
+          |> ok Composition.error_to_string
+        in
+        let scope =
+          Composition.Scope.store store [ [ "shared.txt" ] ]
+          |> ok Composition.error_to_string
+        in
+        let dependencies =
+          Composition.Graph.represented (L.pool staged) [ position.L.basis ]
+          |> ok Composition.Graph.error_to_string
+        in
+        let staged, revision =
+          L.prepare_revision ~store ~authority ~certificate
+            ~signing_capability:capability ~change:None ~previous_revisions:[]
+            ~base_snapshot:accepted.C.result_snapshot ~result_snapshot:result
+            ~edit_scope_root:scope ~dependencies staged
+          |> ok Fun.id
+        in
+        (staged, [ revision ], result)
+  in
+  let staged, basis =
+    L.prepare_acceptance ~store ~authority ~certificate
+      ~signing_capability:capability ~parents:[ position.L.basis ]
+      ~chosen_revisions:chosen ~result_snapshot:result ~cursor:position.L.cursor
+      staged
+    |> ok Fun.id
+  in
+  let received =
+    L.receive_records ~store ~authority ~records:(L.record_objects staged)
+      (local loaded)
+    |> ok L.receive_error_to_string
+  in
+  S.save_collaborative ~local:received repository ~expected:loaded.S.head
+    ~project:loaded.S.project
+    ~collaboration:(Option.get loaded.S.collaboration)
+  |> ok S.error_to_string |> ignore;
+  basis
+
+let saved_private_branch_can_be_selected_before_catching_up_shared_head () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let branch, original_basis, _ =
+        received_nonempty_branch repository capability certificate authority
+      in
+      ignore (switch root "received");
+      write_file root "topic-private.txt" "private E on received branch";
+      ignore (switch root "main");
+      let new_basis =
+        advance_received_branch repository capability certificate authority
+          branch (Some "received branch D2\r\n")
+      in
+      let selected = switch root "received" in
+      Alcotest.(check bool)
+        "selection reports newer known shared head" true
+        (selected.Service.switch_known_heads = [ new_basis ]);
+      Alcotest.(check bool)
+        "selection restores historical private basis without retargeting" true
+        (C.Record_id.equal original_basis
+           (L.selected (local (load repository))).L.basis);
+      Alcotest.(check string)
+        "old private files selected before explicit integration"
+        "received branch D\r\n"
+        (read_file root "shared.txt");
+      Service.branch_create ~root ~name:"private-fork"
+        ~signing_capability:capability
+      |> service |> ignore;
+      let forked = load repository in
+      let fork = L.lookup (local forked) "private-fork" |> ok Fun.id in
+      let version =
+        Composition.Graph.accepted (L.pool (local forked)) fork.L.basis
+        |> ok Composition.Graph.error_to_string
+      in
+      Alcotest.(check bool)
+        "new branch forks the private working basis rather than an unselected \
+         newer head"
+        true
+        (version.C.accepted_parents = [ original_basis ]);
+      let records = L.record_objects (local forked) in
+      let plan = native_plan root [] in
+      ignore (native_apply root plan None);
+      Alcotest.(check bool)
+        "explicit integration catches up to known accepted head" true
+        (C.Record_id.equal new_basis
+           (L.selected (local (load repository))).L.basis);
+      Alcotest.(check string)
+        "known shared update selected" "received branch D2\r\n"
+        (read_file root "shared.txt");
+      Alcotest.(check string)
+        "private E survives shared catch-up" "private E on received branch"
+        (read_file root "topic-private.txt");
+      Alcotest.(check bool)
+        "catch-up signs no duplicate acceptance" true
+        (records = L.record_objects (local (load repository)));
+      ignore (switch root "private-fork");
+      Alcotest.(check string)
+        "fork retains earlier shared contents" "received branch D\r\n"
+        (read_file root "shared.txt");
+      Alcotest.(check string)
+        "fork retains private continuation" "private E on received branch"
+        (read_file root "topic-private.txt");
+      ignore (switch root "main");
+      Alcotest.(check string)
+        "original source private work survives both branches"
+        "private\000bytes\255" (read_private root))
+
+let interrupted_first_selection_keeps_exact_basis_across_new_shared_heads () =
+  List.iter
+    (fun update ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let branch, original_basis, _ =
+            received_nonempty_branch repository capability certificate authority
+          in
+          write_private root "unsaved source";
+          let child = Unix.fork () in
+          if child = 0 then (
+            ignore
+              (Service.For_test.branch_switch
+                 ~observe:(fun boundary ->
+                   if boundary = Service.Prepared_journal then Unix._exit 73)
+                 ~root ~name:"received" ~dry_run:false);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "first selection was durably prepared" true
+            (status = Unix.WEXITED 73);
+          let current_basis =
+            advance_received_branch repository capability certificate authority
+              branch update
+          in
+          Alcotest.(check bool)
+            "new accepted history remains distinct even with equal bytes" false
+            (C.Record_id.equal original_basis current_basis);
+          let resumed = switch root "received" in
+          let after = load repository in
+          Alcotest.(check bool)
+            "resumed selection retains original basis identity" true
+            (C.Record_id.equal original_basis (L.selected (local after)).L.basis);
+          Alcotest.(check bool)
+            "new shared head remains visible and unaccepted locally" true
+            (resumed.Service.switch_known_heads = [ current_basis ]);
+          Alcotest.(check string)
+            "frozen exact target contents selected" "received branch D\r\n"
+            (read_file root "shared.txt");
+          Alcotest.(check int)
+            "receipt/retry creates no duplicate history" 3
+            (List.length (H.nodes after.S.history));
+          ignore (switch root "main");
+          Alcotest.(check string)
+            "source safety alternative retained" "unsaved source"
+            (read_private root)))
+    [ None; Some "later received shared contents\r\n" ]
+
+let registered_shared_position_is_pure_idempotent_and_verified () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let branch, basis, target =
+        received_nonempty_branch repository capability certificate authority
+      in
+      let before = load repository in
+      reject "private contents were registered as the accepted target"
+        (L.register_position (local before) ~history:before.S.history ~branch
+           ~basis ~cursor:0L);
+      let staged_history, node =
+        H.target_snapshot before.S.history
+          ~snapshot:(snapshot (C.Object_id.to_hex target))
+          ~draft ~created_at:0L
+        |> ok Fun.id
+      in
+      let staged =
+        L.register_position (local before) ~history:staged_history ~branch
+          ~basis ~cursor:node.H.id
+        |> ok Fun.id
+      in
+      let repeated =
+        L.register_position staged ~history:staged_history ~branch ~basis
+          ~cursor:node.H.id
+        |> ok Fun.id
+      in
+      Alcotest.(check string)
+        "identical registration preserves exact canonical state"
+        (L.encode staged |> ok Fun.id)
+        (L.encode repeated |> ok Fun.id);
+      let another =
+        H.record_exact staged_history
+          ~expected:(Option.get (H.next_sequence staged_history))
+          ~snapshot:node.H.snapshot ~draft ~created_at:1L
+        |> ok Fun.id
+      in
+      reject
+        "saved private position was retargeted to an equal-content different \
+         node"
+        (L.register_position staged ~history:another ~branch ~basis
+           ~cursor:(H.current another).H.id);
+      Alcotest.(check bool)
+        "pure staging does not allocate durable history" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+
+let first_shared_selection_keeps_gc_roots_and_late_external_edits () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          ignore
+            (received_nonempty_branch repository capability certificate
+               authority);
+          write_private root "source safety retained through GC";
+          let child = Unix.fork () in
+          if child = 0 then (
+            ignore
+              (Service.For_test.branch_switch
+                 ~observe:(fun actual ->
+                   if actual = boundary then Unix._exit 73)
+                 ~root ~name:"received" ~dry_run:false);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "GC test reaches actual selection boundary" true
+            (status = Unix.WEXITED 73);
+          Yeokcham_v1_gc.apply ~root
+          |> ok Yeokcham_v1_gc.error_to_string
+          |> ignore;
+          if boundary = Service.Materialized_journal then
+            write_file root "shared.txt" "external edit after materialization";
+          ignore (switch root "received");
+          Alcotest.(check string)
+            "GC/resume preserves target or later external bytes"
+            (if boundary = Service.Materialized_journal then
+               "external edit after materialization"
+             else "received branch D\r\n")
+            (read_file root "shared.txt");
+          ignore (switch root "main");
+          Alcotest.(check string)
+            "source safety survived collection"
+            "source safety retained through GC" (read_private root);
+          if boundary = Service.Materialized_journal then (
+            ignore (switch root "received");
+            Alcotest.(check string)
+              "late external alternative remains recoverable"
+              "external edit after materialization"
+              (read_file root "shared.txt"))))
+    [
+      Service.After_safety_publish;
+      Service.Prepared_journal;
+      Service.Materialized_journal;
+    ]
+
+let branch_creation_signing_releases_writer_and_revalidates () =
+  List.iter
+    (fun activity ->
+      with_root (fun root ->
+          let repository, capability, _, _, _ = initialize root in
+          write_private root "observed before provider";
+          let before = load repository in
+          let calls = ref 0 and unlocked = ref true in
+          let provider =
+            T.signing_capability_of_external_signer
+              ~public_key:(T.signing_public_key capability)
+              ~sign:(fun ~domain bytes ->
+                incr calls;
+                let child = Unix.fork () in
+                (if child = 0 then
+                   let fd =
+                     Unix.openfile
+                       (root ^ "/.yeokcham/local-worktree.lock")
+                       [ Unix.O_RDWR; Unix.O_CLOEXEC ]
+                       0
+                   in
+                   try
+                     Unix.lockf fd Unix.F_TLOCK 0;
+                     Unix.close fd;
+                     Unix._exit 0
+                   with Unix.Unix_error _ -> Unix._exit 1);
+                let _, status = Unix.waitpid [] child in
+                unlocked := !unlocked && status = Unix.WEXITED 0;
+                if !calls = 1 && activity <> 0 then (
+                  write_private root "changed while provider was active";
+                  if activity = 2 then Service.save ~root |> service |> ignore);
+                T.sign_detached capability ~domain bytes
+                |> Result.map_error T.error_to_string)
+            |> trust
+          in
+          let result =
+            Service.branch_create ~root ~name:"provider-branch"
+              ~signing_capability:provider
+          in
+          Alcotest.(check bool)
+            "branch signing holds no writer lock" true !unlocked;
+          Alcotest.(check int)
+            "exact branch genesis and event signatures" 2 !calls;
+          let after = load repository in
+          if activity = 0 then (
+            service result |> ignore;
+            Alcotest.(check int)
+              "branch created after revalidation" 2
+              (List.length (L.branches (local after))))
+          else (
+            reject "provider-time edits bypassed branch revalidation" result;
+            Alcotest.(check int)
+              "stale request creates no branch" 1
+              (List.length (L.branches (local after)));
+            Alcotest.(check string)
+              "provider-time bytes remain current"
+              "changed while provider was active" (read_private root);
+            if activity = 1 then
+              Alcotest.(check bool)
+                "unrecorded edits do not allocate branch history" true
+                (Raw.Mutable_ref.equal before.S.head after.S.head)
+            else
+              Alcotest.(check int)
+                "concurrent capture is preserved without duplicate history" 2
+                (List.length (H.nodes after.S.history)))))
+    [ 0; 1; 2 ]
+
 let native_integration_preserves_private_work_and_retries () =
   with_root (fun root ->
       let repository, capability, _, _, _ = initialize root in
@@ -4334,6 +4870,34 @@ let () =
             completed_copyout_has_no_permanent_source_root;
           Alcotest.test_case "private switching across fresh processes" `Quick
             private_switch_journey;
+          Alcotest.test_case
+            "first received-branch selection preserves source private work"
+            `Quick received_branch_selection_preserves_private_work;
+          Alcotest.test_case
+            "first received-branch selection resumes file and metadata \
+             boundaries"
+            `Quick
+            received_branch_switch_resumes_mutation_and_metadata_boundaries;
+          Alcotest.test_case
+            "first received-branch selection refuses obstructions and stale \
+             plans"
+            `Quick
+            received_branch_selection_refuses_obstructions_and_stale_preview;
+          Alcotest.test_case
+            "saved private branch selection precedes explicit shared catch-up"
+            `Quick
+            saved_private_branch_can_be_selected_before_catching_up_shared_head;
+          Alcotest.test_case
+            "first selection resumes original basis across different or \
+             equal-content heads"
+            `Quick
+            interrupted_first_selection_keeps_exact_basis_across_new_shared_heads;
+          Alcotest.test_case
+            "shared private-position staging is verified and idempotent" `Quick
+            registered_shared_position_is_pure_idempotent_and_verified;
+          Alcotest.test_case
+            "first shared selection keeps GC roots and later external edits"
+            `Quick first_shared_selection_keeps_gc_roots_and_late_external_edits;
           Alcotest.test_case "equal contents keep exact branch positions" `Quick
             equal_content_switch_keeps_positions;
           Alcotest.test_case
@@ -4374,5 +4938,8 @@ let () =
             signed_false_acceptance_cannot_enter_local_state;
           Alcotest.test_case "unselected branch work survives compaction and GC"
             `Quick branch_work_is_a_retention_root;
+          Alcotest.test_case
+            "branch signing releases writer and refuses provider-time changes"
+            `Quick branch_creation_signing_releases_writer_and_revalidates;
         ] );
     ]

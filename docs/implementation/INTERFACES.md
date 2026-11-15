@@ -1466,11 +1466,10 @@ no private history nodes or identifiers. All state stays under the same root.
 
 `branch list` JSON includes `local_state` (`selected`, `private_saved`,
 `known_shared`) and a nullable private position. Plain output identifies
-known-only branches. Selecting one currently refuses explicitly before replacement
-with `shared-branch-not-materialized`/exit 3; supported first materialization is
-still required by the shared workflow. A private basis behind known accepted
-heads similarly reports a required integration choice instead of an integrity
-error. This does not retarget names or select divergent heads.
+known-only branches. The received-branch selector below supplies supported first
+materialization. An existing saved position behind known accepted heads restores
+its private alternative before explicit integration. Ambiguous names and divergent
+heads still refuse fresh selection; neither path retargets names or picks a winner.
 
 Forked receipt tests stop before/after actual root CAS and verify one complete
 old/new record set, unchanged private history/files and no extra root on retry.
@@ -1478,8 +1477,8 @@ Other tests cover lost-position refusal, typed required-policy refusal, fresh
 JSON/plain branch inspection and receipt during a Prepared integration followed
 by successful resume without losing new records. These are actual service/root
 consumers of public Core packages. Native relay fetching, frozen outbound
-couriers/acknowledgements, clone, remote-branch materialization and complete
-two-person/fault coverage remain open; no ordinary Core relay command is claimed.
+couriers/acknowledgements, clone and received-branch selection are described below;
+the complete conflict/availability/authority/fault audit remains open.
 
 ### P3 frozen Core outbound batches (in progress)
 
@@ -1654,7 +1653,7 @@ accepted-history exchange. It checks actual relay object bytes for both private
 sentinels. Signers are disposable explicit test capabilities. Bob is initialized
 through the library, so this is native exchange evidence, not clone, native
 custody onboarding, human usability, broad performance qualification or complete
-P3 acceptance. First selection of known-only branches, resolutions,
+P3 acceptance. Received-branch selection is described below; resolutions,
 missing-content inspection and the full criterion/fault audit remain required.
 
 ### P3 verified native clone (in progress)
@@ -1758,5 +1757,60 @@ exact source request ID, local closure and foreground coverage. `--request` refu
 a changed source selection after preview. `--resume DIRECTORY` is exclusive of
 new-clone options. Failure data identifies whether metadata is attached and offers
 an applicable local resume action only after attachment. Clone runs no project hooks.
-Native branch switching, conflict resolution, missing-content inspection and the
-remaining authority/error/fault matrix are still P3 work.
+Received-branch switching is described below. Conflict resolution, missing-content
+inspection and the remaining authority/error/fault matrix are still P3 work.
+
+### P3 received-branch selection (in progress)
+
+`Local.selection_target : t -> string -> (selection_target,string) result`
+resolves a unique authenticated name and unambiguous current event/accepted heads.
+Its private variant is `Saved_position of position` or `Accepted_head` carrying
+typed branch/basis/snapshot IDs. A saved position keeps its historical working
+basis even when newer accepted heads are known. `Local.lookup` retains its strict
+current-basis contract for existing consumers. Fresh selection still refuses
+duplicate names and incomparable heads, including equal-content histories.
+
+`Local.register_position state ~history ~branch ~basis ~cursor` stages a known
+accepted target as a private alternative. It checks the exact current accepted
+head, referenced history node and snapshot equality against the verified accepted
+result. Identical registration is unchanged; replacement by an equal-content
+different node refuses. This is pure staging, not durable allocation. The service
+publishes matching history, retained target, source safety capture and new position
+in one existing state-root CAS under the worktree writer. Receipt alone still
+creates no position or private node. `create_branch` now forks the selected private
+working basis, so a newer received head does not implicitly become a new branch's
+accepted parent. Branch creation retains the existing ambiguity refusals.
+Its signing provider runs outside the writer lock. The service reacquires the
+writer, verifies the same state head and fresh complete source snapshot, then
+publishes capture/history/branch metadata together. Provider-time disk edits or
+concurrent saves return `branch-creation-stale`/exit 3 without publishing the new
+branch or overwriting the concurrent state.
+
+`Service.branch_switch*` now handles both variants. First selection calculates
+source capture and target history with existing `History.record/target_snapshot`;
+an imported target has no invented private ancestry. Preview stages immutable
+scan objects only and marks an unallocated target identity provisional. Actual
+application validates complete target/native representation and obstructions,
+checks the predicted sequence, and publishes safety/history/registration before
+ordinary-file mutation. The existing schema-5 selection journal freezes the exact
+target node, branch, physical plan and confirmed selection digest. No envelope
+code or journal schema is allocated. The source stays selected until verified
+materialization and the existing atomic branch/cursor publication.
+
+`Local.select_saved` is metadata-only resumption of the journal's frozen private
+position. The service binds its exact cursor/snapshot; it never retargets the
+working basis to a newly received equal-content head. Existing public heads remain
+visible and unchanged. Prepared/Applying resume uses the identity-checked physical
+plan; Materialized resume preserves subsequent external edits. An interruption
+after safety publication but before Prepared may leave an unselected saved target
+and source observation; no files were replaced. Fresh retry reuses them, while an
+old confirmation digest asks for another preview. GC retains both alternatives.
+
+`branch_switch` adds `switch_target_provisional`, `switch_basis`,
+`switch_known_heads`, and `switch_registers_position`. CLI JSON exposes
+`target_history_provisional`, `target_working_basis`, `known_accepted_heads`, and
+`creates_private_position`, alongside actual target/cursor/change/recovery data.
+Plain text distinguishes proposed allocation and saved-private restoration with
+known shared updates; the latter offers an integration preview. Selecting/restoring
+a private branch position does not accept, sign or export work. Catch-up to an
+already verified accepted head uses ordinary integration without another signature.

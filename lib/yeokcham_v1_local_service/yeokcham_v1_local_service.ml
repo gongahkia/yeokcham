@@ -1684,7 +1684,7 @@ let perform_in_place ~observe ~root repository loaded journal ~resumed =
                        "branch-selection journal requires authenticated local \
                         branch state")
               | Some local ->
-                  Store.Local.select local branch
+                  Store.Local.select_saved local branch
                   |> Result.map Option.some
                   |> Result.map_error (fun e -> History_error e))
           | None | Some (_, None) -> Ok loaded.Store.local
@@ -1738,7 +1738,7 @@ let recover_in_place_unlocked ~observe ~root =
             |> Result.map Option.some)
 
 let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
-    ~selected_branch ~expected_safety ~selection_plan =
+    ~selected_branch ~initial_position ~expected_safety ~selection_plan =
   let* recovered = recover_in_place_unlocked ~observe ~root in
   match recovered with
   | Some restored
@@ -1753,8 +1753,10 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
               ^ "; rerun the requested restore")))
   | None ->
       with_repository ~root (fun repository loaded ->
-          if not (protected_snapshot loaded checkpoint) then
-            Error (Unknown_checkpoint checkpoint)
+          if
+            initial_position = None
+            && not (protected_snapshot loaded checkpoint)
+          then Error (Unknown_checkpoint checkpoint)
           else
             let store = Store.underlying_store repository in
             let* target = load_snapshot store checkpoint in
@@ -1782,7 +1784,12 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
             then Error (Restore_journal_error Journal.Identical_snapshots)
             else
               let project =
-                Model.checkpoint loaded.Store.project ~snapshot:safety
+                let project =
+                  if initial_position = None then loaded.Store.project
+                  else
+                    Model.checkpoint loaded.Store.project ~snapshot:checkpoint
+                in
+                Model.checkpoint project ~snapshot:safety
               in
               let active = Model.active_draft project in
               let now = Int64.of_float (Unix.gettimeofday ()) in
@@ -1792,12 +1799,24 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
                 |> Result.map_error (fun error -> History_error error)
               in
               let* history, target_node =
-                match history_node with
-                | None ->
+                match (history_node, initial_position) with
+                | Some expected, Some _ ->
+                    let* history, node =
+                      History.target_snapshot history ~snapshot:checkpoint
+                        ~draft:active.Model.draft_id ~created_at:now
+                      |> Result.map_error (fun error -> History_error error)
+                    in
+                    if node.History.id = expected then Ok (history, node)
+                    else
+                      Error
+                        (History_error
+                           "shared target history reservation changed; inspect \
+                            a fresh selection")
+                | None, None ->
                     History.target_snapshot history ~snapshot:checkpoint
                       ~draft:active.Model.draft_id ~created_at:now
                     |> Result.map_error (fun error -> History_error error)
-                | Some id ->
+                | Some id, None ->
                     let* node =
                       History.find history id
                       |> Result.map_error (fun error -> History_error error)
@@ -1808,6 +1827,31 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
                       Error
                         (History_error
                            "selected node does not match target snapshot")
+                | None, Some _ ->
+                    Error
+                      (History_error
+                         "shared selection requires an exact proposed history \
+                          node")
+              in
+              let* local =
+                match initial_position with
+                | None -> Ok loaded.Store.local
+                | Some (branch, basis) when selected_branch = Some branch ->
+                    let* local =
+                      loaded.Store.local
+                      |> Option.to_result
+                           ~none:
+                             (History_error
+                                "shared selection requires local branch state")
+                    in
+                    Store.Local.register_position local ~history ~branch ~basis
+                      ~cursor:target_node.History.id
+                    |> Result.map Option.some
+                    |> Result.map_error (fun e -> History_error e)
+                | Some _ ->
+                    Error
+                      (History_error
+                         "shared target branch does not match selection")
               in
               let* entropy =
                 Trust.random_bytes 32
@@ -1822,7 +1866,7 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
               in
               observe Before_safety_publish;
               let* saved =
-                save_project ~history repository loaded project
+                save_project ~history ?local repository loaded project
                 |> Result.map_error (fun e -> Store_error e)
               in
               observe After_safety_publish;
@@ -1866,7 +1910,7 @@ let restore_in_place ~root ~checkpoint =
   with_worktree_lock ~root (fun () ->
       restore_in_place_unlocked ~observe:no_application_observer ~root
         ~checkpoint ~history_node:None ~selected_branch:None
-        ~expected_safety:None ~selection_plan:None)
+        ~initial_position:None ~expected_safety:None ~selection_plan:None)
 
 type copy_outcome = {
   copy_operation : string option;
@@ -3387,7 +3431,7 @@ let navigate_history_with ~observe ~expected_plan ~root ~direction ~dry_run =
                   (if navigation.target_provisional then None
                    else Some navigation.target_node.History.id)
                 ~selected_branch:None ~expected_safety:(Some observed)
-                ~selection_plan:(Some raw_plan)
+                ~initial_position:None ~selection_plan:(Some raw_plan)
             in
             let* after = local_history ~root in
             Ok
@@ -3411,7 +3455,8 @@ module Navigation_for_test = struct
   let restore_in_place ~observe ~root ~checkpoint =
     with_worktree_lock ~root (fun () ->
         restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node:None
-          ~selected_branch:None ~expected_safety:None ~selection_plan:None)
+          ~selected_branch:None ~initial_position:None ~expected_safety:None
+          ~selection_plan:None)
 
   let navigate_history ~observe ~root ~direction ~dry_run =
     navigate_history_with ~observe ~expected_plan:None ~root ~direction ~dry_run
@@ -4664,35 +4709,74 @@ let branch_list ~root =
   with_repository ~root (fun _ loaded -> branch_listing loaded)
 
 let branch_create ~root ~name ~signing_capability =
-  with_writable_repository ~root (fun repository loaded ->
-      let* local = require_local loaded in
-      let* collaboration = require_collaboration loaded in
-      let* authority =
-        match Store.authority collaboration with
-        | Some authority -> Ok authority
-        | None ->
-            Error (History_error "branch creation requires verified authority")
+  let* ( repository,
+         loaded,
+         observed,
+         project,
+         history,
+         local,
+         authority,
+         collaboration ) =
+    with_writable_repository ~root (fun repository loaded ->
+        let* local = require_local loaded in
+        let* collaboration = require_collaboration loaded in
+        let* authority =
+          match Store.authority collaboration with
+          | Some authority -> Ok authority
+          | None ->
+              Error
+                (History_error "branch creation requires verified authority")
+        in
+        let* observed = capture ~root (Store.underlying_store repository) in
+        let project = checkpoint_observed loaded.Store.project observed in
+        let* history =
+          History.record loaded.Store.history ~snapshot:observed
+            ~draft:(Model.active_draft project).Model.draft_id
+            ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+          |> Result.map_error (fun e -> History_error e)
+        in
+        let cursor = (History.current history).History.id in
+        let* local =
+          Store.Local.remember local ~cursor
+          |> Result.map_error (fun e -> History_error e)
+        in
+        Ok
+          ( repository,
+            loaded,
+            observed,
+            project,
+            history,
+            local,
+            authority,
+            collaboration ))
+  in
+  let* local =
+    Store.Local.create_branch
+      ~store:(Store.underlying_store repository)
+      ~authority
+      ~certificate:(Store.local_certificate collaboration)
+      ~signing_capability ~name ~cursor:(History.current history).History.id
+      local
+    |> Result.map_error (fun e -> History_error e)
+  in
+  with_writable_repository ~root (fun repository current ->
+      let* () =
+        if Yeokcham_store.Mutable_ref.equal loaded.Store.head current.Store.head
+        then Ok ()
+        else
+          Error
+            (History_error
+               "branch creation inputs changed while signing; inspect status \
+                and retry branch create")
       in
-      let* observed = capture ~root (Store.underlying_store repository) in
-      let project = checkpoint_observed loaded.Store.project observed in
-      let* history =
-        History.record loaded.Store.history ~snapshot:observed
-          ~draft:(Model.active_draft project).Model.draft_id
-          ~created_at:(Int64.of_float (Unix.gettimeofday ()))
-        |> Result.map_error (fun e -> History_error e)
-      in
-      let cursor = (History.current history).History.id in
-      let* local =
-        Store.Local.remember local ~cursor
-        |> Result.map_error (fun e -> History_error e)
-      in
-      let* local =
-        Store.Local.create_branch
-          ~store:(Store.underlying_store repository)
-          ~authority
-          ~certificate:(Store.local_certificate collaboration)
-          ~signing_capability ~name ~cursor local
-        |> Result.map_error (fun e -> History_error e)
+      let* fresh = capture ~root (Store.underlying_store repository) in
+      let* () =
+        if Model.Snapshot_id.equal fresh observed then Ok ()
+        else
+          Error
+            (History_error
+               "branch creation inputs changed while signing; inspect status \
+                and retry branch create")
       in
       let* saved =
         Store.save_collaborative ~history ~local repository
@@ -4708,6 +4792,10 @@ type branch_switch = {
   switch_from : Model.Core.Branch_id.t;
   switch_to : Model.Core.Branch_id.t;
   switch_target : History.node;
+  switch_target_provisional : bool;
+  switch_basis : Model.Core.Record_id.t;
+  switch_known_heads : Model.Core.Record_id.t list;
+  switch_registers_position : bool;
   switch_changes : path_difference list;
   switch_captures_unsaved : bool;
   switch_applied : bool;
@@ -4730,15 +4818,59 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
             | None | Some _ -> Ok ()
           in
           let* local = require_local loaded in
-          let* position =
-            Store.Local.lookup local name
+          let* selection =
+            Store.Local.selection_target local name
             |> Result.map_error (fun e -> History_error e)
           in
           let from = (Store.Local.selected local).Store.Local.branch in
-          let target_branch = position.Store.Local.branch in
-          let* target =
-            History.find loaded.Store.history position.Store.Local.cursor
-            |> Result.map_error (fun e -> History_error e)
+          let store = Store.underlying_store repository in
+          let* ( target_branch,
+                 basis,
+                 target,
+                 initial_position,
+                 initial_observation ) =
+            match selection with
+            | Store.Local.Saved_position position ->
+                let* target =
+                  History.find loaded.Store.history position.Store.Local.cursor
+                  |> Result.map_error (fun e -> History_error e)
+                in
+                Ok
+                  ( position.Store.Local.branch,
+                    position.Store.Local.basis,
+                    target,
+                    None,
+                    None )
+            | Store.Local.Accepted_head head ->
+                let* observed_id, _, observation =
+                  Snapshot.Observation.scan ~root ~store
+                  |> Result.map_error (fun e -> Snapshot_error e)
+                in
+                let* observed = snapshot_id observed_id in
+                let* snapshot =
+                  Model.Snapshot_id.of_string
+                    (Model.Core.Object_id.to_hex head.snapshot)
+                  |> Result.map_error (fun e ->
+                      History_error (Model.error_to_string e))
+                in
+                let draft =
+                  (Model.active_draft loaded.Store.project).Model.draft_id
+                in
+                let* staged =
+                  History.record loaded.Store.history ~snapshot:observed ~draft
+                    ~created_at:0L
+                  |> Result.map_error (fun e -> History_error e)
+                in
+                let* _, target =
+                  History.target_snapshot staged ~snapshot ~draft ~created_at:0L
+                  |> Result.map_error (fun e -> History_error e)
+                in
+                Ok
+                  ( head.branch,
+                    head.basis,
+                    target,
+                    Some (head.branch, head.basis),
+                    Some (observed_id, observation) )
           in
           let* () =
             match expected with
@@ -4752,6 +4884,13 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
                      "local selection plan is stale; its target scope differs")
             | None | Some _ -> Ok ()
           in
+          let known_heads =
+            Store.Local.branches local
+            |> List.find (fun branch ->
+                Model.Core.Branch_id.equal branch.Model.Core.branch_id
+                  target_branch)
+            |> fun branch -> branch.Model.Core.accepted_heads
+          in
           let result =
             {
               switch_plan = None;
@@ -4761,6 +4900,12 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
               switch_from = from;
               switch_to = target_branch;
               switch_target = target;
+              switch_target_provisional =
+                Result.is_error
+                  (History.find loaded.Store.history target.History.id);
+              switch_basis = basis;
+              switch_known_heads = known_heads;
+              switch_registers_position = Option.is_some initial_position;
               switch_changes = [];
               switch_captures_unsaved = false;
               switch_applied = false;
@@ -4821,10 +4966,14 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
                      "local selection plan is stale; the branch is already \
                       selected")
           | None ->
-              let store = Store.underlying_store repository in
               let* observed_id, _, observation =
-                Snapshot.Observation.scan ~root ~store
-                |> Result.map_error (fun e -> Snapshot_error e)
+                match initial_observation with
+                | Some (id, observation) -> Ok (id, (), observation)
+                | None ->
+                    Snapshot.Observation.scan ~root ~store
+                    |> Result.map (fun (id, _, observation) ->
+                        (id, (), observation))
+                    |> Result.map_error (fun e -> Snapshot_error e)
               in
               let* observed = snapshot_id observed_id in
               let* () =
@@ -4837,7 +4986,9 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
                 | None | Some _ -> Ok ()
               in
               let* () =
-                ensure_retained loaded.Store.project target.History.snapshot
+                if initial_position <> None then Ok ()
+                else
+                  ensure_retained loaded.Store.project target.History.snapshot
               in
               let* () =
                 validate_snapshot_closure store target.History.snapshot
@@ -4893,13 +5044,20 @@ let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
                   restore_in_place_unlocked ~observe ~root
                     ~checkpoint:target.History.snapshot
                     ~history_node:(Some target.History.id)
-                    ~selected_branch:(Some target_branch)
+                    ~selected_branch:(Some target_branch) ~initial_position
                     ~expected_safety:(Some observed)
                     ~selection_plan:(Some raw_plan)
+                in
+                let* after =
+                  with_repository ~root (fun _ loaded ->
+                      History.find loaded.Store.history target.History.id
+                      |> Result.map_error (fun e -> History_error e))
                 in
                 Ok
                   {
                     result with
+                    switch_target = after;
+                    switch_target_provisional = false;
                     switch_applied = true;
                     switch_restore = Some restored;
                   }))

@@ -91,6 +91,19 @@ yeokcham switch experiment --preview
 yeokcham switch experiment --yes
 ```
 
+Branches learned through `exchange` first appear as known shared branches without
+a private position. Explicit `switch NAME` verifies their accepted target and uses
+the same source-safety capture, preflight and journals. Preview marks a new history
+position provisional; registration/allocation occurs with the atomic safety root
+before file application. Source private work remains available by switching back.
+
+A saved branch retains its own private position and working basis when newer shared
+heads arrive. Switching restores that alternative; `integrate --preview` inspects
+the newer shared version separately. A newly created branch forks the current
+working basis rather than implicitly selecting a received update. Ambiguous names
+and divergent heads refuse fresh selection. An interrupted operation retains its
+exact target/basis even if equal-content shared history arrives later.
+
 Initialization generates identities and captures existing files privately against
 an empty accepted genesis. Creating a named branch forks the current accepted
 version and captures current private work without changing selection. Switching
