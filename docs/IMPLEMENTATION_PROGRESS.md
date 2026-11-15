@@ -72,13 +72,13 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt, native HTTPS exchange/clone and received-branch selection; checkpoints below | Missing-content inspection/coverage, complete fault qualification and full phase criteria remain |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt, native HTTPS exchange/clone, received-branch selection and saved-metadata inspection; checkpoints below | Further unavailable-state/coverage and fault qualification plus full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
 | [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery and actual native outbound acknowledgement; checkpoints below | Conflict/policy integration, complete fault matrix and formal phase acceptance remain |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone/branch selection | Native resolution, archive/preferences and complete multi-person journeys remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone/branch selection and unavailable-state inspection | Native resolution, archive/preferences and complete multi-person journeys remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -1661,3 +1661,84 @@ fresh retry reuses it. Old binaries may refuse saved branches behind their known
 head; rolling back code is not recovery of files/history or remote state. Native
 custody/human/cross-OS qualification and broad performance evaluation remain
 unclaimed. P3 remains active and incomplete.
+
+P3 saved-metadata inspection checkpoint:
+`07ead3a737996ee726d160590adf02766538b3c2`, parent handoff
+`0c50f95f959d1e7ac260a75472a9df5578949f96`. This continuation resumed the same
+writer's uncommitted metadata work on main; no unrelated edits were observed.
+HEAD, branch and the original P3 prerequisite ancestry were checked before
+continuing. Origin/main remained at `a27ded4` during this checkpoint; this writer
+issued no push, created no agents/branches/worktrees and performed no deployment.
+
+`Local.Metadata.t` is a separate abstract type for canonical control, historical
+signature/repository/reference checks and private-position ancestry. It cannot
+be converted to a writable `Local.t`. `Store.inspection` returns either fully
+verified state or separately typed metadata plus the actual failed proof.
+`inspect_repository ~root` opens raw layout/format for inspection without returning
+a writable V1 repository. All existing writable open/load/previous-root/save paths
+still require public composition, private correspondence and operation validation.
+TC06's 8 MiB local control bound is enforced before decoding/after encoding; no
+ordered schema, envelope code, immutable identity or mutable root is replaced.
+
+CLI `status`/`history` now retain actual identities, signed head declarations,
+private history topology and per-snapshot availability when public contents are
+missing/corrupt. Schema-2 domain JSON/plain output reports missing public contents
+as exit 5, corrupt/false accepted-result proof as exit 6, with unverified state.
+Status does not capture working files; live differences, private receipt/operation,
+transfer and recovery state stay unknown. No write/recovery action is suggested
+from an unverified state, and no repair from working bytes or public-cache admission
+is inferred from metadata. Plain failures escape terminal controls in native paths.
+
+Tests remove a real chunk from a multi-chunk accepted binary, inspect from fresh
+CLI processes, exercise missing and corrupt cases, restore exact immutable data,
+and verify strict writer refusal, root/history preservation, ordinary bytes and
+refusal of implicit corrupt-object replacement. A separate test installs a validly
+signed false accepted claim in a temporary state root: declarations remain readable,
+composition stays invalid and CLI save refuses. Bad signatures, missing controls,
+swapped logical/stored mappings, duplicate references, unsupported control versions
+and oversized inputs do not become authenticated metadata. The fresh-process test
+first found that the V1 opener rejected state before the inspection path; the new
+read-only opener corrects that boundary without weakening the writable opener.
+
+Final focused local-core78, V1-store6, service45, Core-package15, Python inspection9
+and branch17 passed. `make build`, `make lint`, `make ci` exited 0 on the exact
+stable source committed as `07ead3a`; CI took 189.535 seconds and ran all27 transport
+cases with no reported skips. Matching unchanged Dune actions were reused. Exact
+commands, exits, timings and owned-file SHA-256 are in
+`metadata-view-stable-checks.json` under
+`/home/gongahkia/.cache/yeokcham-p3-20261115/`, with `source_stable: true`.
+Earlier `metadata-view-checkpoint-checks.json` records all passing commands but
+`source_stable: false` because terminal escaping/tests were hardened during that
+run; it is superseded, not final revision evidence. Initial build/strict-warning
+and fresh-CLI failures were corrected; formatter promotions were followed by a
+clean format check and full verification. Documentation links passed (247 local
+references). README/P2 evidence/all accepted G01 hashes match all12 preservation
+entries in start.json; no measurements or missing benchmark artifacts were recreated.
+
+This adds partial G02 bounded control/API documentation, G08 truthful unavailable
+public-state inspection and G14 domain CLI coverage. No whole original phase or
+P3 criterion is closed solely by this checkpoint. Private-control loaders still
+expose string errors, conservatively classified unverified/integrity; native
+exchange still requires complete existing state and does not repair an already
+incomplete root. These limits remain explicit for the P3 availability/error audit.
+Native Docker/macOS/Windows, custody onboarding, human usability and broad
+performance qualification were not run or claimed here.
+
+Required P3 continuation: implement actual native `conflicts`/`resolve` with named
+exact versions, text/opaque replacement/selection and safe deferral, binding every
+superseded variant and preparing a fresh exact plan without silent acceptance or
+private publication. Reuse the canonical registry/model/Graph/plan/operation/public
+closure boundaries; do not disable the unsupported-resolution gate before real
+semantics and proof exist. Complete the authority/policy/adoption/exit and remaining
+availability/refusal/fault/GC audit; extend the real Alice/Bob TLS journey through
+explicit resolutions and all-head reconciliation. Then audit every original scoped
+P3 criterion, verify final build/lint/CI and write P03 report/compact acceptance
+evidence separately. P4 and independent full phases remain unauthorized.
+
+Rollback preserves current roots/history, private recovery material and working
+files. This checkpoint adds no data migration or schema; reverting loses the new
+inspection path and control bound, not an acceptance or file operation. Existing
+overlarge local controls now refuse explicitly without erasing data; incremental
+index/history replacement remains outside this change. Metadata inspection is not
+permission to replace corrupt objects or bypass failed full proofs. P3 remains
+active and incomplete.

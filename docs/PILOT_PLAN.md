@@ -193,9 +193,10 @@ for these documentation-only changes.
 P1 and P2 are complete under their scoped tasks and reports. Continue the
 [scoped P3 shared-workflow task](implementation/goals/P03-shared-workflow.md)
 from the latest [ledger checkpoint](IMPLEMENTATION_PROGRESS.md) and actual
-[interfaces](implementation/INTERFACES.md). Selected sharing is connected to
-durable local state; native exchange/clone, confirmed recoverable integration,
-resolution and full P3 acceptance remain required. Preserve the original phase
+[interfaces](implementation/INTERFACES.md). Selected sharing, native exchange/clone,
+confirmed recoverable integration, received-branch selection and saved-metadata
+inspection have automated checkpoint evidence. Native conflict resolution and
+the full P3 criterion/authority/error/fault audit remain required. Preserve the original phase
 remainders. P4 remains unstarted.
 The user requires one writer on main for this handoff. Future orchestration
 preferences must be reconciled separately before changing that workflow.
