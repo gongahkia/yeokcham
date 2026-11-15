@@ -53,6 +53,7 @@ type object_type =
   | Core_shared_revision
   | Core_accepted_version
   | Core_branch_event
+  | Core_edit_scope
 
 let object_type_code = function
   | Content -> 1
@@ -98,6 +99,7 @@ let object_type_code = function
   | Core_shared_revision -> 41
   | Core_accepted_version -> 42
   | Core_branch_event -> 43
+  | Core_edit_scope -> 44
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -143,6 +145,7 @@ let object_type_of_code = function
   | 41 -> Some Core_shared_revision
   | 42 -> Some Core_accepted_version
   | 43 -> Some Core_branch_event
+  | 44 -> Some Core_edit_scope
   | _ -> None
 
 type creation_error =

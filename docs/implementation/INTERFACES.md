@@ -767,3 +767,44 @@ fault-injection option/environment switch. Existing CLI28, branch17, inspection9
 ignore4 and tiny harness regressions remain part of CI. No native macOS/Windows,
 managed scheduling, private archive/backup or P3 shared-loop claim follows from
 these Linux tests.
+
+## P3 composition and exact edit scopes (in progress)
+
+`Yeokcham_v1_composition.Line_hunks` implements TC06 base-indexed half-open
+hunks with exact line bytes, deletion-first LCS ties, prefix/suffix trimming,
+2 MiB per-input and 4,000,000-cell limits. Set merge coalesces identical hunks;
+competing insertions and insertions touching replacement boundaries refuse.
+`Text_diff` uses the same alignment while retaining its separate display/context
+API. Text display alone is not a proof of accepted contents.
+
+`Yeokcham_v1_composition` exposes opaque flat trees, validated snapshot `load`,
+immutable `store`, exact `differences`, selected subtree construction with
+explicit excluded paths, and multi-variant `merge`. Whole-path equality/unchanged
+rules apply before bounded text merging. Types, directories, executable changes
+and symlink contents participate; no guessed opaque-file merge. Only immutable
+objects may be staged, never live files, cursors, accepted history or state roots.
+`Invalid_input`, `Unavailable`, `Integrity` and `Conflicts of string list list`
+remain distinct outcomes.
+
+Registry code **44** is `Core_edit_scope`. A scope is a canonical immutable
+collection of byte-component paths: leaf `[1, 0, paths]` or index
+`[1, 1, child_object_ids]`. Every complete envelope is at most 1 MiB. Leaves hold
+at most 128 paths, greedily split with a 64-byte envelope/array allowance; indexes
+hold at most 128 children. Paths sort by raw components. Readers bound bytes
+before decoding, reject repeated/cyclic/deep pages, malformed IDs, unsupported
+versions, metadata paths and noncanonical ordering/duplicates/pagination, and
+recompute the canonical root without writing objects. Root identities use the
+existing domain-separated store object identity. `Scope.closure` returns verified
+page IDs for package/retention consumers. The sole registry remains
+`Yeokcham_envelope`; P1 record codes 41–43 and their bytes are unchanged.
+
+`validate_revision store revision` verifies full base/result closure and exact
+scope equality to the actual changed path set. Mandatory metadata paths refuse.
+A signed declaration cannot substitute for this content check. Independent
+Python scope envelope/identity fixtures are in `test/golden/composition/` and
+checked by `tools/generate_composition_vectors.py`. Focused profile/tree/scope
+and malformed-input/property cases are in `test/test_composition.ml`.
+
+This foundation does not yet implement accepted-result graph verification,
+publication correspondence, selected share CLI, clone/exchange, integration
+plans/execution or conflict resolution. P3 remains incomplete.

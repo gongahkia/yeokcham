@@ -803,3 +803,26 @@ and accepted G01 result digests are recorded in external
 Inspecting actual composition, selected-publication, accepted-result verification,
 local root, transfer and safe-application boundaries before implementation.
 P3 remains incomplete; P4 and independent full phases are not started.
+
+P3 composition/scope foundation checkpoint: added one TC06 line-hunk implementation
+shared with the existing display renderer; exact tree composition, selected
+subtree construction and actual base/result/scope validation. Registry code 44
+owns bounded paged edit scopes, with an independent envelope/store-ID golden.
+The scope collection uses existing immutable objects, not another history store.
+The initial nine semantic/property cases passed; independent-vector testing then
+found a test-only fixture-path assumption under direct `dune exec`, now corrected.
+Core model/record/trust, GC and existing text-diff cases passed. `make build` and
+`make lint` passed with formatter promotion on the initial format invocation.
+Final expanded bounded-reader/error tests and their check outcomes follow in
+external composition logs. No accepted G01 measurement rerun or README edit.
+This is a prerequisite only: P3 still needs actual accepted-result validation,
+correspondence/outbox, publication, native exchange/clone, journaled integration,
+conflict actions, end-to-end/fault verification and final acceptance evidence.
+
+Final composition checkpoint checks passed: 11 composition cases (including 400
+randomized byte reconstructions), existing text-diff5, independent scope vectors,
+`make build`, `make lint`, `make docs-check` and `git diff --check` all exited 0.
+Earlier focused core model/record/trust and GC checks also exited 0. Exact command
+records are `composition-checks.json` and `composition-final-checks.json` in the
+P3 external log directory. Formatter promotion initially exited 2 from make;
+subsequent lint passed. No full P3 acceptance or shared CLI claim yet.

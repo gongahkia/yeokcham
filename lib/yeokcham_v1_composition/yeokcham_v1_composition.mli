@@ -1,0 +1,64 @@
+module Line_hunks = Line_hunks
+module Core = Yeokcham_v1_model.Core
+
+type path = string list
+
+type entry =
+  | Directory
+  | File of {
+      mode : Yeokcham_snapshot.file_mode;
+      content : Yeokcham_snapshot.Content.id;
+    }
+
+type tree
+
+type error =
+  | Invalid_input of string
+  | Unavailable of string
+  | Integrity of string
+  | Conflicts of path list
+
+val error_to_string : error -> string
+val entries : tree -> (path * entry) list
+val tree : (path * entry) list -> (tree, error) result
+val load : Yeokcham_store.repository -> Core.Object_id.t -> (tree, error) result
+
+val store :
+  Yeokcham_store.repository -> tree -> (Core.Object_id.t, error) result
+
+val differences : tree -> tree -> path list
+
+val select :
+  base:tree ->
+  observed:tree ->
+  paths:path list ->
+  excluded:path list ->
+  (tree, error) result
+
+val merge :
+  Yeokcham_store.repository ->
+  base:tree ->
+  variants:tree list ->
+  (tree, error) result
+(** Only immutable content/tree objects can be staged. No working-file, state
+    root, cursor, accepted-history or publication mutation. *)
+
+module Scope : sig
+  val max_page_bytes : int
+
+  val store :
+    Yeokcham_store.repository -> path list -> (Core.Object_id.t, error) result
+
+  val load :
+    Yeokcham_store.repository -> Core.Object_id.t -> (path list, error) result
+
+  val closure :
+    Yeokcham_store.repository ->
+    Core.Object_id.t ->
+    (Yeokcham_store.Stored_object_id.t list, error) result
+end
+
+val validate_revision :
+  Yeokcham_store.repository -> Core.shared_revision -> (unit, error) result
+(** Full base/result/scope validation. A declared scope must equal the actual
+    changed path set; no metadata path or undeclared private difference. *)

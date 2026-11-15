@@ -77,56 +77,38 @@ let compare ~before ~after =
   then Opaque "opaque bytes (NUL or invalid UTF-8)"
   else if before = after then Text []
   else
-    let old = lines before and new_ = lines after in
-    let old_length = Array.length old and new_length = Array.length new_ in
-    let prefix = ref 0 in
-    while
-      !prefix < old_length && !prefix < new_length
-      && old.(!prefix) = new_.(!prefix)
-    do
-      incr prefix
-    done;
-    let suffix = ref 0 in
-    while
-      !suffix < old_length - !prefix
-      && !suffix < new_length - !prefix
-      && old.(old_length - 1 - !suffix) = new_.(new_length - 1 - !suffix)
-    do
-      incr suffix
-    done;
-    let n = old_length - !prefix - !suffix
-    and m = new_length - !prefix - !suffix in
-    if n + 1 > max_cells / (m + 1) then
-      Opaque "text alignment exceeds 4,000,000 cells"
-    else
-      let scores = Array.make_matrix (n + 1) (m + 1) 0 in
-      for i = n - 1 downto 0 do
-        for j = m - 1 downto 0 do
-          scores.(i).(j) <-
-            (if old.(!prefix + i) = new_.(!prefix + j) then
-               1 + scores.(i + 1).(j + 1)
-             else max scores.(i + 1).(j) scores.(i).(j + 1))
-        done
-      done;
-      let reversed = ref [] in
-      for i = 0 to !prefix - 1 do
-        reversed := line Context old.(i) :: !reversed
-      done;
-      let rec align i j =
-        if i = n && j = m then ()
-        else if i < n && j < m && old.(!prefix + i) = new_.(!prefix + j) then (
-          reversed := line Context old.(!prefix + i) :: !reversed;
-          align (i + 1) (j + 1))
-        else if i < n && (j = m || scores.(i + 1).(j) >= scores.(i).(j + 1))
-        then (
-          reversed := line Removed old.(!prefix + i) :: !reversed;
-          align (i + 1) j)
-        else (
-          reversed := line Added new_.(!prefix + j) :: !reversed;
-          align i (j + 1))
-      in
-      align 0 0;
-      for i = old_length - !suffix to old_length - 1 do
-        reversed := line Context old.(i) :: !reversed
-      done;
-      Text (hunks (List.rev !reversed))
+    match
+      Yeokcham_v1_composition.Line_hunks.diff ~base:before ~result:after
+    with
+    | Error message -> Opaque message
+    | Ok edits ->
+        let original = lines before in
+        let reversed = ref [] and cursor = ref 0 in
+        List.iter
+          (fun edit ->
+            for
+              i = !cursor to edit.Yeokcham_v1_composition.Line_hunks.first - 1
+            do
+              reversed := line Context original.(i) :: !reversed
+            done;
+            for
+              i = edit.Yeokcham_v1_composition.Line_hunks.first
+              to edit.Yeokcham_v1_composition.Line_hunks.last - 1
+            do
+              reversed := line Removed original.(i) :: !reversed
+            done;
+            List.iter
+              (fun bytes ->
+                let newline = String.ends_with ~suffix:"\n" bytes in
+                let text =
+                  if newline then String.sub bytes 0 (String.length bytes - 1)
+                  else bytes
+                in
+                reversed := line Added (text, newline) :: !reversed)
+              edit.Yeokcham_v1_composition.Line_hunks.replacement;
+            cursor := edit.Yeokcham_v1_composition.Line_hunks.last)
+          edits;
+        for i = !cursor to Array.length original - 1 do
+          reversed := line Context original.(i) :: !reversed
+        done;
+        Text (hunks (List.rev !reversed))
