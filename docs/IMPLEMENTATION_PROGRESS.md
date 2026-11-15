@@ -867,3 +867,36 @@ P3 continuation starts at clean main
 criteria remain binding. Implementing scoped publication correspondence and
 durable retry/outbound facts under the existing root, then their actual CLI
 consumers. No later pilot slice or independent original phase started.
+
+P3 publication-receipt checkpoint: immutable namespace-bound metadata pages use
+registry code 45, with independent envelope/identity fixtures, bounded readers
+and chunked control values. Local schema 2 roots private publication receipts
+alongside existing signed records/positions. Receipts bind an operation, retry
+intent, source history observation, exact newly contributed scope and source
+Merkle witnesses. Existing receipts are immutable; identical retries reuse their
+operation identity and conflicting reuse/collisions refuse. Carried-forward
+remote fields are not asserted as newly observed local edits.
+
+The first GC test failed: existing snapshot/tree loaders recursively required
+unselected private blobs. Commit `6c58589` adds explicit canonical metadata-only
+loaders for witness traversal; ordinary loaders retain their full-closure checks.
+Actual collection of an old unselected blob now leaves source correspondence
+verifiable without pinning the whole private capture. Native signed-local29,
+metadata-pages6, core-model, composition11, GC11, content-verification and
+snapshot-materialization3 passed. `make build`, `make lint`, `make ci` exited 0;
+matching unchanged Dune results may be cached. Evidence is
+`publication-final-checks.json`, `publication-broad-checks.json` and
+`publication-snapshot-materialize.log` under the P3 external log directory.
+One attempted focused target `test/test_snapshot.exe` did not exist; the actual
+`test/test_snapshot_materialize.exe` passed. Initial strict-warning/docstring
+compile failures and formatter promotion were corrected before broad checks.
+
+After the user resumed the goal, clean main was
+`39db20671da7ea3ae3417d49b07568f7539f6552`: external commits `b4080389` and
+`39db2067` had committed the owned receipt/pages checkpoint and diagnostic test
+edits. Inspected/preserved both; no reset/amend or push. P3 remains incomplete.
+Next connect actual selected share to atomic capture/history/receipt publication,
+then exact private-preserving integration, native exchange/clone, conflicts and
+the complete fault/CLI audit. Receipt staging is not an implemented transfer
+acknowledgement or a complete service operation. README/G01 measurements remain
+unchanged; no later pilot slice started.
