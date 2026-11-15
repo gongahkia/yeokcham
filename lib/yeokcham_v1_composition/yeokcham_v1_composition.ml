@@ -143,6 +143,16 @@ let[@warning "-4"] load store id =
   let* values = walk [] (S.Snapshot.root snapshot_value) [] in
   tree values |> decoded
 
+let overlay ~base changes =
+  let* values = List.fold_left (fun acc (path, entry) ->
+    let* values = acc in
+    let* () = valid_path path in
+    let values = match entry with
+      | Some Directory -> values
+      | None | Some (File _) -> Paths.filter (fun candidate _ -> not (prefix path candidate)) values in
+    Ok (match entry with None -> Paths.remove path values | Some entry -> Paths.add path entry values)) (Ok base) changes in
+  tree (Paths.bindings values)
+
 type trie = Dir of trie Names.t | Leaf of S.file_mode * S.Content.id
 
 let store repository values =
@@ -666,6 +676,17 @@ module Graph = struct
         let* value = revision pool id in
         revision_closure pool (Ids.add id seen) (value.Core.dependencies @ rest)
 
+  let represented_revisions pool roots =
+    let rec walk seen = function
+      | [] -> Ok (Ids.elements seen)
+      | id :: rest when Ids.mem id seen -> walk seen rest
+      | id :: rest ->
+          let* value = revision pool id in
+          walk (Ids.add id seen)
+            (value.Core.previous_revisions @ value.Core.dependencies @ rest)
+    in
+    walk Ids.empty roots
+
   let represented pool heads =
     let* versions = ancestors pool Ids.empty heads in
     let* roots =
@@ -676,15 +697,7 @@ module Graph = struct
           Ok (value.Core.chosen_revisions @ value.Core.resolutions @ roots))
         versions (Ok [])
     in
-    let rec walk seen = function
-      | [] -> Ok (Ids.elements seen)
-      | id :: rest when Ids.mem id seen -> walk seen rest
-      | id :: rest ->
-          let* value = revision pool id in
-          walk (Ids.add id seen)
-            (value.Core.previous_revisions @ value.Core.dependencies @ rest)
-    in
-    walk Ids.empty roots
+    represented_revisions pool roots
 
   let rec revision_ancestors pool seen = function
     | [] -> Ok seen

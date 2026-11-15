@@ -1,6 +1,7 @@
 module Safe_apply = Safe_apply
 module Text_diff = Text_diff
 module Share = Native_share
+module Preservation = Preservation
 module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model
 module Journal = Yeokcham_v1_restore_journal

@@ -1,6 +1,7 @@
 module Safe_apply = Safe_apply
 module Text_diff = Text_diff
 module Share = Native_share
+module Preservation = Preservation
 
 (** Local V1 saved-work transitions and verified offline-package receive.
 

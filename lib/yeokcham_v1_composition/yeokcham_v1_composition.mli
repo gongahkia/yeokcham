@@ -28,6 +28,10 @@ val store :
 
 val differences : tree -> tree -> path list
 
+val overlay : base:tree -> (path * entry option) list -> (tree, error) result
+(** Install already-proved scoped values/absence. Structural replacements remove
+    descendants; the resulting parent/tree invariants are revalidated. *)
+
 val select :
   base:tree ->
   observed:tree ->
@@ -90,6 +94,11 @@ module Graph : sig
     Core.pool ->
     Core.Record_id.t list ->
     (Core.Record_id.t list, failure) result
+
+  val represented_revisions :
+    Core.pool -> Core.Record_id.t list -> (Core.Record_id.t list, failure) result
+  (** Exact revision ancestry through both previous versions and dependencies.
+      Unlike pending composition, this includes superseded version witnesses. *)
 
   val common_base :
     Core.pool -> Core.Record_id.t list -> (Core.Record_id.t, failure) result
