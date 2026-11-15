@@ -1398,9 +1398,9 @@ The opaque prepared value exposes artifact, authority, historical pure pool,
 record map, public titles and selected branch. `import_prepared ~destination`
 copies only previously verified immutable objects, with per-object revalidation.
 It creates no project head and does not change ordinary files or private cursors.
-Current new-record admission, atomic receipt, transfer acknowledgement and clone
-materialization are separate required service consumers; historical verification
-alone is not new-record admission. Legacy `read_artifact`/materialization helpers
+Current new-record admission and atomic receipt are supplied by `Core_receive`
+below. Transfer acknowledgement and clone materialization remain required
+consumers; historical verification alone is not new-record admission. Legacy `read_artifact`/materialization helpers
 remain legacy-manifest APIs; shared iteration/lookups support either artifact.
 
 Actual mixed-file tests exercise selected D/later private E through native share
@@ -1419,3 +1419,63 @@ already requires a native C toolchain. A debugger sample of the mixed Core
 journey identified repeated OCaml SHA-256 work. Functional fixture timings are
 diagnostics, not G01 measurements or native performance qualification. Independent
 vectors and persistent-context/offset feed tests verify the native adapter.
+
+### P3 atomic Core metadata receipt (in progress)
+
+`Local_service.Core_receive` aliases `Native_receipt`. `receive ~root ~package`
+first runs isolated `Package.Core.prepare` against the known authority root and
+imports verified immutable bytes outside the workspace writer lock. It then
+acquires the same `local-worktree.lock`, reloads current state, merges verified
+authority with current membership/epochs and runs
+`Store.Local.receive_records ~store ~authority ~records`. That API rechecks
+logical/stored identities, performs current trust admission and actual public
+composition proof. Historical verification alone never admits a new late record.
+
+The service publishes the extended Core pool and authority through one existing
+state-root CAS, preserving the current project, exact history/counter/cursor,
+selected branch, working basis, private positions, publications, operation roots
+and legacy transport data. It never scans/captures ordinary working files, signs,
+integrates, runs project commands or claims transport acknowledgement. Incoming
+metadata can arrive during an incomplete integration. The integration's usual
+revalidation handles relevant changes; independent branches/records survive its
+later commit. Identical receipt reports Unchanged and performs no extra CAS.
+
+`Core_receive.outcome` exposes records/branches added, unchanged status, actual
+`History_id`, selected branch/basis, known branch sets and resulting state-head ID.
+Typed package errors preserve Core model/record/trust/graph failures.
+`Local.receive_error` separately distinguishes invalid identity/reference data,
+record decoding, current trust, composition and store failures. Required unsupported
+policy remains a typed refusal, not successful approval.
+
+Known shared branches have no invented private observation. When a public branch
+lacks a private position, the canonical local wrapper selects schema 4:
+
+```text
+[4, empty_snapshot, selected_branch, record_pairs, private_positions,
+ publication_root_or_null, operation_root_or_null]
+```
+
+Private positions are sorted/unique, reference known branches, and must include
+selection. Schema 4 is canonical only when at least one branch is known without
+a private position; complete-position states retain schema 1/2/3 exactly. Those
+older schemas still reject lost positions. Update validation forbids dropping
+any existing private position even when a schema-4 candidate can otherwise decode.
+History allocation/namespace ownership is unchanged; receiving records allocates
+no private history nodes or identifiers. All state stays under the same root.
+
+`branch list` JSON includes `local_state` (`selected`, `private_saved`,
+`known_shared`) and a nullable private position. Plain output identifies
+known-only branches. Selecting one currently refuses explicitly before replacement
+with `shared-branch-not-materialized`/exit 3; supported first materialization is
+still required by the shared workflow. A private basis behind known accepted
+heads similarly reports a required integration choice instead of an integrity
+error. This does not retarget names or select divergent heads.
+
+Forked receipt tests stop before/after actual root CAS and verify one complete
+old/new record set, unchanged private history/files and no extra root on retry.
+Other tests cover lost-position refusal, typed required-policy refusal, fresh
+JSON/plain branch inspection and receipt during a Prepared integration followed
+by successful resume without losing new records. These are actual service/root
+consumers of public Core packages. Native relay fetching, frozen outbound
+couriers/acknowledgements, clone, remote-branch materialization and complete
+two-person/fault coverage remain open; no ordinary Core relay command is claimed.

@@ -386,6 +386,12 @@ let[@warning "-4"] fail_local = function
     when String.starts_with ~prefix:"unknown branch " message ->
       fail_with_status 2 "unknown-branch" message
   | Service.History_error message
+    when String.starts_with ~prefix:"shared branch " message ->
+      fail_with_status 3 "shared-branch-not-materialized" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"private branch basis differs" message ->
+      fail_with_status 3 "branch-integration-required" message
+  | Service.History_error message
     when String.starts_with ~prefix:"branch has divergent" message
          || String.starts_with ~prefix:"branch name " message
             && String.ends_with ~suffix:"explicitly" message ->
@@ -3183,6 +3189,12 @@ let render_branches ?created_branch listing =
                      ( "selected",
                        `Bool (Core.Branch_id.equal selected row.Core.branch_id)
                      );
+                     ( "local_state",
+                       `String
+                         (if Core.Branch_id.equal selected row.Core.branch_id
+                          then "selected"
+                          else if Option.is_some position then "private_saved"
+                          else "known_shared") );
                      ("event_heads", json_ids row.Core.event_heads);
                      ("accepted_heads", json_ids row.Core.accepted_heads);
                      ( "private_position",
@@ -3215,14 +3227,21 @@ let render_branches ?created_branch listing =
   | Text_format ->
       List.iter
         (fun row ->
-          Printf.printf "%s %s branch:%s accepted:%s\n"
+          Printf.printf "%s %s branch:%s accepted:%s local:%s\n"
             (if Core.Branch_id.equal selected row.Core.branch_id then "*"
              else " ")
             (String.concat ", "
                (List.map Output.display_value row.Core.display_names))
             (Core.Branch_id.to_hex row.Core.branch_id)
             (String.concat ","
-               (List.map Core.Record_id.to_hex row.Core.accepted_heads)))
+               (List.map Core.Record_id.to_hex row.Core.accepted_heads))
+            (if
+               List.exists
+                 (fun position ->
+                   Core.Branch_id.equal position.Local.branch row.Core.branch_id)
+                 listing.Service.private_positions
+             then "saved"
+             else "known-shared"))
         listing.Service.shared_branches
 
 let[@warning "-4"] fail_branch = function
@@ -3251,6 +3270,9 @@ let[@warning "-4"] fail_branch = function
          || String.starts_with ~prefix:"branch name " message
             && String.ends_with ~suffix:"before switching" message ->
       fail_with_status 3 "branch-choice-required" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"shared branch " message ->
+      fail_with_status 3 "shared-branch-not-materialized" message
   | Service.History_error message
     when String.starts_with ~prefix:"unknown branch " message ->
       fail_with_status 2 "unknown-branch" message

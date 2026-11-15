@@ -21,6 +21,10 @@ type error =
   | Trust_error of Trust.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Model_error of Model.error
+  | Core_model_error of Model.Core.error
+  | Core_record_error of Yeokcham_v1_record.Core.error
+  | Core_trust_error of Trust.Core.error
+  | Core_graph_error of Yeokcham_v1_composition.Graph.failure
 
 val error_to_string : error -> string
 

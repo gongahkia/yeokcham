@@ -427,6 +427,7 @@
  (modules test_core_package)
  (libraries
   alcotest
+  yojson
   unix
   yeokcham_encoding
   yeokcham_envelope
@@ -443,6 +444,7 @@
   yeokcham_v1_pages
   yeokcham_v1_package)
  (deps
+  ../bin/yeokcham_v1.exe
   (source_tree golden)))
 
 (rule

@@ -1,5 +1,6 @@
 module Safe_apply = Safe_apply
 module Integrate = Native_integration
+module Core_receive = Native_receipt
 module Text_diff = Text_diff
 module Share = Native_share
 module Integration = Yeokcham_v1_integration

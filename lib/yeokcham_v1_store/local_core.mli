@@ -72,6 +72,26 @@ val pool : t -> Core.pool
 val record_objects :
   t -> (Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list
 
+type receive_error =
+  | Receive_invalid of string
+  | Receive_record of Yeokcham_v1_record.Core.error
+  | Receive_trust of Yeokcham_v1_trust.Core.error
+  | Receive_graph of Yeokcham_v1_composition.Graph.failure
+  | Receive_store of Yeokcham_store.error
+
+val receive_error_to_string : receive_error -> string
+
+val receive_records :
+  store:Yeokcham_store.repository ->
+  authority:Yeokcham_v1_trust.authority ->
+  records:(Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list ->
+  t ->
+  (t, receive_error) result
+(** Current trust admission and actual public scope/composition verification.
+    Preserves selection, private positions, correspondence and operation roots.
+    New shared branches have no fabricated private working observation. The
+    caller publishes this candidate atomically with the unchanged history. *)
+
 val initialize :
   store:Yeokcham_store.repository ->
   authority:Yeokcham_v1_trust.authority ->

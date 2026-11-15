@@ -55,6 +55,10 @@ type error =
   | Trust_error of Trust.error
   | Snapshot_error of Snapshot.error
   | Model_error of Model.error
+  | Core_model_error of Model.Core.error
+  | Core_record_error of Yeokcham_v1_record.Core.error
+  | Core_trust_error of Trust.Core.error
+  | Core_graph_error of Yeokcham_v1_composition.Graph.failure
 
 let ( let* ) = Result.bind
 let manifest_name = "manifest.cbor"
@@ -73,6 +77,11 @@ let error_to_string = function
   | Trust_error error -> Trust.error_to_string error
   | Snapshot_error error -> Snapshot.error_to_string error
   | Model_error error -> Model.error_to_string error
+  | Core_model_error error -> Model.Core.error_to_string error
+  | Core_record_error error -> Yeokcham_v1_record.Core.error_to_string error
+  | Core_trust_error error -> Trust.Core.error_to_string error
+  | Core_graph_error error ->
+      Yeokcham_v1_composition.Graph.error_to_string error
 
 let construction value =
   Result.map_error
@@ -1168,20 +1177,13 @@ module Core = struct
 
   [@@@warning "-42"]
 
-  let model result =
-    Result.map_error (fun e -> Invalid_package (M.error_to_string e)) result
-
-  let record result =
-    Result.map_error (fun e -> Invalid_package (R.error_to_string e)) result
+  let model result = Result.map_error (fun e -> Core_model_error e) result
+  let record result = Result.map_error (fun e -> Core_record_error e) result
 
   let pages result =
     Result.map_error (fun e -> Invalid_package (Pages.error_to_string e)) result
 
-  let graph result =
-    Result.map_error
-      (fun e -> Invalid_package (Composition.Graph.error_to_string e))
-      result
-
+  let graph result = Result.map_error (fun e -> Core_graph_error e) result
   let trust result = Result.map_error (fun e -> Trust_error e) result
   let stored result = Result.map_error (fun e -> Store_error e) result
   let schema_version = 2L
@@ -1377,8 +1379,7 @@ module Core = struct
           let* actual = R.id signed |> record in
           let* () =
             Trust.Core.verify authority signed
-            |> Result.map_error (fun e ->
-                Invalid_package (Trust.Core.error_to_string e))
+            |> Result.map_error (fun e -> Core_trust_error e)
           in
           if not (M.Record_id.equal id actual) then
             Error (Invalid_package "Core logical record identity mismatch")
@@ -1397,7 +1398,7 @@ module Core = struct
                 | Ok (pool, _) -> Ok (pool, remaining)
                 | Error (M.Missing_reference _) ->
                     Ok (pool, (id, body) :: remaining)
-                | Error e -> Error (Invalid_package (M.error_to_string e)))
+                | Error e -> Error (Core_model_error e))
               (Ok (pool, []))
               pending
           in

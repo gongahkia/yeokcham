@@ -495,6 +495,366 @@ let independent_manifest_vector () =
     (Yeokcham_hash.Sha256.digest_string bytes
     |> Yeokcham_hash.Sha256.to_raw_string |> hex)
 
+let receipt_fixture parent =
+  let root = parent ^ "/receiver" in
+  let repository, capability, authority = initialize root 'k' in
+  let before = load repository in
+  let store = S.underlying_store repository in
+  let certificate = S.local_certificate (Option.get before.S.collaboration) in
+  let make name state =
+    L.create_branch ~store ~authority ~certificate
+      ~signing_capability:capability ~name ~cursor:0L state
+    |> ok Fun.id
+  in
+  let private_branch = make "local-work" (local before) in
+  S.save_collaborative ~local:private_branch repository ~expected:before.S.head
+    ~project:before.S.project
+    ~collaboration:(Option.get before.S.collaboration)
+  |> ok S.error_to_string |> ignore;
+  let before = load repository in
+  let remote = make "received-shared" (local before) in
+  let directory = parent ^ "/incoming" in
+  P.create ~source:store ~destination:directory ~authority
+    ~records:(L.record_objects remote)
+    ~selected_branch:(L.selected remote).L.branch ~titles:[]
+  |> package |> ignore;
+  write (root ^ "/private.txt") "UNSAVED RECEIVER PRIVATE WORK";
+  (root, repository, capability, authority, before, directory, remote)
+
+let cli root arguments =
+  let binary =
+    List.find Sys.file_exists
+      [ "../bin/yeokcham_v1.exe"; "_build/default/bin/yeokcham_v1.exe" ]
+  in
+  let path = Filename.temp_file "yeokcham-core-receipt-cli-" "" in
+  let errors = Filename.temp_file "yeokcham-core-receipt-cli-errors-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.unlink path;
+      Unix.unlink errors)
+    (fun () ->
+      let output = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+      let error_output =
+        Unix.openfile errors [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600
+      in
+      let child =
+        Unix.create_process binary
+          (Array.of_list ((binary :: arguments) @ [ "--root"; root ]))
+          Unix.stdin output error_output
+      in
+      Unix.close output;
+      Unix.close error_output;
+      let _, status = Unix.waitpid [] child in
+      (status, read path))
+
+let[@warning "-4"] native_receipt_preserves_history_files_and_private_positions
+    () =
+  temporary (fun parent ->
+      let root, repository, _, _, before, directory, remote =
+        receipt_fixture parent
+      in
+      let received =
+        Service.Core_receive.receive ~root ~package:directory
+        |> ok Service.Core_receive.error_to_string
+      in
+      Alcotest.(check int)
+        "two new signed records, no navigation" 2
+        received.Service.Core_receive.records_added;
+      Alcotest.(check int)
+        "one newly known shared branch" 1
+        received.Service.Core_receive.branches_added;
+      let after = load repository in
+      Alcotest.(check string)
+        "complete private history and allocation unchanged"
+        (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+        (Yeokcham_v1_undo.encode after.S.history |> ok Fun.id);
+      Alcotest.(check bool)
+        "existing exact private working positions retained" true
+        (L.positions (local before) = L.positions (local after));
+      Alcotest.(check int)
+        "shared discovery does not fabricate a private position" 2
+        (List.length (L.positions (local after)));
+      Alcotest.(check int)
+        "all shared branches now visible" 3
+        (List.length (L.branches (local after)));
+      Alcotest.(check string)
+        "unsaved bytes were not captured or replaced"
+        "UNSAVED RECEIVER PRIVATE WORK"
+        (read (root ^ "/private.txt"));
+      Alcotest.(check bool)
+        "public receipt matches exact declared records" true
+        (L.record_objects (local after) = L.record_objects remote);
+      let encoded = L.encode (local after) |> ok Fun.id in
+      let version =
+        E.decode encoded |> ok E.decode_error_to_string |> function
+        | E.Array (E.Integer version :: _) -> version
+        | _ -> assert false
+      in
+      Alcotest.(check int64)
+        "known-only branches select explicit schema 4" 4L version;
+      let listing = Service.branch_list ~root |> service in
+      Alcotest.(check int)
+        "branch listing distinguishes missing private position" 2
+        (List.length listing.Service.private_positions);
+      let status, json = cli root [ "branch"; "list"; "--format"; "json" ] in
+      Alcotest.(check bool)
+        "fresh branch CLI reads received state" true (status = Unix.WEXITED 0);
+      let open Yojson.Safe.Util in
+      let body = Yojson.Safe.from_string json in
+      let branch =
+        body |> member "data" |> member "branches" |> to_list
+        |> List.find (fun branch ->
+            branch |> member "names" |> to_list
+            |> List.mem (`String "received-shared"))
+      in
+      Alcotest.(check bool)
+        "JSON distinguishes known shared from private saved" true
+        (member "local_state" branch = `String "known_shared"
+        && member "private_position" branch = `Null);
+      let status, plain = cli root [ "branch"; "list" ] in
+      Alcotest.(check bool)
+        "plain branch CLI identifies known-only work" true
+        (status = Unix.WEXITED 0 && contains plain "local:known-shared");
+      let status, json =
+        cli root [ "switch"; "received-shared"; "--yes"; "--format"; "json" ]
+      in
+      Alcotest.(check bool)
+        "unmaterialized branch choice refuses before files" true
+        (status = Unix.WEXITED 3);
+      Alcotest.(check bool)
+        "choice has actionable domain error" true
+        (Yojson.Safe.from_string json
+        |> member "error" |> member "code"
+        = `String "shared-branch-not-materialized");
+      reject
+        (Service.branch_switch ~root ~name:"received-shared" ~dry_run:false);
+      let repeated =
+        Service.Core_receive.receive ~root ~package:directory
+        |> ok Service.Core_receive.error_to_string
+      in
+      Alcotest.(check bool)
+        "identical receipt reports no-op" true
+        repeated.Service.Core_receive.unchanged;
+      Alcotest.(check bool)
+        "retry publishes no additional root" true
+        (Raw.Mutable_ref.equal after.S.head (load repository).S.head))
+
+let[@warning "-4"] native_receipt_cannot_erase_working_positions_or_bypass_admission
+    () =
+  temporary (fun parent ->
+      let root, repository, capability, authority, before, directory, _ =
+        receipt_fixture parent
+      in
+      Service.Core_receive.receive ~root ~package:directory
+      |> ok Service.Core_receive.error_to_string
+      |> ignore;
+      let loaded = load repository in
+      let state = local loaded in
+      let store = S.underlying_store repository in
+      let selected = (L.selected state).L.branch in
+      let fields =
+        L.encode state |> ok Fun.id |> E.decode |> ok E.decode_error_to_string
+        |> function
+        | E.Array fields -> fields
+        | _ -> assert false
+      in
+      let positions =
+        match List.nth fields 4 with
+        | E.Array positions -> positions
+        | _ -> assert false
+      in
+      let kept =
+        List.filter
+          (function
+            | E.Array (E.Bytes raw :: _) -> raw = C.Branch_id.to_raw selected
+            | _ -> assert false)
+          positions
+      in
+      let altered =
+        E.array
+          (List.mapi
+             (fun index value ->
+               if index = 4 then
+                 E.array kept |> ok E.construction_error_to_string
+               else value)
+             fields)
+        |> ok E.construction_error_to_string
+        |> E.encode
+      in
+      let candidate = L.decode ~store ~authority altered |> ok Fun.id in
+      reject (L.validate_update ~previous:state candidate);
+      reject
+        (S.save_collaborative ~local:candidate repository
+           ~expected:loaded.S.head ~project:loaded.S.project
+           ~collaboration:(Option.get loaded.S.collaboration));
+      let legacy =
+        E.array
+          (E.integer 1L
+          :: List.tl (List.filteri (fun index _ -> index < 5) fields))
+        |> ok E.construction_error_to_string
+        |> E.encode
+      in
+      reject (L.decode ~store ~authority legacy);
+      let first = List.hd (L.record_objects state)
+      and second = List.nth (L.record_objects state) 1 in
+      reject
+        (L.receive_records ~store ~authority
+           ~records:[ (fst first, snd second) ]
+           state);
+      let digest text = C.Digest.of_hex text |> model in
+      let certificate =
+        S.local_certificate (Option.get loaded.S.collaboration)
+      in
+      let context =
+        C.make_context
+          ~repository:(C.pool_repository (L.pool state))
+          ~author_certificate:(digest certificate)
+          ~authority_heads:(List.map digest (T.authority_heads authority))
+          ~display_time:None
+        |> model
+      in
+      let version =
+        C.make_accepted_version ~branch:selected
+          ~accepted_parents:[ (L.selected state).L.basis ]
+          ~chosen_revisions:[] ~resolutions:[]
+          ~result_snapshot:(L.empty_snapshot state)
+          ~composition_profile:"line-hunks-v1"
+          ~policy_heads:[ C.Digest.of_raw (String.make 32 'p') |> model ]
+          ~review_evidence:[]
+        |> model
+      in
+      let signed =
+        T.Core.sign authority capability
+          (C.make_body ~context ~payload:(C.Accepted_version version))
+        |> ok T.Core.error_to_string
+      in
+      let id = R.id signed |> ok R.error_to_string in
+      let object_id =
+        R.encode signed |> ok R.error_to_string |> Envelope.decode
+        |> ok Envelope.decode_error_to_string
+        |> Raw.put store |> ok Raw.error_to_string
+      in
+      (match
+         L.receive_records ~store ~authority ~records:[ (id, object_id) ] state
+       with
+      | Error (L.Receive_trust (T.Core.Model_error (C.Unsupported_policy _))) ->
+          ()
+      | Error error -> Alcotest.fail (L.receive_error_to_string error)
+      | Ok _ -> Alcotest.fail "required unsupported policy admitted");
+      Alcotest.(check bool)
+        "failed admission never changes saved private cursor" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      Alcotest.(check bool)
+        "pre-receipt local positions still retained" true
+        (L.positions (local before) = L.positions (local (load repository))))
+
+let native_receipt_root_faults_retry_exactly_once () =
+  List.iter
+    (fun boundary ->
+      temporary (fun parent ->
+          let root, repository, _, _, before, directory, _ =
+            receipt_fixture parent
+          in
+          let child = Unix.fork () in
+          if child = 0 then (
+            Service.Core_receive.For_test.receive ~root ~package:directory
+              ~observe:(fun current -> if current = boundary then Unix._exit 73)
+            |> ignore;
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "interrupted at actual receipt root publication" true
+            (status = Unix.WEXITED 73);
+          let saved = load repository in
+          Alcotest.(check int)
+            "only atomic old/new record sets visible"
+            (if boundary = Service.Core_receive.Before_metadata_publish then 4
+             else 6)
+            (List.length (L.record_objects (local saved)));
+          let retried =
+            Service.Core_receive.receive ~root ~package:directory
+            |> ok Service.Core_receive.error_to_string
+          in
+          let after = load repository in
+          Alcotest.(check bool)
+            "lost acknowledgement retries recorded metadata"
+            (boundary = Service.Core_receive.After_metadata_publish)
+            retried.Service.Core_receive.unchanged;
+          Alcotest.(check string)
+            "interrupted receipt never captures partial work"
+            (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+            (Yeokcham_v1_undo.encode after.S.history |> ok Fun.id);
+          Alcotest.(check string)
+            "external unsaved bytes remain" "UNSAVED RECEIVER PRIVATE WORK"
+            (read (root ^ "/private.txt"));
+          Service.Core_receive.receive ~root ~package:directory
+          |> ok Service.Core_receive.error_to_string
+          |> ignore;
+          Alcotest.(check bool)
+            "second retry does not move the root" true
+            (Raw.Mutable_ref.equal after.S.head (load repository).S.head)))
+    [
+      Service.Core_receive.Before_metadata_publish;
+      Service.Core_receive.After_metadata_publish;
+    ]
+
+let native_receipt_during_integration_preserves_the_operation_and_new_records ()
+    =
+  temporary (fun parent ->
+      let root, repository, capability, _, _, directory, _ =
+        receipt_fixture parent
+      in
+      let shared = share root capability [ [ "note.txt" ] ] in
+      let plan =
+        Service.Integrate.prepare ~root
+          ~selected_revisions:[ Option.get shared.Service.Share.revision ]
+          ~reconcile_heads:None
+        |> ok Service.Integrate.error_to_string
+      in
+      let child = Unix.fork () in
+      if child = 0 then (
+        Service.Integrate.For_test.apply ~root
+          ~plan:(Yeokcham_v1_integration.id plan)
+          ~signing_capability:(Some capability) ~observe:(fun boundary ->
+            if boundary = Service.Integrate.Prepared_root then Unix._exit 73)
+        |> ignore;
+        Unix._exit 74);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "integration intent really exists before receipt" true
+        (status = Unix.WEXITED 73);
+      let before = load repository in
+      let operation = Option.get (L.pending_operation (local before)) in
+      let received =
+        Service.Core_receive.receive ~root ~package:directory
+        |> ok Service.Core_receive.error_to_string
+      in
+      Alcotest.(check int)
+        "independent incoming branch retained during pending operation" 2
+        received.Service.Core_receive.records_added;
+      let after = load repository in
+      Alcotest.(check string)
+        "receipt does not capture the pending tree"
+        (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+        (Yeokcham_v1_undo.encode after.S.history |> ok Fun.id);
+      Alcotest.(check bool)
+        "exact operation survives the unrelated receipt" true
+        (L.pending_operation (local after) = Some operation);
+      Service.Integrate.resume ~root ~operation:operation.L.Operation.token
+      |> ok Service.Integrate.error_to_string
+      |> ignore;
+      let finished = load repository in
+      Alcotest.(check int)
+        "integration commit does not erase received branch" 3
+        (List.length (L.branches (local finished)));
+      Alcotest.(check bool)
+        "unrelated receipt does not stale exact plan" true
+        ((List.hd (L.operations (local finished))).L.Operation.phase
+       = L.Operation.Completed);
+      Alcotest.(check string)
+        "private unsaved bytes remain private" "UNSAVED RECEIVER PRIVATE WORK"
+        (read (root ^ "/private.txt")))
+
 let native_hash_stream_offsets_and_context_forks () =
   let module Hash = Yeokcham_hash.Sha256 in
   let hex digest =
@@ -541,6 +901,19 @@ let () =
     [
       ( "public",
         [
+          Alcotest.test_case
+            "native receipt preserves private state and known-only branches"
+            `Quick native_receipt_preserves_history_files_and_private_positions;
+          Alcotest.test_case
+            "native receipt guards private positions and required policy" `Quick
+            native_receipt_cannot_erase_working_positions_or_bypass_admission;
+          Alcotest.test_case
+            "native receipt retries before/after actual root publication" `Quick
+            native_receipt_root_faults_retry_exactly_once;
+          Alcotest.test_case
+            "native receipt composes with an already prepared integration"
+            `Quick
+            native_receipt_during_integration_preserves_the_operation_and_new_records;
           Alcotest.test_case "independent manifest and courier identity" `Quick
             independent_manifest_vector;
           Alcotest.test_case "native hash streams preserve offsets and contexts"

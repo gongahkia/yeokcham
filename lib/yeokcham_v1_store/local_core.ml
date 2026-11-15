@@ -309,7 +309,12 @@ let lookup state name =
           Error
             "private branch basis differs from the accepted head; integration \
              is required"
-      | None -> Error "branch has no local working position")
+      | None ->
+          Error
+            (Printf.sprintf
+               "shared branch %S has no private working position; its files \
+                have not been selected"
+               name))
   | [] -> Error (Printf.sprintf "unknown branch %S; inspect branch list" name)
   | _ ->
       Error
@@ -468,26 +473,48 @@ let encode state =
         Ok (Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
     | _ -> Error "publication root and receipts disagree"
   in
-  let* value =
-    match
-      ( state.operation_root,
-        state.operations,
-        state.publication_root,
-        state.publications )
-    with
-    | Some root, _ :: _, _, _ ->
-        array
-          ((Encoding.integer 3L :: fields)
-          @ [
-              publication_fields;
-              Encoding.bytes (Store.Stored_object_id.to_raw_bytes root);
-            ])
-    | None, [], None, [] -> array (Encoding.integer 1L :: fields)
-    | None, [], Some root, _ :: _ ->
-        array
-          ((Encoding.integer 2L :: fields)
-          @ [ Encoding.bytes (Store.Stored_object_id.to_raw_bytes root) ])
+  let* operation_field =
+    match (state.operation_root, state.operations) with
+    | None, [] -> Ok Encoding.null
+    | Some root, _ :: _ ->
+        Ok (Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
     | _ -> Error "operation root and operations disagree"
+  in
+  let shared_only =
+    List.exists
+      (fun row ->
+        not
+          (List.exists
+             (fun position ->
+               Core.Branch_id.equal position.branch row.Core.branch_id)
+             state.positions))
+      (branches state)
+  in
+  let* value =
+    if shared_only then
+      array
+        ((Encoding.integer 4L :: fields)
+        @ [ publication_fields; operation_field ])
+    else
+      match
+        ( state.operation_root,
+          state.operations,
+          state.publication_root,
+          state.publications )
+      with
+      | Some root, _ :: _, _, _ ->
+          array
+            ((Encoding.integer 3L :: fields)
+            @ [
+                publication_fields;
+                Encoding.bytes (Store.Stored_object_id.to_raw_bytes root);
+              ])
+      | None, [], None, [] -> array (Encoding.integer 1L :: fields)
+      | None, [], Some root, _ :: _ ->
+          array
+            ((Encoding.integer 2L :: fields)
+            @ [ Encoding.bytes (Store.Stored_object_id.to_raw_bytes root) ])
+      | _ -> Error "operation root and operations disagree"
   in
   Ok (Encoding.encode value)
 
@@ -495,8 +522,32 @@ let[@warning "-4"] decode ~store ~authority bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string
   in
-  let* value, publication_root, operation_root =
+  let* value, publication_root, operation_root, shared_only =
     match value with
+    | Encoding.Array
+        [
+          Encoding.Integer 4L;
+          empty;
+          selected;
+          ids;
+          positions;
+          publication;
+          operation;
+        ] ->
+        let optional_root label = function
+          | Encoding.Null -> Ok None
+          | Encoding.Bytes raw ->
+              Store.Stored_object_id.of_raw_bytes raw
+              |> Option.to_result ~none:("invalid " ^ label ^ " root")
+              |> Result.map Option.some
+          | _ -> Error ("invalid " ^ label ^ " root")
+        in
+        let* publication_root = optional_root "publication" publication in
+        let* operation_root = optional_root "operation" operation in
+        let* value =
+          array [ Encoding.integer 1L; empty; selected; ids; positions ]
+        in
+        Ok (value, publication_root, operation_root, true)
     | Encoding.Array
         [
           Encoding.Integer 3L;
@@ -523,7 +574,7 @@ let[@warning "-4"] decode ~store ~authority bytes =
         let* value =
           array [ Encoding.integer 1L; empty; selected; ids; positions ]
         in
-        Ok (value, publication_root, Some operation_root)
+        Ok (value, publication_root, Some operation_root, false)
     | Encoding.Array
         [
           Encoding.Integer 2L;
@@ -540,8 +591,8 @@ let[@warning "-4"] decode ~store ~authority bytes =
         let* value =
           array [ Encoding.integer 1L; empty; selected; ids; positions ]
         in
-        Ok (value, Some root, None)
-    | value -> Ok (value, None, None)
+        Ok (value, Some root, None, false)
+    | value -> Ok (value, None, None, false)
   in
   let* empty, selected_branch, ids, positions =
     match value with
@@ -694,8 +745,13 @@ let[@warning "-4"] decode ~store ~authority bytes =
     in
     let position_ids = List.map (fun position -> position.branch) positions in
     if
-      branch_ids <> position_ids
-      || not (List.exists (Core.Branch_id.equal selected_branch) branch_ids)
+      (if shared_only then
+         position_ids <> List.sort_uniq Core.Branch_id.compare position_ids
+         || List.exists
+              (fun id -> not (List.exists (Core.Branch_id.equal id) branch_ids))
+              position_ids
+       else branch_ids <> position_ids)
+      || not (List.exists (Core.Branch_id.equal selected_branch) position_ids)
     then
       Error "local branch positions do not cover the retained branches exactly"
     else
@@ -753,6 +809,16 @@ let validate_update ~previous state =
   in
   if not (Core.Object_id.equal previous.empty state.empty) then
     Error "cannot replace accepted genesis"
+  else if
+    List.exists
+      (fun position ->
+        not
+          (List.exists
+             (fun current ->
+               Core.Branch_id.equal position.branch current.branch)
+             state.positions))
+      previous.positions
+  then Error "cannot erase a private branch working position"
   else if
     List.for_all
       (fun (id, stored) ->
@@ -1019,6 +1085,89 @@ let[@warning "-4"] commit_operation ~store ~authority operation state =
     in
     let* committed = Operation.advance operation Operation.Committed in
     put_operation ~store committed state
+
+type receive_error =
+  | Receive_invalid of string
+  | Receive_record of Record.error
+  | Receive_trust of Trust.Core.error
+  | Receive_graph of Composition.Graph.failure
+  | Receive_store of Store.error
+
+let receive_error_to_string = function
+  | Receive_invalid message -> message
+  | Receive_record error -> Record.error_to_string error
+  | Receive_trust error -> Trust.Core.error_to_string error
+  | Receive_graph error -> Composition.Graph.error_to_string error
+  | Receive_store error -> Store.error_to_string error
+
+let receive_records ~store ~authority ~records state =
+  let existing =
+    List.fold_left
+      (fun map (id, obj) -> Ids.add id obj map)
+      Ids.empty state.records
+  in
+  let* combined =
+    List.fold_left
+      (fun result (id, obj) ->
+        let* map = result in
+        match Ids.find_opt id map with
+        | Some previous when not (Store.Stored_object_id.equal previous obj) ->
+            Error (Receive_invalid "received core record identity collision")
+        | Some _ -> Ok map
+        | None -> Ok (Ids.add id obj map))
+      (Ok existing) records
+  in
+  let* pending =
+    Ids.bindings combined
+    |> List.filter (fun (id, _) -> not (Ids.mem id existing))
+    |> List.fold_left
+         (fun result (id, obj) ->
+           let* pending = result in
+           let* envelope =
+             Store.get ~max_bytes:Record.max_record_bytes store obj
+             |> Result.map_error (fun error -> Receive_store error)
+           in
+           let bytes = Envelope.encode envelope in
+           let* signed =
+             Record.decode ~repository:(Core.pool_repository state.pool) bytes
+             |> Result.map_error (fun error -> Receive_record error)
+           in
+           let* actual =
+             Record.id signed
+             |> Result.map_error (fun error -> Receive_record error)
+           in
+           if not (Core.Record_id.equal id actual) then
+             Error (Receive_invalid "received core logical identity mismatch")
+           else Ok (bytes :: pending))
+         (Ok [])
+  in
+  let[@warning "-4"] rec receive pool = function
+    | [] -> Ok pool
+    | pending ->
+        let* pool, remaining =
+          List.fold_left
+            (fun result bytes ->
+              let* pool, remaining = result in
+              match Trust.Core.receive authority pool bytes with
+              | Ok (pool, _) -> Ok (pool, remaining)
+              | Error (Trust.Core.Model_error (Core.Missing_reference _)) ->
+                  Ok (pool, bytes :: remaining)
+              | Error error -> Error (Receive_trust error))
+            (Ok (pool, []))
+            pending
+        in
+        if List.length remaining = List.length pending then
+          Error
+            (Receive_invalid
+               "received core records have missing causal references")
+        else receive pool remaining
+  in
+  let* pool = receive state.pool pending in
+  let* () =
+    Composition.Graph.validate store pool
+    |> Result.map_error (fun error -> Receive_graph error)
+  in
+  Ok { state with pool; records = Ids.bindings combined }
 
 module For_test = struct
   let create_branch = create_branch_using
