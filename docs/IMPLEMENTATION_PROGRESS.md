@@ -68,7 +68,7 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | complete | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`, `7646362d80929e4f9cdccce0b90ac86beaa1a4a8`, `f924e0f480b4b5b7040b2ad3572790f171a8d745`; [attempt 07](implementation/reports/G01-attempt-07.md) | None for G01; next G02 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | in_progress | Partial via P1: `0c1f910dcd8a4f4a7d10db81a199d83fa9774043`, `06f526d9f6f09cd06bd3b57a7a348f64ea17817a`, `51c374f499372349b235e68b32e7bf3e748d2718`, `f900fbc3432e1d7134a547eda4f2ec7366d6c991`, `06b662a8bab5c783117e5fcf45e36b7d942cfc64`; [P1 report](implementation/reports/P01-attempt-01.md) | Review/request/event/policy and account/settings/archive records; request/member identity and proof; full policy/review/archive/journal and crypto interfaces; corresponding vectors/tests. P1 does not complete G02. |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Principal/review/policy evaluation, reconciliation/adoption and full review matrix; see criterion coverage below |
-| [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | Partial P3 composition/plans plus exact public resolution proof; checkpoints below | Private resolution choices, complete criterion audit and formal phase acceptance remain |
+| [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | Partial P3 composition/plans, exact public resolution proof and private workspace decisions; checkpoints below | Remaining decision/criterion audit and formal phase acceptance remain |
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
@@ -77,8 +77,8 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
-| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery, resolved public acceptance and native outbound acknowledgement; checkpoints below | Private-resolution/CLI/policy flows, remaining fault matrix and formal phase acceptance remain |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone/branch selection and unavailable-state inspection | Native resolution, archive/preferences and complete multi-person journeys remain |
+| [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery, native shared/private conflict choices, resolved acceptance and outbound acknowledgement; checkpoints below | Complete two-person resolution/policy flows, remaining fault matrix and formal phase acceptance remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange/clone/branch selection, unavailable-state inspection and native conflicts/resolve | Complete multi-person resolution journeys, archive/preferences and formal phase acceptance remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -102,13 +102,21 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 
 ## Current-phase checkpoints
 
-- P3 latest checkpoint: received-branch selection, saved-private restoration across
+- P3 latest checkpoint: native `conflicts`/`resolve`, streamed explicit replacements,
+  canonical private workspace decisions and recovered application are committed as
+  `51a63028250fa987ff870d959294347e0e3ee593`. Build/lint/CI pass on its exact stable
+  source, including 85 local-state, 14 graph, independent control vectors, 11 local
+  integration CLI cases and the existing 27 transport cases. The dedicated Alice/Bob
+  TLS resolution extension, remaining authority/error/fault audit and full P03
+  report/receipt are still required. P3 is active and incomplete; details below.
+
+- Earlier P3 checkpoint: received-branch selection, saved-private restoration across
   newer shared heads, working-basis forks and unlocked/revalidated branch signing
   are committed as `bc75d492af15bb8e83bd863d7aceaef370a54c35`. Full build/lint/CI,
   real TLS named-branch/nondefault-clone journey and recovery/GC tests pass.
-  Native text/opaque resolution, read-only missing-content inspection, remaining
-  error/authority/fault coverage and final criterion audit remain. P3 is active and
-  incomplete; details below.
+  Saved-metadata inspection and native local conflict preparation were subsequently
+  added. Remaining error/authority/fault coverage and final criterion audit stay
+  open. P3 is active and incomplete; details below.
 
 - Earlier P3 verified native `clone URL [DIRECTORY]` checkpoint: preview/request
   binding and local resume are committed as
@@ -1838,3 +1846,91 @@ the new kind and may refuse the state; source reversion cannot undo acceptance,
 materialization or exchange. No obsolete-format migration or destructive repair
 is introduced. A standalone resolution proposal is not an accepted result or
 permission to replace private work. P3 remains active and incomplete.
+
+### P3 native conflict choices and private result checkpoint — November 15
+
+Continuation on main at `548df679a9579fc1d513c9d3826ee14d90a6a8d3` preserved the
+eleven modified files inherited from the private-decision implementation. P1/P2
+prerequisite ancestry remained verified. Implementation is now committed as
+`51a63028250fa987ff870d959294347e0e3ee593`, with 28 explicitly staged owned files.
+No branch/worktree, agent, push, release or deployment was used.
+
+`Service.Conflicts` now backs actual native `conflicts` and `resolve CONFLICT`
+commands, preserving the explicit earlier `resolve --decision` path. Inspection
+exposes exact plan/conflict IDs, shared/private scope, named versions, entry/type/
+mode/content identities and bounded escaped previews. Deferral changes no state.
+Shared choices record only a scoped signed resolution proposal and prepare a
+fresh plan; private choices remain private plan data with no signer/public record.
+Neither action accepts work, advances the private cursor or rewrites files.
+Signing releases the existing writer, then revalidates source, file identity,
+authority and exact context before publication. Identical recorded choices reuse
+their signed identity. A post-publication alias-retention failure reports its
+actual resolution/plan/source identities and incomplete outcome with retry action.
+Incomparable decision alternatives stay explicit rather than using arrival order.
+
+Private plan schema 2 appends a canonical nonempty sorted path/replacement set to
+the existing fields; schema 1 bytes are unchanged. No envelope code was added.
+The plan and incomplete operation protect replacement roots and verify the actual
+private merge, keeping accepted D separate from selected private E. Canonical
+decoding rejects malformed/duplicate/unsorted/overlapping decisions and unsupported
+versions. Native application refuses a syntactically Ready false output before
+files/root movement. Nested choices now admit only necessary directory ancestors,
+while refusing unrelated changes and undecided ancestor-file replacement.
+Explicit replacement capture reuses native streaming/chunking, executable mode,
+file fingerprints and three bounded instability attempts; final symlinks and
+special files refuse. Provider-time external/source changes preserve existing
+state. Actual private-choice Prepared/file/Materialized/Committed interruptions
+resume without another acceptance/navigation; discarded private E stays in safety.
+
+Focused checks passed: all85 local-state cases, all14 graph cases, one owner-vector
+case covering both schemas, four independently emitted encoding/identity fixtures,
+and all11 fresh-process integration CLI cases (JSON/plain). CLI journeys cover
+deferral, exact named choices, signer-free identity reuse, accepted D/private E,
+large executable replacements, stale inputs and unknown versions. The new large
+replacement case exceeded the old20s per-command test bound; its bounded120s
+invocation passed, and the final11-case CLI run took26.848s. This is correctness
+evidence, not a responsiveness budget or representative performance qualification.
+
+The first full local run caught an unintended schema-1 recovery regression: the
+new pending workspace proof also required older plans' safety contents during
+root loading. Limiting the added proof to nonempty explicit private decisions
+preserved schema-1 recovery behavior; its missing-safety case and the four new
+cases then passed together. Earlier compile/strict-warning errors, a wrong JSON
+test-field assertion, the native error-schema defect and timeout are retained in
+external logs. No existing recovery test was weakened. The initial formatter
+promotion exited2; the final formatter, build and lint exited0.
+
+Final `make build`, `make lint`, `make ci` all exited0 on the exact committed
+source. Full CI took195.512s, ran all27 existing native transport cases through
+the real controlled TLS relay (suite193.222s), all85 local cases and the new CLI/
+vector checks, and reused matching unchanged Dune actions. No skips were reported
+by final CI; earlier targeted invocations deliberately skipped unrelated cases.
+Documentation links passed (247 local references). Exact commands/exits/timings,
+all28 SHA-256 values and a committed-source comparison are in
+`native-conflicts-stable-checks.json` under
+`/home/gongahkia/.cache/yeokcham-p3-20261115/`; `source_stable` and
+`committed_source_matches` are true. The failed local attempt remains in
+`native-conflicts-check-attempt-01.json` and its logs. All12 README/P2/accepted-G01
+preservation hashes still match start.json. Accepted measurements were not rerun
+or missing benchmark directories recreated. Default CI's synthetic harness tests
+are distinct from accepted G01 measurements. No Docker/macOS/Windows, native custody,
+human or broad performance qualification was performed or claimed.
+
+This adds partial G02 private plan/consumer contracts, G04 actual private decisions,
+G05 bounded replacement capture, G13 resolved native application and G14 supported
+conflict CLI journeys. It does not complete any original full phase. P3 remains
+active and incomplete. Next extend the actual Alice/Bob TLS journey through native
+conflicts/resolve, receipt without file movement, private E, accepted-history
+exchange, privacy and exact retry. Complete the authority/policy/availability/exit
+and fault audit, including shared-resolution root-to-alias failure/retry, remaining
+decision cases and private replacement GC/closed-metadata behavior. Then audit all
+seven P3 criteria and write the full P03 report/acceptance receipt. Those files are
+not yet created. P4 remains unstarted and unauthorized. The external
+`native-conflicts-next-notes.md` records the concrete continuation and test helpers.
+
+Rollback must retain schema-2 plans, their private replacements, operation facts,
+history/safety/recovery roots and all working bytes, as well as existing public
+code47 records. Earlier readers may refuse these new private plan controls;
+reverting source cannot undo accepted history, materialization or exchange.
+Do not delete metadata or roots to make an older reader succeed. D10 introduces
+no destructive current-data migration or recovery exception.
