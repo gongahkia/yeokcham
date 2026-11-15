@@ -1399,8 +1399,9 @@ record map, public titles and selected branch. `import_prepared ~destination`
 copies only previously verified immutable objects, with per-object revalidation.
 It creates no project head and does not change ordinary files or private cursors.
 Current new-record admission and atomic receipt are supplied by `Core_receive`
-below. Transfer acknowledgement and clone materialization remain required
-consumers; historical verification alone is not new-record admission. Legacy `read_artifact`/materialization helpers
+below. `Core_outbound` and `Sync.Core` supply native transfer and acknowledgement;
+clone materialization remains required. Historical verification alone is not
+new-record admission. Legacy `read_artifact`/materialization helpers
 remain legacy-manifest APIs; shared iteration/lookups support either artifact.
 
 Actual mixed-file tests exercise selected D/later private E through native share
@@ -1544,5 +1545,114 @@ state-root publication boundaries. Forked faults, fresh reconstruction without a
 signer, provider lock probes, later public/private work, wrong acknowledgements,
 endpoint changes, actual GC and exact acceptance acknowledgement are tested.
 An independent CBOR fixture covers schema 2 alongside unchanged signed courier
-bytes. These APIs still require the native HTTP/CLI exchange and clone consumers;
-local freeze/ack tests alone do not establish a relay acknowledgement or P3.
+bytes. `Sync.Core` supplies the actual HTTP/CLI exchange consumer below. Clone
+remains required; local freeze/ack tests alone do not establish P3 completion.
+
+### P3 native HTTPS exchange and courier catalogue (in progress)
+
+`Yeokcham_v1_sync.Core` aliases `Native_sync`. `run ~root ~remote
+~load_signing_capability` drives the actual `exchange NAME` CLI. It loads existing
+configuration/credentials and authenticated Core state, checks the endpoint pin,
+rescans the relay's bounded publication inventory and orders unknown couriers by
+verified feed dependencies. Hash cursors order a page, not arrivals; a later hash
+can sort earlier, so they are not reused as an arrival high-water mark. A run
+refuses above 100000 couriers. Pages must be increasing, unique and at most 128.
+
+Core manifest, authority/record/title/object inventories and pages are verified
+before following their references. `Package.Core.declared_selected_snapshots`
+checks historical signed metadata and pure reference closure only, returning
+claimed selected accepted targets for transfer priority. It cannot prove their
+actual composition or availability. The client fetches these targets first,
+then the remaining advertised inventory. `Snapshot.Manifest.load_metadata` is a
+canonical declaration reader for this traversal; full `Manifest.load` still
+verifies chunks. Normal package preparation and current admission remain required
+before any public root update. Legacy manifest-1 feeds retain their existing
+receipt consumer; `sync` remains the older family-specific command.
+
+`Transport_http.get ?max_bytes` applies a tighter curl response limit and checks
+size before allocation; publication lists are bounded to 64 KiB. Metadata pages
+use 1 MiB and manifests/couriers 8 MiB limits. Content uses existing V2 verified
+ranges and explicit V1 fallback only when V2 is unavailable. Uploads use existing
+missing-object inventories/resumable sessions. Verified bytes may be staged in
+the existing immutable store; no second mutable store is introduced.
+
+`Package.Core.public_object_ids ~source ~authority ~records` derives the exact
+verified public record/scope/snapshot closure. Download reuse is restricted to
+that closure. A new advertised data hash cannot borrow matching private local
+contents when the relay has not supplied them. Scoped public metadata pages have
+separate namespace verification. Unadmitted data staging may be downloaded again
+after interruption; mere raw-store presence supplies no durable public-provenance
+claim. A real TLS regression omits an advertised blob that already exists in the
+receiver's private capture and verifies unavailable receipt, unchanged root/files/
+history and no subsequent private-blob upload. Raw `Local.receive_records` callers
+must independently establish delivered public closure; that low-level admission
+API alone does not establish object provenance.
+
+`Core_receive.receive_publication ~root ~remote ~endpoint ~cursor ~publication
+~package` verifies courier/manifest binding, active unknown publishers and feed
+references, then atomically publishes the public pool, merged authority and
+courier provenance. Known verified couriers remain historical facts. Existing
+private history, positions, working files and operations are preserved. An exact
+repeat is unchanged. The same root update retains signed courier bytes, exact
+manifest and remote/endpoint through `Transport.Core_inbox`. This catalogue also
+retains locally issued couriers once actually acknowledged, so preparing a new
+outgoing batch cannot erase earlier exact coverage evidence.
+
+When catalogue rows exist, private transport schema 3 is canonical:
+
+```text
+[3, legacy_remote_rows, frozen_core_rows, verified_courier_rows]
+verified_courier_row = [remote_name, endpoint_sha256_hex,
+                        manifest_bytes, signed_courier_bytes]
+```
+
+Catalogue rows sort by remote then courier ID, are unique, and retain verified
+feed references. At most 100000 rows and the existing 16 MiB total control bound
+apply; control byte strings retain 8 MiB limits. Endpoint mismatches, replacement/
+erasure of retained rows and missing courier references refuse. Schema 3 without
+catalogue rows is noncanonical; states without them retain schema 1/2 encoding.
+No envelope code is allocated. The root writer applies both inbox and outbox
+update guards. Independent Python vectors cover pending schema 2 and acknowledged
+schema 3 using the unchanged historical signed courier fixture.
+
+`Core_receive.public_titles[_for_loaded]` returns revision/title/courier/remote
+provenance. These are courier display labels, not author-signed record fields.
+Outgoing manifests forward only unambiguous labels; conflicting labels fall back
+to stable identities. Contextual integration choices use retained labels when
+unambiguous. `Core_outbound.acknowledged_records_for_loaded` derives exact per-remote
+record coverage from retained acknowledged manifests, including earlier batches
+while later work is pending. `local_status.status_transfers` reports the result;
+CLI publication rows expose acknowledged remotes or explicit unavailable status.
+An integration that reuses an already known acceptance with no staged public
+records reports transfer `not_required`.
+
+`Local.initialize_received ~store ~authority ~records ~selected_branch ~cursor`
+is the clone bootstrap prerequisite: current admission and full composition
+verification, one event/accepted head and a unique empty accepted ancestor. It
+creates only a private empty position, signs no second shared genesis and leaves
+other branches known-only. The caller must initialize matching empty history and
+use verified integration for materialization. The automated peer fixture uses
+this API; ordinary clone remains unimplemented.
+
+`Native_sync.report` contains received records/branches/publications, legacy
+receipt count, known shared-record count and actual selected branch/basis/cursor.
+Upload is `No_outgoing`, exact `Acknowledged` (courier, manifest, offered-object
+count, reused flag), or `Pending` with an actionable error. Offered objects include
+already-present missing-inventory hits, so the count is not claimed as newly
+uploaded objects. JSON schema 2 distinguishes verified local closure, checked
+relay inventory, unknown remote disclosure, foreground execution and outgoing
+facts. A post-receive send failure returns incomplete JSON/exit 5; receipt does
+not roll back. `For_test` exposes actual offered-object, sent-manifest, sent-courier
+and recorded-acknowledgement boundaries. Lost acknowledgement testing stops after
+the real HTTPS courier PUT and resumes the same signed identity in a fresh CLI
+without a signer.
+
+The controlled TLS journey uses separately enrolled Alice/Bob replicas and fresh
+JSON/plain CLI processes for selected mixed-file sharing, exact courier retry,
+receipt without files/history movement, D acceptance/private E preservation and
+accepted-history exchange. It checks actual relay object bytes for both private
+sentinels. Signers are disposable explicit test capabilities. Bob is initialized
+through the library, so this is native exchange evidence, not clone, native
+custody onboarding, human usability, broad performance qualification or complete
+P3 acceptance. Native clone, first selection of known-only branches, resolutions,
+missing-content inspection and the full criterion/fault audit remain required.

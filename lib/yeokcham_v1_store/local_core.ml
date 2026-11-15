@@ -1169,39 +1169,91 @@ let receive_records ~store ~authority ~records state =
   in
   Ok { state with pool; records = Ids.bindings combined }
 
-let[@warning "-4"] initialize_received ~store ~authority ~records ~selected_branch ~cursor =
-  if cursor < 0L then Error (Receive_invalid "negative initial private history cursor")
+let[@warning "-4"] initialize_received ~store ~authority ~records
+    ~selected_branch ~cursor =
+  if cursor < 0L then
+    Error (Receive_invalid "negative initial private history cursor")
   else
-    let* repository = repository authority |> Result.map_error (fun s -> Receive_invalid s) in
-    let* tree, snapshot, empty = canonical_empty () |> Result.map_error (fun s -> Receive_invalid s) in
-    let* _ = Snapshot.Tree.store store tree |> Result.map_error (fun e -> Receive_invalid (Snapshot.error_to_string e)) in
-    let* _ = Snapshot.Snapshot.store store snapshot |> Result.map_error (fun e -> Receive_invalid (Snapshot.error_to_string e)) in
-    let state = { pool = Core.empty_pool ~repository; records = []; empty;
-                  selected_branch; positions = []; publications = []; publication_root = None;
-                  operations = []; operation_root = None } in
+    let* repository =
+      repository authority |> Result.map_error (fun s -> Receive_invalid s)
+    in
+    let* tree, snapshot, empty =
+      canonical_empty () |> Result.map_error (fun s -> Receive_invalid s)
+    in
+    let* _ =
+      Snapshot.Tree.store store tree
+      |> Result.map_error (fun e ->
+          Receive_invalid (Snapshot.error_to_string e))
+    in
+    let* _ =
+      Snapshot.Snapshot.store store snapshot
+      |> Result.map_error (fun e ->
+          Receive_invalid (Snapshot.error_to_string e))
+    in
+    let state =
+      {
+        pool = Core.empty_pool ~repository;
+        records = [];
+        empty;
+        selected_branch;
+        positions = [];
+        publications = [];
+        publication_root = None;
+        operations = [];
+        operation_root = None;
+      }
+    in
     let* state = receive_records ~store ~authority ~records state in
-    let* branch = List.find_opt (fun branch -> Core.Branch_id.equal branch.Core.branch_id selected_branch)
-        (branches state) |> Option.to_result ~none:(Receive_invalid "selected received branch is unknown") in
-    if List.length branch.Core.event_heads <> 1 || List.length branch.Core.accepted_heads <> 1 then
-      Error (Receive_invalid "selected received branch has incomparable heads; choose or reconcile them before clone")
+    let* branch =
+      List.find_opt
+        (fun branch ->
+          Core.Branch_id.equal branch.Core.branch_id selected_branch)
+        (branches state)
+      |> Option.to_result
+           ~none:(Receive_invalid "selected received branch is unknown")
+    in
+    if
+      List.length branch.Core.event_heads <> 1
+      || List.length branch.Core.accepted_heads <> 1
+    then
+      Error
+        (Receive_invalid
+           "selected received branch has incomparable heads; choose or \
+            reconcile them before clone")
     else
       let visited = Hashtbl.create 32 in
       let rec ancestors roots = function
         | [] -> Ok roots
         | id :: rest when Hashtbl.mem visited id -> ancestors roots rest
-        | id :: rest ->
+        | id :: rest -> (
             Hashtbl.add visited id ();
-            (match Core.find state.pool id with
-             | Some { Core.payload = Core.Accepted_version version; _ } ->
-                 let roots = if version.Core.accepted_parents = []
-                     && Core.Object_id.equal version.Core.result_snapshot empty
-                   then id :: roots else roots in
-                 ancestors roots (version.Core.accepted_parents @ rest)
-             | _ -> Error (Receive_invalid "received branch has a malformed accepted ancestry")) in
+            match Core.find state.pool id with
+            | Some { Core.payload = Core.Accepted_version version; _ } ->
+                let roots =
+                  if
+                    version.Core.accepted_parents = []
+                    && Core.Object_id.equal version.Core.result_snapshot empty
+                  then id :: roots
+                  else roots
+                in
+                ancestors roots (version.Core.accepted_parents @ rest)
+            | _ ->
+                Error
+                  (Receive_invalid
+                     "received branch has a malformed accepted ancestry"))
+      in
       let* roots = ancestors [] branch.Core.accepted_heads in
       match List.sort_uniq Core.Record_id.compare roots with
-      | [ basis ] -> Ok { state with positions = [ { branch = selected_branch; cursor; basis } ] }
-      | _ -> Error (Receive_invalid "received branch has no unique verified empty accepted ancestor")
+      | [ basis ] ->
+          Ok
+            {
+              state with
+              positions = [ { branch = selected_branch; cursor; basis } ];
+            }
+      | _ ->
+          Error
+            (Receive_invalid
+               "received branch has no unique verified empty accepted ancestor")
 
 module For_test = struct
   let create_branch = create_branch_using

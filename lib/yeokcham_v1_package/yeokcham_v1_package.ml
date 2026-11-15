@@ -1523,16 +1523,30 @@ module Core = struct
 
   let public_titles = load_titles
 
-  let[@warning "-4"] declared_selected_snapshots store manifest ~known_authority =
+  let[@warning "-4"] declared_selected_snapshots store manifest ~known_authority
+      =
     let* authority = load_authority store manifest known_authority in
     let* records = record_rows store manifest in
-    let* pool = verify_record_metadata store authority manifest.repository records in
-    let* branch = List.find_opt (fun branch -> M.Branch_id.equal
-        branch.M.branch_id manifest.selected_branch) (M.branch_states pool)
-      |> Option.to_result ~none:(Invalid_package "selected public branch is unknown") in
-    traverse (fun id -> match M.find pool id with
-        | Some { M.payload = M.Accepted_version version; _ } -> Ok version.M.result_snapshot
-        | _ -> Error (Invalid_package "selected public accepted head is unavailable")) branch.M.accepted_heads
+    let* pool =
+      verify_record_metadata store authority manifest.repository records
+    in
+    let* branch =
+      List.find_opt
+        (fun branch ->
+          M.Branch_id.equal branch.M.branch_id manifest.selected_branch)
+        (M.branch_states pool)
+      |> Option.to_result
+           ~none:(Invalid_package "selected public branch is unknown")
+    in
+    traverse
+      (fun id ->
+        match M.find pool id with
+        | Some { M.payload = M.Accepted_version version; _ } ->
+            Ok version.M.result_snapshot
+        | _ ->
+            Error
+              (Invalid_package "selected public accepted head is unavailable"))
+      branch.M.accepted_heads
 
   let source_objects source pool records =
     let object_snapshot id =
@@ -1579,6 +1593,22 @@ module Core = struct
     List.exists
       (fun row -> M.Branch_id.equal row.M.branch_id branch)
       (M.branch_states pool)
+
+  let public_object_ids ~source ~authority ~records =
+    let* repository =
+      M.Repository_id.of_hex
+        (Trust.repository (Trust.authority_membership authority)
+        |> Trust.Repository_id.to_string)
+      |> model
+    in
+    let* pool = verify_records source authority repository records in
+    let* objects = source_objects source pool records in
+    traverse
+      (fun hex ->
+        Id.of_hex hex
+        |> Result.map_error (fun _ ->
+            Invalid_package "invalid public closure identity"))
+      (Object_set.elements objects)
 
   let create ~source ~destination ~authority ~records ~selected_branch ~titles =
     let* repository =

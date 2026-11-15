@@ -2,7 +2,12 @@ module Core = Yeokcham_v1_model.Core
 
 type upload =
   | No_outgoing
-  | Acknowledged of { publication : string; manifest : string; objects_offered : int; reused : bool }
+  | Acknowledged of {
+      publication : string;
+      manifest : string;
+      objects_offered : int;
+      reused : bool;
+    }
   | Pending of string
 
 type report = {
@@ -32,9 +37,12 @@ type error =
 val error_to_string : error -> string
 
 val run :
-  root:string -> remote:string ->
-  load_signing_capability:(Yeokcham_v1_model.Device_id.t ->
-    (Yeokcham_v1_trust.signing_capability, string) result) -> (report, error) result
+  root:string ->
+  remote:string ->
+  load_signing_capability:
+    (Yeokcham_v1_model.Device_id.t ->
+    (Yeokcham_v1_trust.signing_capability, string) result) ->
+  (report, error) result
 (** Foreground native exchange. Rescans the bounded relay inventory, verifies
     complete incoming packages and persists receipt without moving files/cursor.
     Publishes a frozen outgoing batch and records its exact acknowledgement.
@@ -49,7 +57,11 @@ type boundary =
 
 module For_test : sig
   val run :
-    observe:(boundary -> unit) -> root:string -> remote:string ->
-    load_signing_capability:(Yeokcham_v1_model.Device_id.t ->
-      (Yeokcham_v1_trust.signing_capability, string) result) -> (report, error) result
+    observe:(boundary -> unit) ->
+    root:string ->
+    remote:string ->
+    load_signing_capability:
+      (Yeokcham_v1_model.Device_id.t ->
+      (Yeokcham_v1_trust.signing_capability, string) result) ->
+    (report, error) result
 end

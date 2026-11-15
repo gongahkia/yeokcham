@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 def encode(value):
+    if value is None:
+        return b"\xf6"
     if isinstance(value, bool):
         return b"\xf5" if value else b"\xf4"
     if isinstance(value, int) and 0 <= value < 24:
@@ -26,6 +28,28 @@ def encode(value):
     raise ValueError("value outside independent fixture subset")
 
 
+def decode_courier(raw, offset=0):
+    tag = raw[offset]
+    offset += 1
+    major, arg = tag >> 5, tag & 31
+    if arg >= 24:
+        width = {24: 1, 25: 2, 26: 4, 27: 8}[arg]
+        arg = int.from_bytes(raw[offset:offset + width], "big")
+        offset += width
+    if major == 0:
+        return arg, offset
+    if major in (2, 3):
+        value = raw[offset:offset + arg]
+        return (value if major == 2 else value.decode("utf-8")), offset + arg
+    if major == 4:
+        values = []
+        for _ in range(arg):
+            value, offset = decode_courier(raw, offset)
+            values.append(value)
+        return values, offset
+    raise ValueError("unexpected independent courier fixture type")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true")
@@ -39,6 +63,15 @@ def main():
     courier = bytes.fromhex((directory.parent / "v1/transport-publication-v1.cbor.hex").read_text().strip())
     vectors["outbound-state.hex"] = encode([2, [], [["origin",
         hashlib.sha256(b"https://relay.invalid").hexdigest(), b"manifest", courier, False]]])
+    decoded, end = decode_courier(courier)
+    fields, signature = decoded
+    assert end == len(courier) and fields[0] == 1 and len(signature) == 64
+    endpoint = hashlib.sha256(b"https://relay.invalid").hexdigest()
+    reference = [hashlib.sha256(courier).hexdigest(), fields[2], fields[3]]
+    remote = ["origin", None, [reference], [hashlib.sha256(b"manifest").hexdigest()], [], []]
+    vectors["courier-state.hex"] = encode([3, [remote],
+        [["origin", endpoint, b"manifest", courier, True]],
+        [["origin", endpoint, b"manifest", courier]]])
     for name, value in vectors.items():
         path = directory / name
         expected = value.hex() + "\n"
@@ -47,7 +80,7 @@ def main():
             path.write_text(expected)
         elif path.read_text() != expected:
             raise SystemExit("Core public-package fixture differs: " + name)
-    print("independent Core public-package/hash/outbound vectors verified (4)")
+    print("independent Core public-package/hash/courier vectors verified (5)")
 
 
 if __name__ == "__main__":

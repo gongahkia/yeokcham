@@ -902,6 +902,111 @@ let native_hash_stream_offsets_and_context_forks () =
 let endpoint = Transport.sha256 "https://relay.invalid"
 let outbound result = ok Outbound.error_to_string result
 
+let native_courier_receipt_keeps_provenance_atomic_and_monotonic () =
+  List.iter
+    (fun boundary ->
+      temporary (fun parent ->
+          let root, repository, capability, authority, before, directory, _ =
+            receipt_fixture parent
+          in
+          let publisher =
+            T.device_of_public_key (T.signing_public_key capability)
+            |> ok T.error_to_string
+          in
+          let manifest = read (directory ^ "/manifest.cbor") in
+          let courier =
+            Transport.create_publication
+              ~repository:(T.repository (T.authority_membership authority))
+              ~publisher
+              ~certificate:
+                (S.local_certificate (Option.get before.S.collaboration))
+              ~parents:[]
+              ~manifest:(Transport.sha256 manifest)
+              ~signing_capability:capability
+            |> ok Transport.error_to_string
+          in
+          let receive () =
+            Service.Core_receive.receive_publication ~root ~remote:"origin"
+              ~endpoint ~cursor:None ~publication:courier ~package:directory
+            |> ok Service.Core_receive.error_to_string
+          in
+          let child = Unix.fork () in
+          if child = 0 then (
+            Service.Core_receive.For_test.receive_publication ~root
+              ~remote:"origin" ~endpoint ~cursor:None ~publication:courier
+              ~package:directory ~observe:(fun event ->
+                if event = boundary then Unix._exit 73)
+            |> ignore;
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "interrupted at actual receipt/root boundary" true
+            (status = Unix.WEXITED 73);
+          let partial = load repository in
+          let incoming loaded =
+            Transport.Core_inbox.receipts
+              (S.transport (Option.get loaded.S.collaboration))
+          in
+          let after = boundary = Service.Core_receive.After_metadata_publish in
+          Alcotest.(check int)
+            "courier evidence and public records publish together"
+            (if after then 1 else 0)
+            (List.length (incoming partial));
+          Alcotest.(check int)
+            "one complete record set at each side of CAS"
+            (if after then 6 else 4)
+            (List.length (L.record_objects (local partial)));
+          receive () |> ignore;
+          let completed = load repository in
+          let receipt = List.hd (incoming completed) in
+          Alcotest.(check string)
+            "exact public manifest provenance retained" manifest
+            (Transport.Core_inbox.manifest receipt);
+          Alcotest.(check string)
+            "exact verified courier retained"
+            (Transport.publication_id courier)
+            (Transport.publication_id
+               (Transport.Core_inbox.publication receipt));
+          Alcotest.(check bool)
+            "identical full receipt reports unchanged" true
+            (receive ()).Service.Core_receive.unchanged;
+          Alcotest.(check bool)
+            "identical receipt publishes no additional root" true
+            (Raw.Mutable_ref.equal completed.S.head (load repository).S.head);
+          let collaboration = Option.get completed.S.collaboration in
+          let erased =
+            S.collaboration_with_authority_transport ~authority
+              ~transport:Transport.empty_local_state
+              ~revisions:(S.signed_revisions collaboration)
+              ~local_certificate:(S.local_certificate collaboration)
+              ~authorizations:(S.authorizations collaboration)
+              ~adoptions:(S.adoptions collaboration)
+            |> ok S.error_to_string
+          in
+          reject
+            (S.save_collaborative ~local:(local completed) repository
+               ~expected:completed.S.head ~project:completed.S.project
+               ~collaboration:erased);
+          reject
+            (Service.Core_receive.receive_publication ~root ~remote:"origin"
+               ~endpoint:(Transport.sha256 "different endpoint")
+               ~cursor:None ~publication:courier ~package:directory);
+          Alcotest.(check bool)
+            "invalid updates preserve committed receipt" true
+            (Raw.Mutable_ref.equal completed.S.head (load repository).S.head);
+          Alcotest.(check string)
+            "receipt never captures/navigation private history"
+            (Yeokcham_v1_undo.encode before.S.history |> ok Fun.id)
+            (Yeokcham_v1_undo.encode completed.S.history |> ok Fun.id);
+          Alcotest.(check string)
+            "receipt preserves unsaved private bytes"
+            "UNSAVED RECEIVER PRIVATE WORK"
+            (read (root ^ "/private.txt"))))
+    [
+      Service.Core_receive.Before_metadata_publish;
+      Service.Core_receive.After_metadata_publish;
+    ]
+
 let frozen repository =
   let loaded = load repository in
   Outbox.find
@@ -1011,6 +1116,36 @@ let[@warning "-4"] native_outbound_freezes_retries_and_preserves_later_work () =
             "ack retry publishes no root" true
             (Raw.Mutable_ref.equal acked.S.head (load repository).S.head);
           let next = prepare_outbound root (Some capability) |> Option.get in
+          let status, json = cli root [ "status"; "--format"; "json" ] in
+          Alcotest.(check bool)
+            "status inspects retained acknowledgement coverage" true
+            (status = Unix.WEXITED 0);
+          let open Yojson.Safe.Util in
+          let rows =
+            Yojson.Safe.from_string json
+            |> member "data"
+            |> member "local_publications"
+            |> to_list
+          in
+          let transfer revision =
+            List.find
+              (fun row ->
+                member "revision_id" row = `String (C.Record_id.to_hex revision))
+              rows
+          in
+          Alcotest.(check bool)
+            "preparing new work retains earlier transfer acknowledgement" true
+            (member "transfer_state"
+               (transfer (Option.get shared.Service.Share.revision))
+            = `String "acknowledged");
+          Alcotest.(check bool)
+            "status exposes the acknowledging remote" true
+            (member "acknowledged_remotes"
+               (transfer (Option.get shared.Service.Share.revision))
+            = `List [ `String "origin" ]);
+          Alcotest.(check bool)
+            "new revision remains pending while its batch is frozen" true
+            (member "transfer_state" (transfer later_id) = `String "pending");
           Alcotest.(check bool)
             "later public work creates a different batch" true
             (Outbox.manifest next.Outbound.batch <> snapshot);
@@ -1238,6 +1373,9 @@ let () =
     [
       ( "public",
         [
+          Alcotest.test_case
+            "native courier receipt publishes provenance atomically" `Quick
+            native_courier_receipt_keeps_provenance_atomic_and_monotonic;
           Alcotest.test_case
             "outbound exact retries preserve later private/public work" `Quick
             native_outbound_freezes_retries_and_preserves_later_work;

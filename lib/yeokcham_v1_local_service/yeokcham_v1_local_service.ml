@@ -4946,6 +4946,8 @@ type local_status = {
   status_shared_revisions :
     (Model.Core.Record_id.t * Model.Core.shared_revision) list;
   status_publications : Store.Local.publication list;
+  status_transfers :
+    ((Model.Core.Record_id.t * string list) list, string) result;
   status_integrations : Store.Local.Operation.t list;
   status_branch : branch_listing option;
   status_cursor : state_view;
@@ -5226,6 +5228,14 @@ let[@warning "-4"] inspect_local_status ~root =
               (match loaded.Store.local with
               | None -> []
               | Some local -> Store.Local.publications local);
+            status_transfers =
+              (match loaded.Store.local with
+              | None -> Ok []
+              | Some _ ->
+                  Core_outbound.acknowledged_records_for_loaded
+                    ~store:(Store.underlying_store repository)
+                    ~loaded
+                  |> Result.map_error Core_outbound.error_to_string);
             status_integrations =
               (match loaded.Store.local with
               | None -> []

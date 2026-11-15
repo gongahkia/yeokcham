@@ -31,11 +31,54 @@ or saved state change while the provider is active, sharing refuses and asks for
 a fresh preview/retry instead of publishing the older capture.
 
 Status shows native revision identities, the private working basis and local
-publication receipts separately from accepted heads. At this checkpoint transfer
-is pending: the legacy package/relay journeys below carry the earlier V1 record
-family and do not yet export these new Core records. Native clone/exchange and
-complete conflict journeys remain required before P3 is complete. Do not substitute
-the old package commands for verification of the new selected-publication loop.
+publication receipts separately from accepted heads. Transfer remains pending
+until an exact native courier is acknowledged by a configured relay. Status lists
+the acknowledging remotes and preserves those facts when newer work is pending.
+The legacy package journeys below carry the earlier V1 record family. Native
+clone and complete conflict journeys remain required before P3 is complete.
+
+## Foreground native exchange (P3 in progress)
+
+For an existing authenticated Core workspace with an already enrolled member and
+device, configure the relay and exchange explicitly:
+
+```sh
+yeokcham remote add team https://YOUR_RELAY
+yeokcham remote login team
+yeokcham exchange team --format json
+yeokcham exchange team
+```
+
+Remote login uses the existing credential adapter. A relay bearer token grants
+byte-storage access; membership still requires the verified repository authority.
+The sender signs a courier with its enrolled local device. A pending frozen
+courier can resume without another signature. The repository identity and known
+authority root remain pinned throughout receipt.
+
+Exchange receives complete verified shared packages first, without scanning or
+rewriting working files, moving private history, integrating, or running project
+commands. It prioritizes declared selected contents, then verifies all advertised
+closure. Missing contents refuse receipt before publishing that package. Existing
+verified public contents may be reused; matching private cached bytes alone do
+not satisfy an incoming advertisement. The relay must supply new contents.
+
+Outgoing work freezes exact public manifest/courier bytes before network writes.
+Retrying after interruption or a lost acknowledgement resends the same courier;
+later work stays available for a later batch. Transfers use existing bounded V2
+missing-object/range mechanisms, with explicit V1 fallback when V2 is unavailable.
+Receiving succeeds independently of a later outgoing failure: JSON reports an
+incomplete outcome and exit 5 with retry instructions when sending remains pending.
+
+Coverage describes verified locally known shared closure and the relay inventory
+checked in that foreground run. It cannot prove the relay disclosed every remote
+record. No managed background downloads or backup success is claimed. The client
+rescans the bounded relay inventory because its hash-order cursor is not an
+arrival high-water mark.
+
+Ordinary clone is still unfinished. Automated TLS tests create Bob's empty,
+already enrolled replica through the library, then run fresh CLI sharing,
+exchange and integration processes. That setup is not a supported clone command,
+native custody onboarding, or human-usability evidence.
 
 ## Local shared acceptance (P3 in progress)
 

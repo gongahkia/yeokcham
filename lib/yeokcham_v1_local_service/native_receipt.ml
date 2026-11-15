@@ -29,7 +29,9 @@ let store result = Result.map_error (fun error -> Store_error error) result
 let trust result = Result.map_error (fun error -> Trust_error error) result
 let metadata result = Result.map_error (fun message -> Metadata message) result
 let package result = Result.map_error (fun error -> Package_error error) result
-let transport result = Result.map_error (fun error -> Transport_error error) result
+
+let transport result =
+  Result.map_error (fun error -> Transport_error error) result
 
 type outcome = {
   records_added : int;
@@ -135,22 +137,46 @@ let receive_with ~observe ~arrival ~root ~package:directory =
         | None -> Ok (Store.transport collaboration)
         | Some arrival ->
             let state = Store.transport collaboration in
-            let manifest = Package.artifact_manifest (Package.Core.prepared_artifact prepared) in
-            let* () =
-              if Transport.sha256 manifest = Transport.publication_manifest arrival.publication then Ok ()
-              else Error (Metadata "Core courier does not name the verified package manifest")
+            let manifest =
+              Package.artifact_manifest
+                (Package.Core.prepared_artifact prepared)
             in
-            let known = Option.fold ~none:[] ~some:Transport.remote_known_publications
-                (Transport.find_remote state ~name:arrival.remote) in
-            let already_known = List.exists (fun reference ->
-                Transport.reference_id reference = Transport.publication_id arrival.publication
-                && Transport.reference_certificate reference = Transport.publication_certificate arrival.publication
-                && Yeokcham_v1_model.Device_id.equal (Transport.reference_publisher reference)
-                    (Transport.publication_publisher arrival.publication)) known in
-            let* () = if already_known then Ok () else
-                Transport.verify_publication ~authority arrival.publication |> transport in
-            Transport.Core_inbox.receive state ~remote:arrival.remote ~endpoint:arrival.endpoint
-              ~cursor:arrival.cursor ~manifest ~publication:arrival.publication |> transport
+            let* () =
+              if
+                Transport.sha256 manifest
+                = Transport.publication_manifest arrival.publication
+              then Ok ()
+              else
+                Error
+                  (Metadata
+                     "Core courier does not name the verified package manifest")
+            in
+            let known =
+              Option.fold ~none:[] ~some:Transport.remote_known_publications
+                (Transport.find_remote state ~name:arrival.remote)
+            in
+            let already_known =
+              List.exists
+                (fun reference ->
+                  Transport.reference_id reference
+                  = Transport.publication_id arrival.publication
+                  && Transport.reference_certificate reference
+                     = Transport.publication_certificate arrival.publication
+                  && Yeokcham_v1_model.Device_id.equal
+                       (Transport.reference_publisher reference)
+                       (Transport.publication_publisher arrival.publication))
+                known
+            in
+            let* () =
+              if already_known then Ok ()
+              else
+                Transport.verify_publication ~authority arrival.publication
+                |> transport
+            in
+            Transport.Core_inbox.receive state ~remote:arrival.remote
+              ~endpoint:arrival.endpoint ~cursor:arrival.cursor ~manifest
+              ~publication:arrival.publication
+            |> transport
       in
       let* local =
         Store.Local.receive_records
@@ -162,8 +188,13 @@ let receive_with ~observe ~arrival ~root ~package:directory =
       in
       let* encoded = Store.Local.encode local |> metadata in
       let* previous_encoded = Store.Local.encode previous |> metadata in
-      let* transport_bytes = Transport.encode_local_state transport_state |> transport in
-      let* previous_transport = Transport.encode_local_state (Store.transport collaboration) |> transport in
+      let* transport_bytes =
+        Transport.encode_local_state transport_state |> transport
+      in
+      let* previous_transport =
+        Transport.encode_local_state (Store.transport collaboration)
+        |> transport
+      in
       let changed =
         encoded <> previous_encoded
         || authority_ids known <> authority_ids authority
@@ -174,8 +205,7 @@ let receive_with ~observe ~arrival ~root ~package:directory =
         else
           let* collaboration =
             Store.collaboration_with_authority_transport
-              ~transport:transport_state
-              ~authority
+              ~transport:transport_state ~authority
               ~revisions:(Store.signed_revisions collaboration)
               ~local_certificate:(Store.local_certificate collaboration)
               ~authorizations:(Store.authorizations collaboration)
@@ -213,14 +243,64 @@ let receive_with ~observe ~arrival ~root ~package:directory =
           state_head = saved.Store.object_id;
         })
 
-let receive ~root ~package = receive_with ~observe:(fun _ -> ()) ~arrival:None ~root ~package
+let receive ~root ~package =
+  receive_with ~observe:(fun _ -> ()) ~arrival:None ~root ~package
 
-let receive_publication_with ~observe ~root ~remote ~endpoint ~cursor ~publication ~package =
-  receive_with ~observe ~arrival:(Some { remote; endpoint; cursor; publication }) ~root ~package
+let receive_publication_with ~observe ~root ~remote ~endpoint ~cursor
+    ~publication ~package =
+  receive_with ~observe
+    ~arrival:(Some { remote; endpoint; cursor; publication })
+    ~root ~package
 
 let receive_publication = receive_publication_with ~observe:(fun _ -> ())
 
+type public_title = {
+  revision : Core.Record_id.t;
+  title : string;
+  courier : string;
+  remote : string;
+}
+
+let public_titles_for_loaded ~store:source ~loaded =
+  let* local, collaboration, _ = context loaded in
+  let repository = Core.pool_repository (Store.Local.pool local) in
+  List.fold_left
+    (fun result receipt ->
+      let* titles = result in
+      let* manifest =
+        Package.Core.decode_manifest ~repository
+          (Transport.Core_inbox.manifest receipt)
+        |> package
+      in
+      let* labels =
+        Package.Core.public_titles source manifest (Store.Local.pool local)
+        |> package
+      in
+      let courier =
+        Transport.publication_id (Transport.Core_inbox.publication receipt)
+      in
+      Ok
+        (List.fold_left
+           (fun titles (revision, title) ->
+             {
+               revision;
+               title;
+               courier;
+               remote = Transport.Core_inbox.remote receipt;
+             }
+             :: titles)
+           titles labels))
+    (Ok [])
+    (Transport.Core_inbox.receipts (Store.transport collaboration))
+
+let public_titles ~root =
+  let* repository = Store.open_repository ~root |> store in
+  let* loaded = Store.load repository |> store in
+  public_titles_for_loaded ~store:(Store.underlying_store repository) ~loaded
+
 module For_test = struct
-  let receive ~observe ~root ~package = receive_with ~observe ~arrival:None ~root ~package
+  let receive ~observe ~root ~package =
+    receive_with ~observe ~arrival:None ~root ~package
+
   let receive_publication = receive_publication_with
 end

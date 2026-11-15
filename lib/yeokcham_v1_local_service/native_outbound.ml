@@ -19,7 +19,9 @@ let error_to_string = function
   | Package_error error -> Package.error_to_string error
   | Store_error error -> Store.error_to_string error
   | Transport_error error -> Transport.error_to_string error
-  | Signer_required -> "a new Core courier requires the enrolled local signer; a frozen pending batch can resume without it"
+  | Signer_required ->
+      "a new Core courier requires the enrolled local signer; a frozen pending \
+       batch can resume without it"
   | Metadata message -> message
 
 let ( let* ) = Result.bind
@@ -141,6 +143,105 @@ let temporary_artifact ~root create =
 let pending state ~remote ~endpoint =
   Outbox.find state ~remote ~endpoint |> transport
 
+module Record_map = Map.Make (struct
+  type t = Core.Record_id.t
+
+  let compare = Core.Record_id.compare
+end)
+
+let public_titles source loaded local =
+  let* received =
+    Native_receipt.public_titles_for_loaded ~store:source ~loaded
+    |> Result.map_error (fun e -> Metadata (Native_receipt.error_to_string e))
+  in
+  let values =
+    List.map
+      (fun row -> (row.Native_receipt.revision, row.Native_receipt.title))
+      received
+    @ List.map
+        (fun row -> (row.Local.revision, row.Local.title))
+        (Local.publications local)
+  in
+  let labels =
+    List.fold_left
+      (fun labels (id, title) ->
+        Record_map.update id
+          (function
+            | None -> Some [ title ]
+            | Some values ->
+                Some (List.sort_uniq String.compare (title :: values)))
+          labels)
+      Record_map.empty values
+  in
+  Ok
+    (Record_map.bindings labels
+    |> List.filter_map (function
+      | id, [ title ] -> Some (id, title)
+      | _ -> None))
+
+let acknowledged_records_for_loaded ~store:source ~loaded =
+  let* local, collaboration, _ = context loaded in
+  let state = Store.transport collaboration in
+  let manifests =
+    List.map
+      (fun receipt ->
+        ( Transport.Core_inbox.remote receipt,
+          Transport.Core_inbox.manifest receipt ))
+      (Transport.Core_inbox.receipts state)
+    @ (Outbox.batches state
+      |> List.filter Outbox.acknowledged
+      |> List.map (fun batch -> (Outbox.remote batch, Outbox.manifest batch)))
+    |> List.sort_uniq compare
+  in
+  let* covered =
+    List.fold_left
+      (fun result (remote, bytes) ->
+        let* covered = result in
+        let acknowledged =
+          Option.exists
+            (fun row ->
+              List.mem (Transport.sha256 bytes)
+                (Transport.remote_announced_manifests row))
+            (Transport.find_remote state ~name:remote)
+        in
+        if not acknowledged then Ok covered
+        else
+          let* manifest =
+            Package.Core.decode_manifest
+              ~repository:(Core.pool_repository (Local.pool local))
+              bytes
+            |> package
+          in
+          let* records =
+            Package.Core.record_inventory source manifest |> package
+          in
+          let* () =
+            if
+              List.for_all
+                (fun row -> List.mem row (Local.record_objects local))
+                records
+            then Ok ()
+            else
+              Error
+                (Metadata
+                   "acknowledged Core inventory differs from retained public \
+                    records")
+          in
+          Ok
+            (List.fold_left
+               (fun covered (id, _) ->
+                 Record_map.update id
+                   (function
+                     | None -> Some [ remote ]
+                     | Some remotes ->
+                         Some
+                           (List.sort_uniq String.compare (remote :: remotes)))
+                   covered)
+               covered records))
+      (Ok Record_map.empty) manifests
+  in
+  Ok (Record_map.bindings covered)
+
 let prepare_with ~observe ~root ~remote ~endpoint ~signing_capability =
   let* repository = Store.open_repository ~root |> store in
   let* initial = with_writer root (fun () -> Store.load repository |> store) in
@@ -163,15 +264,12 @@ let prepare_with ~observe ~root ~remote ~endpoint ~signing_capability =
       in
       Ok (Some { batch; artifact; reused = true })
   | None | Some _ ->
+      let* titles = public_titles source initial local in
       let* artifact =
         temporary_artifact ~root (fun destination ->
             Package.Core.create ~source ~destination ~authority
               ~records:(Local.record_objects local)
-              ~selected_branch:(Local.selected local).Local.branch
-              ~titles:
-                (List.map
-                   (fun row -> (row.Local.revision, row.Local.title))
-                   (Local.publications local))
+              ~selected_branch:(Local.selected local).Local.branch ~titles
             |> package)
       in
       let keep = ref false in
@@ -186,9 +284,7 @@ let prepare_with ~observe ~root ~remote ~endpoint ~signing_capability =
           then Ok None
           else
             let* signing_capability =
-              signing_capability
-              |> Option.to_result
-                   ~none:Signer_required
+              signing_capability |> Option.to_result ~none:Signer_required
             in
             let* publisher = local_device collaboration authority in
             let certificate = Store.local_certificate collaboration in

@@ -103,6 +103,7 @@ module Manifest : sig
     (id, error) result
 
   val store_bytes : Yeokcham_store.repository -> string -> (id, error) result
+
   val load_metadata : Yeokcham_store.repository -> id -> (t, error) result
   (** Canonical manifest declarations only; does not verify/fetch its chunks. *)
 

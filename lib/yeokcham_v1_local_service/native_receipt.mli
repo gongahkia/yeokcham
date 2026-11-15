@@ -28,12 +28,33 @@ val receive : root:string -> package:string -> (outcome, error) result
     shared branches receive no fabricated private working positions. *)
 
 val receive_publication :
-  root:string -> remote:string -> endpoint:string -> cursor:string option ->
-  publication:Yeokcham_v1_transport.publication -> package:string -> (outcome, error) result
+  root:string ->
+  remote:string ->
+  endpoint:string ->
+  cursor:string option ->
+  publication:Yeokcham_v1_transport.publication ->
+  package:string ->
+  (outcome, error) result
 (** Same admission boundary, atomically retaining verified courier/manifest
-    provenance and feed references. No transfer acknowledgement or integration. *)
+    provenance and feed references. No transfer acknowledgement or integration.
+*)
 
 type boundary = Before_metadata_publish | After_metadata_publish
+
+type public_title = {
+  revision : Core.Record_id.t;
+  title : string;
+  courier : string;
+  remote : string;
+}
+
+val public_titles_for_loaded :
+  store:Yeokcham_store.repository ->
+  loaded:Yeokcham_v1_store.loaded ->
+  (public_title list, error) result
+
+val public_titles : root:string -> (public_title list, error) result
+(** Courier labels with exact provenance, not author-signed record fields. *)
 
 module For_test : sig
   val receive :
@@ -43,7 +64,12 @@ module For_test : sig
     (outcome, error) result
 
   val receive_publication :
-    observe:(boundary -> unit) -> root:string -> remote:string -> endpoint:string ->
-    cursor:string option -> publication:Yeokcham_v1_transport.publication ->
-    package:string -> (outcome, error) result
+    observe:(boundary -> unit) ->
+    root:string ->
+    remote:string ->
+    endpoint:string ->
+    cursor:string option ->
+    publication:Yeokcham_v1_transport.publication ->
+    package:string ->
+    (outcome, error) result
 end

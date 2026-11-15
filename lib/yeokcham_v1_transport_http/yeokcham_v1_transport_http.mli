@@ -22,8 +22,14 @@ val error_to_string : error -> string
 val create : url:string -> token:string -> (client, error) result
 
 val get :
-  ?max_bytes:int -> client -> project:string -> kind:kind -> id:string -> (string, error) result
-(** Optional tighter limit is enforced by curl and before response allocation. *)
+  ?max_bytes:int ->
+  client ->
+  project:string ->
+  kind:kind ->
+  id:string ->
+  (string, error) result
+(** Optional tighter limit is enforced by curl and before response allocation.
+*)
 
 val put :
   client ->

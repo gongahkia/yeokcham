@@ -1182,7 +1182,9 @@ let remote_state ~name ~cursor ~known ~announced_manifests ~announced_revisions
       remote_review_inbox_value = review_inbox;
     }
 
-let empty_local_state = { local_remotes = []; local_core_outbound = []; local_core_incoming = [] }
+let empty_local_state =
+  { local_remotes = []; local_core_outbound = []; local_core_incoming = [] }
+
 let remote_name remote = remote.remote_name_value
 let remote_cursor remote = remote.remote_cursor_value
 let remote_known_publications remote = remote.remote_known_publications_value
@@ -1283,46 +1285,107 @@ let core_courier_known state ~remote ~publication =
   | None -> false
   | Some remote ->
       List.exists
-           (fun reference ->
-             reference_id reference = publication_id publication
-             && Model.Device_id.equal
-                  (reference_publisher reference)
-                  (publication_publisher publication)
-             && reference_certificate reference
-                = publication_certificate publication)
-           (remote_known_publications remote)
+        (fun reference ->
+          reference_id reference = publication_id publication
+          && Model.Device_id.equal
+               (reference_publisher reference)
+               (publication_publisher publication)
+          && reference_certificate reference
+             = publication_certificate publication)
+        (remote_known_publications remote)
 
 let core_acknowledgement_present state row =
-  core_courier_known state ~remote:row.core_remote ~publication:row.core_publication
-  && Option.exists (fun remote -> List.mem (publication_manifest row.core_publication)
-      (remote_announced_manifests remote)) (find_remote state ~name:row.core_remote)
+  core_courier_known state ~remote:row.core_remote
+    ~publication:row.core_publication
+  && Option.exists
+       (fun remote ->
+         List.mem
+           (publication_manifest row.core_publication)
+           (remote_announced_manifests remote))
+       (find_remote state ~name:row.core_remote)
 
 let check_core_endpoint state ~remote ~endpoint =
   let* () = validate_remote_name remote in
   let* () = check_digest endpoint in
-  if List.exists (fun row -> row.core_remote = remote && row.core_endpoint <> endpoint) state.local_core_outbound
-     || List.exists (fun row -> row.incoming_remote = remote && row.incoming_endpoint <> endpoint) state.local_core_incoming then
-    Error (Invalid_publication "Core remote endpoint changed; preserve its transfer records and configure a distinct remote name")
+  if
+    List.exists
+      (fun row -> row.core_remote = remote && row.core_endpoint <> endpoint)
+      state.local_core_outbound
+    || List.exists
+         (fun row ->
+           row.incoming_remote = remote && row.incoming_endpoint <> endpoint)
+         state.local_core_incoming
+  then
+    Error
+      (Invalid_publication
+         "Core remote endpoint changed; preserve its transfer records and \
+          configure a distinct remote name")
   else Ok ()
 
 let compare_core_incoming a b =
   let remote = String.compare a.incoming_remote b.incoming_remote in
-  if remote <> 0 then remote else String.compare
-      (publication_id a.incoming_publication) (publication_id b.incoming_publication)
+  if remote <> 0 then remote
+  else
+    String.compare
+      (publication_id a.incoming_publication)
+      (publication_id b.incoming_publication)
+
+let retain_core_courier state ~remote ~endpoint ~manifest ~publication =
+  let row =
+    {
+      incoming_remote = remote;
+      incoming_endpoint = endpoint;
+      incoming_manifest = manifest;
+      incoming_publication = publication;
+    }
+  in
+  let existing =
+    List.find_opt
+      (fun previous -> compare_core_incoming previous row = 0)
+      state.local_core_incoming
+  in
+  match existing with
+  | Some previous when previous <> row ->
+      Error (Invalid_publication "Core courier identity collision")
+  | Some _ -> Ok state
+  | None ->
+      Ok
+        {
+          state with
+          local_core_incoming =
+            List.sort compare_core_incoming (row :: state.local_core_incoming);
+        }
 
 let encode_core_incoming row =
   let* remote = text row.incoming_remote in
   let* endpoint = text row.incoming_endpoint in
-  array [ remote; endpoint; Encoding.bytes row.incoming_manifest;
-          Encoding.bytes (encode_publication row.incoming_publication) ]
+  array
+    [
+      remote;
+      endpoint;
+      Encoding.bytes row.incoming_manifest;
+      Encoding.bytes (encode_publication row.incoming_publication);
+    ]
 
 let encode_local_state state =
-  let* () = List.fold_left (fun result row ->
-      let* () = result in
-      let* () = check_core_endpoint state ~remote:row.incoming_remote ~endpoint:row.incoming_endpoint in
-      if core_courier_known state ~remote:row.incoming_remote ~publication:row.incoming_publication then Ok ()
-      else Error (Invalid_publication "Core receipt lacks its verified courier reference"))
-      (Ok ()) state.local_core_incoming in
+  let* () =
+    List.fold_left
+      (fun result row ->
+        let* () = result in
+        let* () =
+          check_core_endpoint state ~remote:row.incoming_remote
+            ~endpoint:row.incoming_endpoint
+        in
+        if
+          core_courier_known state ~remote:row.incoming_remote
+            ~publication:row.incoming_publication
+        then Ok ()
+        else
+          Error
+            (Invalid_publication
+               "Core receipt lacks its verified courier reference"))
+      (Ok ()) state.local_core_incoming
+  in
   let* () =
     if
       List.exists
@@ -1355,11 +1418,17 @@ let encode_local_state state =
           (Ok []) state.local_core_outbound
       in
       let* rows = array (List.rev rows) in
-      if state.local_core_incoming = [] then array [ Encoding.integer 2L; remotes; rows ]
+      if state.local_core_incoming = [] then
+        array [ Encoding.integer 2L; remotes; rows ]
       else
-        let* incoming = List.fold_left (fun result row ->
-            let* values = result in let* value = encode_core_incoming row in Ok (value :: values))
-            (Ok []) state.local_core_incoming in
+        let* incoming =
+          List.fold_left
+            (fun result row ->
+              let* values = result in
+              let* value = encode_core_incoming row in
+              Ok (value :: values))
+            (Ok []) state.local_core_incoming
+        in
         let* incoming = array (List.rev incoming) in
         array [ Encoding.integer 3L; remotes; rows; incoming ]
   in
@@ -1480,8 +1549,13 @@ let decode_core_incoming value =
   let* fields = exact_array "Core incoming receipt" 4 value in
   let* wrapper = array (fields @ [ Encoding.bool false ]) in
   let* row = decode_core_outbound wrapper in
-  Ok { incoming_remote = row.core_remote; incoming_endpoint = row.core_endpoint;
-       incoming_manifest = row.core_manifest; incoming_publication = row.core_publication }
+  Ok
+    {
+      incoming_remote = row.core_remote;
+      incoming_endpoint = row.core_endpoint;
+      incoming_manifest = row.core_manifest;
+      incoming_publication = row.core_publication;
+    }
 
 let[@warning "-4"] decode_local_state bytes =
   let* () =
@@ -1492,15 +1566,25 @@ let[@warning "-4"] decode_local_state bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
   in
-  let* value, core_incoming = match value with
+  let* value, core_incoming =
+    match value with
     | Encoding.Array [ Encoding.Integer 3L; remotes; outgoing; incoming ] ->
         let* rows = array_values "Core incoming receipts" incoming in
-        if List.length rows > 100000 then Error (Invalid_publication "too many Core incoming receipts")
+        if List.length rows > 100000 then
+          Error (Invalid_publication "too many Core incoming receipts")
         else
-          let* rows = List.fold_left (fun result row ->
-              let* rows = result in let* row = decode_core_incoming row in Ok (row :: rows)) (Ok []) rows in
+          let* rows =
+            List.fold_left
+              (fun result row ->
+                let* rows = result in
+                let* row = decode_core_incoming row in
+                Ok (row :: rows))
+              (Ok []) rows
+          in
           let rows = List.rev rows in
-          let* () = strictly_sorted "Core incoming receipts" compare_core_incoming rows in
+          let* () =
+            strictly_sorted "Core incoming receipts" compare_core_incoming rows
+          in
           let* value = array [ Encoding.integer 2L; remotes; outgoing ] in
           Ok (value, rows)
     | value -> Ok (value, [])
@@ -1559,7 +1643,11 @@ let[@warning "-4"] decode_local_state bytes =
         in
         let* () = sorted remotes in
         let state =
-          { local_remotes = remotes; local_core_outbound = core_rows; local_core_incoming = core_incoming }
+          {
+            local_remotes = remotes;
+            local_core_outbound = core_rows;
+            local_core_incoming = core_incoming;
+          }
         in
         let* canonical = encode_local_state state in
         if String.equal canonical bytes then Ok state
@@ -1623,7 +1711,14 @@ module Core_outbox = struct
           (Invalid_publication
              "Core remote has an unacknowledged frozen batch; retry it before \
               preparing later work")
-    | None | Some _ -> put state row
+    | Some previous ->
+        let* state =
+          retain_core_courier state ~remote ~endpoint
+            ~manifest:previous.core_manifest
+            ~publication:previous.core_publication
+        in
+        put state row
+    | None -> put state row
 
   let acknowledge state ~remote ~endpoint ~publication:id =
     let* previous = find state ~remote ~endpoint in
@@ -1652,6 +1747,11 @@ module Core_outbox = struct
               ~review_inbox:(Option.fold ~none:[] ~some:remote_review_inbox old)
           in
           let* state = with_remote state remote in
+          let* state =
+            retain_core_courier state ~remote:row.core_remote
+              ~endpoint:row.core_endpoint ~manifest:row.core_manifest
+              ~publication:row.core_publication
+          in
           put state { row with core_acknowledged = true }
     | None | Some _ ->
         Error
@@ -1696,6 +1796,7 @@ end
 
 module Core_inbox = struct
   type receipt = core_incoming
+
   let receipts state = state.local_core_incoming
   let remote receipt = receipt.incoming_remote
   let endpoint receipt = receipt.incoming_endpoint
@@ -1703,44 +1804,85 @@ module Core_inbox = struct
   let publication receipt = receipt.incoming_publication
 
   let find state ~remote ~publication:id =
-    List.find_opt (fun row -> row.incoming_remote = remote
-        && publication_id row.incoming_publication = id) state.local_core_incoming
+    List.find_opt
+      (fun row ->
+        row.incoming_remote = remote
+        && publication_id row.incoming_publication = id)
+      state.local_core_incoming
 
   let receive state ~remote ~endpoint ~cursor ~manifest ~publication =
     let* () = check_core_endpoint state ~remote ~endpoint in
-    let* control = make_core_outbound ~remote ~endpoint ~manifest ~publication ~acknowledged:false in
-    let row = { incoming_remote = remote; incoming_endpoint = endpoint;
-                incoming_manifest = control.core_manifest; incoming_publication = publication } in
+    let* control =
+      make_core_outbound ~remote ~endpoint ~manifest ~publication
+        ~acknowledged:false
+    in
+    let row =
+      {
+        incoming_remote = remote;
+        incoming_endpoint = endpoint;
+        incoming_manifest = control.core_manifest;
+        incoming_publication = publication;
+      }
+    in
     let id = publication_id publication in
-    let* rows = match find state ~remote ~publication:id with
-      | Some previous when previous <> row -> Error (Invalid_publication "Core incoming courier identity collision")
+    let* rows =
+      match find state ~remote ~publication:id with
+      | Some previous when previous <> row ->
+          Error (Invalid_publication "Core incoming courier identity collision")
       | Some _ -> Ok state.local_core_incoming
-      | None -> Ok (row :: state.local_core_incoming |> List.sort compare_core_incoming) in
+      | None ->
+          Ok
+            (row :: state.local_core_incoming |> List.sort compare_core_incoming)
+    in
     let old = find_remote state ~name:remote in
     let known = Option.fold ~none:[] ~some:remote_known_publications old in
-    let* () = if core_courier_known state ~remote ~publication then Ok ()
-      else validate_feed ~known [ publication ] in
-    let known = publication_reference publication :: known
-      |> List.sort_uniq (fun a b -> String.compare (reference_id a) (reference_id b)) in
-    let* remote = remote_state ~name:remote ~cursor ~known
-        ~announced_manifests:(Option.fold ~none:[] ~some:remote_announced_manifests old)
-        ~announced_revisions:(Option.fold ~none:[] ~some:remote_announced_revisions old)
-        ~review_inbox:(Option.fold ~none:[] ~some:remote_review_inbox old) in
+    let* () =
+      if core_courier_known state ~remote ~publication then Ok ()
+      else validate_feed ~known [ publication ]
+    in
+    let known =
+      publication_reference publication :: known
+      |> List.sort_uniq (fun a b ->
+          String.compare (reference_id a) (reference_id b))
+    in
+    let* remote =
+      remote_state ~name:remote ~cursor ~known
+        ~announced_manifests:
+          (Option.fold ~none:[] ~some:remote_announced_manifests old)
+        ~announced_revisions:
+          (Option.fold ~none:[] ~some:remote_announced_revisions old)
+        ~review_inbox:(Option.fold ~none:[] ~some:remote_review_inbox old)
+    in
     let* state = with_remote state remote in
-    if List.length rows > 100000 then Error (Invalid_publication "too many Core incoming receipts")
+    if List.length rows > 100000 then
+      Error (Invalid_publication "too many Core incoming receipts")
     else
       let state = { state with local_core_incoming = rows } in
-      let* _ = encode_local_state state in Ok state
+      let* _ = encode_local_state state in
+      Ok state
 
   let validate_update ~previous state =
-    List.fold_left (fun result old ->
+    List.fold_left
+      (fun result old ->
         let* () = result in
-        let* () = check_core_endpoint state ~remote:old.incoming_remote ~endpoint:old.incoming_endpoint in
-        match find state ~remote:old.incoming_remote
-            ~publication:(publication_id old.incoming_publication) with
+        let* () =
+          check_core_endpoint state ~remote:old.incoming_remote
+            ~endpoint:old.incoming_endpoint
+        in
+        match
+          find state ~remote:old.incoming_remote
+            ~publication:(publication_id old.incoming_publication)
+        with
         | Some row when row = old ->
-            if core_courier_known state ~remote:row.incoming_remote ~publication:row.incoming_publication then Ok ()
-            else Error (Invalid_publication "cannot erase a received Core courier reference")
-        | None | Some _ -> Error (Invalid_publication "cannot erase or replace a Core receipt"))
+            if
+              core_courier_known state ~remote:row.incoming_remote
+                ~publication:row.incoming_publication
+            then Ok ()
+            else
+              Error
+                (Invalid_publication
+                   "cannot erase a received Core courier reference")
+        | None | Some _ ->
+            Error (Invalid_publication "cannot erase or replace a Core receipt"))
       (Ok ()) previous.local_core_incoming
 end

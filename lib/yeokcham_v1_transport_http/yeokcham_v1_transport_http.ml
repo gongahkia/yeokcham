@@ -189,8 +189,11 @@ type parallel_request = {
 }
 
 let run ?(max_bytes = max_response_bytes) client ~method_ ~url ~body =
-  let* () = if max_bytes <= 0 || max_bytes > max_response_bytes then
-      Error (Invalid_response "invalid bounded HTTPS response limit") else Ok () in
+  let* () =
+    if max_bytes <= 0 || max_bytes > max_response_bytes then
+      Error (Invalid_response "invalid bounded HTTPS response limit")
+    else Ok ()
+  in
   with_temporary_directory (fun temporary ->
       let config = Filename.concat temporary "curl.conf" in
       let response = Filename.concat temporary "response" in
@@ -414,7 +417,9 @@ let route client ~project ~kind ~id =
 
 let get ?max_bytes client ~project ~kind ~id =
   let* url = route client ~project ~kind ~id in
-  let* status, response = run ?max_bytes client ~method_:"GET" ~url ~body:None in
+  let* status, response =
+    run ?max_bytes client ~method_:"GET" ~url ~body:None
+  in
   if status = 200 then Ok response else Error (Unexpected_status status)
 
 let put_v1 client ~project ~kind ~id ~bytes =
@@ -442,7 +447,9 @@ let list_url client ~project ~cursor ~limit =
 
 let list_publications client ~project ~cursor ~limit =
   let* url = list_url client ~project ~cursor ~limit in
-  let* status, response = run client ~method_:"GET" ~url ~body:None in
+  let* status, response =
+    run ~max_bytes:(64 * 1024) client ~method_:"GET" ~url ~body:None
+  in
   if status <> 200 then Error (Unexpected_status status)
   else
     let* value =

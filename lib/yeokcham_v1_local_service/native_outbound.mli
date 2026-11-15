@@ -41,6 +41,12 @@ type boundary =
   | Acknowledge_before
   | Acknowledge_after
 
+val acknowledged_records_for_loaded :
+  store:Yeokcham_store.repository ->
+  loaded:Yeokcham_v1_store.loaded ->
+  ((Yeokcham_v1_model.Core.Record_id.t * string list) list, error) result
+(** Exact per-remote coverage derived from retained acknowledged manifests. *)
+
 module For_test : sig
   val prepare :
     observe:(boundary -> unit) ->

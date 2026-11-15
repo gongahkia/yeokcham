@@ -977,11 +977,12 @@ let help_for = function
   | [ "exchange" ] ->
       Some
         "usage: yeokcham exchange [--root PATH] NAME [--format text|json]\n\n\
-         Receive verified shared work and send the exact durable outgoing batch \
-         through a configured native HTTPS relay. Requires existing enrollment \
-         and remote login. Receipt preserves working files/private history. \
-         Transfers run in the foreground; retry this command after interruption. \
-         Local acceptance and relay acknowledgement are separate facts."
+         Receive verified shared work and send the exact durable outgoing \
+         batch through a configured native HTTPS relay. Requires existing \
+         enrollment and remote login. Receipt preserves working files/private \
+         history. Transfers run in the foreground; retry this command after \
+         interruption. Local acceptance and relay acknowledgement are separate \
+         facts."
   | [ "relay" ] ->
       Some
         "usage: yeokcham relay serve|access issue|rotate|revoke|list ...\n\n\
@@ -3428,6 +3429,20 @@ let json_operation_recovery operation =
         ])
     operation.Integration_op.recovery
 
+let integration_transfer_state operation =
+  if operation.Integration_op.acknowledged then "acknowledged"
+  else if Integration_op.committed operation then
+    if operation.Integration_op.staged = [] then "not_required" else "pending"
+  else "not_committed"
+
+let publication_transfer_state status revision =
+  match status.Service.status_transfers with
+  | Error _ -> ("unavailable", [])
+  | Ok records -> (
+      match List.assoc_opt revision records with
+      | None | Some [] -> ("pending", [])
+      | Some remotes -> ("acknowledged", remotes))
+
 let json_integration_operation operation =
   `Assoc
     [
@@ -3438,11 +3453,7 @@ let json_integration_operation operation =
       ("committed", `Bool (Integration_op.committed operation));
       ("recovered", `Bool (Integration_op.recovered operation));
       ("recovery", json_operation_recovery operation);
-      ( "outbound_state",
-        `String
-          (if operation.Integration_op.acknowledged then "acknowledged"
-           else if Integration_op.committed operation then "pending"
-           else "not_committed") );
+      ("outbound_state", `String (integration_transfer_state operation));
       ( "branch_id",
         `String (Core.Branch_id.to_hex operation.Integration_op.branch) );
       ("source_history", json_history_identity operation.Integration_op.source);
@@ -4150,6 +4161,9 @@ let run_status arguments =
           `List
             (List.map
                (fun p ->
+                 let transfer, remotes =
+                   publication_transfer_state status p.Local.revision
+                 in
                  `Assoc
                    [
                      ( "operation_id",
@@ -4157,9 +4171,15 @@ let run_status arguments =
                      ( "revision_id",
                        `String (Core.Record_id.to_hex p.Local.revision) );
                      ("title", `String p.Local.title);
-                     ("transfer_state", `String "pending");
+                     ("transfer_state", `String transfer);
+                     ( "acknowledged_remotes",
+                       `List (List.map (fun name -> `String name) remotes) );
                    ])
                status.Service.status_publications) );
+        ( "transfer_inspection_error",
+          match status.Service.status_transfers with
+          | Ok _ -> `Null
+          | Error message -> `String (public_error_message message) );
         ( "integration_operations",
           `List
             (List.map json_integration_operation
@@ -4258,9 +4278,15 @@ let run_status arguments =
         status.Service.status_shared_revisions;
       List.iter
         (fun p ->
-          Printf.printf "publication %s revision:%s transfer:pending title:%s\n"
+          let transfer, remotes =
+            publication_transfer_state status p.Local.revision
+          in
+          Printf.printf
+            "publication %s revision:%s transfer:%s remotes:%s title:%s\n"
             (Core.Operation_id.to_hex p.Local.operation)
             (Core.Record_id.to_hex p.Local.revision)
+            transfer
+            (String.concat "," remotes)
             (Output.display_value p.Local.title))
         status.Service.status_publications;
       List.iter
@@ -4270,9 +4296,7 @@ let run_status arguments =
             (phase_name operation.Integration_op.phase)
             (if Integration_op.committed operation then "committed"
              else "not_committed")
-            (if operation.Integration_op.acknowledged then "acknowledged"
-             else if Integration_op.committed operation then "pending"
-             else "not_committed"))
+            (integration_transfer_state operation))
         status.Service.status_integrations;
       Printf.printf "cursor %s\n"
         status.Service.status_cursor.Service.state_name;
@@ -6124,7 +6148,7 @@ let render_integration_plan ?(historical = false) ~root plan =
         conflicts
 
 let integration_selection root ~all selectors =
-  let _, _, local = integration_repository root in
+  let repository, loaded, local = integration_repository root in
   let pool = Local.pool local in
   let selected = Local.selected local in
   let branch =
@@ -6188,6 +6212,19 @@ let integration_selection root ~all selectors =
       eligible
     |> List.sort Core.Record_id.compare
   else
+    let received_titles =
+      match
+        Service.Core_receive.public_titles_for_loaded
+          ~store:(Yeokcham_v1_store.underlying_store repository)
+          ~loaded
+      with
+      | Ok titles -> titles
+      | Error error ->
+          record_warning
+            ("Shared display labels unavailable; use exact identities: "
+            ^ Service.Core_receive.error_to_string error);
+          []
+    in
     let title change heads =
       match
         List.find_opt
@@ -6196,8 +6233,22 @@ let integration_selection root ~all selectors =
           (Local.publications local)
       with
       | Some publication -> publication.Local.title
-      | None ->
-          "Shared change " ^ String.sub (Core.Change_id.to_hex change) 0 12
+      | None -> (
+          let titles =
+            received_titles
+            |> List.filter_map (fun label ->
+                if
+                  List.exists
+                    (Core.Record_id.equal label.Service.Core_receive.revision)
+                    heads
+                then Some label.Service.Core_receive.title
+                else None)
+            |> List.sort_uniq String.compare
+          in
+          match titles with
+          | [ title ] -> title
+          | [] | _ :: _ ->
+              "Shared change " ^ String.sub (Core.Change_id.to_hex change) 0 12)
     in
     if requested_format () = Text_format then
       List.iter
@@ -7646,65 +7697,137 @@ let run_bootstrap arguments =
 
 let[@warning "-4"] fail_exchange error =
   let module Native = Sync.Core in
-  let status, code = match error with
-    | Native.Receipt_error (Service.Core_receive.Admission_error
-        (Local.Receive_trust _))
+  let status, code =
+    match error with
+    | Native.Receipt_error
+        (Service.Core_receive.Admission_error (Local.Receive_trust _))
+    | Native.Package_error
+        (Package.Core_model_error (Core.Unsupported_policy _))
+    | Native.Receipt_error
+        (Service.Core_receive.Package_error
+           (Package.Core_model_error (Core.Unsupported_policy _)))
     | Native.Receipt_error (Service.Core_receive.Trust_error _)
     | Native.Package_error (Package.Core_trust_error _ | Package.Trust_error _)
-    | Native.Receipt_error (Service.Core_receive.Package_error
-        (Package.Core_trust_error _ | Package.Trust_error _)) -> 7, "exchange-authority-blocked"
-    | Native.Http_error (Transport_http.Unexpected_status (401 | 403)) -> 7, "exchange-access-blocked"
-    | Native.Http_error _ | Native.Invalid _ | Native.Store_error _ | Native.Raw_error _ -> 5, "exchange-unavailable"
-    | _ -> 6, "exchange-integrity-failure" in
+    | Native.Receipt_error
+        (Service.Core_receive.Package_error
+           (Package.Core_trust_error _ | Package.Trust_error _)) ->
+        (7, "exchange-authority-blocked")
+    | Native.Http_error (Transport_http.Unexpected_status (401 | 403)) ->
+        (7, "exchange-access-blocked")
+    | Native.Http_error _ | Native.Invalid _ | Native.Store_error _
+    | Native.Raw_error _ ->
+        (5, "exchange-unavailable")
+    | _ -> (6, "exchange-integrity-failure")
+  in
   fail_with_status status code (Native.error_to_string error)
 
 let run_exchange arguments =
   let module Native = Sync.Core in
   let root, remote = parse_remote_name arguments in
-  let report = match Native.run ~root ~remote ~load_signing_capability:(fun device ->
-      V1_signer.load ~root device |> Result.map_error V1_signer.error_to_string) with
-    | Ok report -> report | Error error -> fail_exchange error in
-  let outgoing = match report.Native.upload with
-    | Native.No_outgoing -> `Assoc [ "state", `String "none" ]
-    | Native.Pending reason -> `Assoc [ "state", `String "pending"; "reason", `String (public_error_message reason) ]
-    | Native.Acknowledged sent -> `Assoc [ "state", `String "acknowledged";
-        "publication_id", `String sent.publication; "manifest_id", `String sent.manifest;
-        "objects_offered", `Int sent.objects_offered; "reused_batch", `Bool sent.reused ] in
-  let data = `Assoc [ "remote", `String remote;
-      "relay_inventory_publications", `Int report.Native.remote_publications;
-      "received_publications", `Int report.Native.received_publications;
-      "received_records", `Int report.Native.received_records;
-      "received_branches", `Int report.Native.received_branches;
-      "legacy_received_revisions", `Int report.Native.legacy_received_revisions;
-      "known_shared_records", `Int report.Native.local_shared_records;
-      "selected_branch", `String (Core.Branch_id.to_hex report.Native.selected_branch);
-      "working_basis", `String (Core.Record_id.to_hex report.Native.working_basis);
-      "cursor", json_history_identity report.Native.cursor;
-      "coverage", `Assoc [ "scope", `String "locally_known_shared_closure";
-        "verified_complete", `Bool true; "relay_inventory_checked", `Bool true;
-        "remote_disclosure_proven", `Bool false; "managed_downloads", `Bool false ];
-      "outgoing", outgoing ] in
-  let next_actions = [ Cli_data.{ arguments = [ "yeokcham"; "exchange"; "--root"; root; remote ];
-      explanation = "Retry pending transfers or check for new shared work.";
-      applicable = true; confirmation_required = false } ] in
-  let pending = match report.Native.upload with Native.Pending _ -> true | Native.No_outgoing | Native.Acknowledged _ -> false in
+  let report =
+    match
+      Native.run ~root ~remote ~load_signing_capability:(fun device ->
+          V1_signer.load ~root device
+          |> Result.map_error V1_signer.error_to_string)
+    with
+    | Ok report -> report
+    | Error error -> fail_exchange error
+  in
+  let outgoing =
+    match report.Native.upload with
+    | Native.No_outgoing -> `Assoc [ ("state", `String "none") ]
+    | Native.Pending reason ->
+        `Assoc
+          [
+            ("state", `String "pending");
+            ("reason", `String (public_error_message reason));
+          ]
+    | Native.Acknowledged sent ->
+        `Assoc
+          [
+            ("state", `String "acknowledged");
+            ("publication_id", `String sent.publication);
+            ("manifest_id", `String sent.manifest);
+            ("objects_offered", `Int sent.objects_offered);
+            ("reused_batch", `Bool sent.reused);
+          ]
+  in
+  let data =
+    `Assoc
+      [
+        ("remote", `String remote);
+        ("relay_inventory_publications", `Int report.Native.remote_publications);
+        ("received_publications", `Int report.Native.received_publications);
+        ("received_records", `Int report.Native.received_records);
+        ("received_branches", `Int report.Native.received_branches);
+        ( "legacy_received_revisions",
+          `Int report.Native.legacy_received_revisions );
+        ("known_shared_records", `Int report.Native.local_shared_records);
+        ( "selected_branch",
+          `String (Core.Branch_id.to_hex report.Native.selected_branch) );
+        ( "working_basis",
+          `String (Core.Record_id.to_hex report.Native.working_basis) );
+        ("cursor", json_history_identity report.Native.cursor);
+        ( "coverage",
+          `Assoc
+            [
+              ("scope", `String "locally_known_shared_closure");
+              ("verified_complete", `Bool true);
+              ("relay_inventory_checked", `Bool true);
+              ("remote_disclosure_proven", `Bool false);
+              ("managed_downloads", `Bool false);
+            ] );
+        ("outgoing", outgoing);
+      ]
+  in
+  let next_actions =
+    [
+      Cli_data.
+        {
+          arguments = [ "yeokcham"; "exchange"; "--root"; root; remote ];
+          explanation = "Retry pending transfers or check for new shared work.";
+          applicable = true;
+          confirmation_required = false;
+        };
+    ]
+  in
+  let pending =
+    match report.Native.upload with
+    | Native.Pending _ -> true
+    | Native.No_outgoing | Native.Acknowledged _ -> false
+  in
   (match requested_format () with
   | Json_format ->
-      if pending then (
+      if pending then
         Cli_data.domain_failure ~command:(command_name ()) ~outcome:`Incomplete
-          ~error:Cli_data.{ code = "exchange-outgoing-pending"; message = "Receipt completed; outgoing transfer remains pending." }
-          ~data ~warnings:[] ~next_actions () |> Cli_data.encode |> print_json)
-      else domain_json ~outcome:`Completed ~code:"shared-work-exchanged"
-          ~message:"Shared receipt and foreground transfer completed." ~data ~next_actions ()
-  | Text_format ->
+          ~error:
+            Cli_data.
+              {
+                code = "exchange-outgoing-pending";
+                message =
+                  "Receipt completed; outgoing transfer remains pending.";
+              }
+          ~data ~warnings:[] ~next_actions ()
+        |> Cli_data.encode |> print_json
+      else
+        domain_json ~outcome:`Completed ~code:"shared-work-exchanged"
+          ~message:"Shared receipt and foreground transfer completed." ~data
+          ~next_actions ()
+  | Text_format -> (
       Printf.printf "received publications %d; Core records %d; branches %d\n"
-        report.Native.received_publications report.Native.received_records report.Native.received_branches;
-      Printf.printf "verified local shared closure: %d records; relay inventory checked: %d couriers\n"
+        report.Native.received_publications report.Native.received_records
+        report.Native.received_branches;
+      Printf.printf
+        "verified local shared closure: %d records; relay inventory checked: \
+         %d couriers\n"
         report.Native.local_shared_records report.Native.remote_publications;
-      (match report.Native.upload with
-       | Native.No_outgoing -> print_endline "outgoing: none"
-       | Native.Pending reason -> Printf.printf "outgoing: pending; %s\n" (public_error_message reason)
-       | Native.Acknowledged sent -> Printf.printf "outgoing: acknowledged %s; manifest %s\n" sent.publication sent.manifest));
+      match report.Native.upload with
+      | Native.No_outgoing -> print_endline "outgoing: none"
+      | Native.Pending reason ->
+          Printf.printf "outgoing: pending; %s\n" (public_error_message reason)
+      | Native.Acknowledged sent ->
+          Printf.printf "outgoing: acknowledged %s; manifest %s\n"
+            sent.publication sent.manifest));
   if pending then exit 5
 
 let run_sync arguments =

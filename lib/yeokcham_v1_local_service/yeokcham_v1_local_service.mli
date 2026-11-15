@@ -10,10 +10,10 @@ module Preservation = Integration.Preservation
 (** Local V1 saved-work transitions and verified offline-package receive.
 
     This adapter has no network transport. [Integrate] supplies deterministic
-    composition and durable local execution; ordinary integration CLI remains a
-    separate consumer. Commands `status`, `changes`, and `save` scan exact
-    snapshots when invoked. Linux `watch` lives in the CLI and only calls `save`
-    after debounce; it is not part of this module. *)
+    composition and durable local execution for the ordinary integration CLI.
+    Commands `status`, `changes`, and `save` scan exact snapshots when invoked.
+    Linux `watch` lives in the CLI and only calls `save` after debounce; it is
+    not part of this module. *)
 
 type error =
   | Share_error of Share.error
@@ -780,6 +780,8 @@ type local_status = {
     * Yeokcham_v1_model.Core.shared_revision)
     list;
   status_publications : Yeokcham_v1_store.Local.publication list;
+  status_transfers :
+    ((Yeokcham_v1_model.Core.Record_id.t * string list) list, string) result;
   status_integrations : Yeokcham_v1_store.Local.Operation.t list;
   status_branch : branch_listing option;
   status_cursor : state_view;

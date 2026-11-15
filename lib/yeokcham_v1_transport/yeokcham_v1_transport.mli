@@ -141,15 +141,24 @@ module Core_inbox : sig
   val endpoint : receipt -> string
   val manifest : receipt -> string
   val publication : receipt -> publication
-  val find : local_state -> remote:string -> publication:string -> receipt option
+
+  val find :
+    local_state -> remote:string -> publication:string -> receipt option
 
   val receive :
-    local_state -> remote:string -> endpoint:string -> cursor:string option ->
-    manifest:string -> publication:publication -> (local_state, error) result
+    local_state ->
+    remote:string ->
+    endpoint:string ->
+    cursor:string option ->
+    manifest:string ->
+    publication:publication ->
+    (local_state, error) result
   (** Persists already verified complete public package/courier provenance with
-      feed references. Caller verifies authority/admission before root publication. *)
+      feed references. Caller verifies authority/admission before root
+      publication. *)
 
-  val validate_update : previous:local_state -> local_state -> (unit, error) result
+  val validate_update :
+    previous:local_state -> local_state -> (unit, error) result
 end
 
 module V2 : sig

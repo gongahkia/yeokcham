@@ -194,6 +194,23 @@ let[@warning "-4"] core_outbox_canonical_and_monotonic () =
       ~publication:(Transport.publication_id courier)
     |> require_ok Transport.error_to_string
   in
+  let ack_bytes =
+    Transport.encode_local_state acked |> require_ok Transport.error_to_string
+  in
+  let ack_hex =
+    String.init
+      (String.length ack_bytes * 2)
+      (fun i ->
+        let byte = Char.code ack_bytes.[i / 2] in
+        "0123456789abcdef".[if i mod 2 = 0 then byte lsr 4 else byte land 15])
+  in
+  Alcotest.(check string)
+    "independent acknowledged courier catalogue vector"
+    (In_channel.with_open_bin
+       (golden_path "core-package/courier-state.hex")
+       In_channel.input_all
+    |> String.trim)
+    ack_hex;
   Outbox.validate_update ~previous:pending acked
   |> require_ok Transport.error_to_string;
   reject (Outbox.validate_update ~previous:acked pending);
@@ -2270,158 +2287,550 @@ let relay_access_scopes_rotation_and_expiry_are_enforced () =
       | Ok _ -> Alcotest.fail "denied upload wrote an immutable relay object"
       | Error error -> Alcotest.fail (Relay.error_to_string error))
 
-let[@warning "-4-40-42"] native_core_exchange_uses_enrolled_replicas_and_exact_retry () =
+let[@warning "-4-40-42"] native_core_replicas parent signer_directory =
   let module Core = Model.Core in
   let module Local = Store.Local in
   let module History = Yeokcham_v1_undo in
+  let source, _, alice, bob = source_and_destination parent in
+  store_test_signer signer_directory alice;
+  store_test_signer signer_directory bob;
+  let open_store root =
+    Store.open_repository ~root |> require_ok Store.error_to_string
+  in
+  let load repository =
+    Store.load repository |> require_ok Store.error_to_string
+  in
+  let source_repository = open_store source in
+  let initial = load source_repository in
+  let collaboration = Option.get initial.Store.collaboration in
+  let authority = Option.get (Store.authority collaboration) in
+  let initial_local =
+    Local.initialize
+      ~store:(Store.underlying_store source_repository)
+      ~authority
+      ~certificate:(Store.local_certificate collaboration)
+      ~signing_capability:alice
+      ~cursor:(History.current initial.Store.history).History.id
+    |> require_ok Fun.id
+  in
+  Store.save_collaborative ~local:initial_local source_repository
+    ~expected:initial.Store.head ~project:initial.Store.project ~collaboration
+  |> require_ok Store.error_to_string
+  |> ignore;
+  let genesis = parent ^ "/genesis" in
+  Package.Core.create
+    ~source:(Store.underlying_store source_repository)
+    ~destination:genesis ~authority
+    ~records:(Local.record_objects initial_local)
+    ~selected_branch:(Local.selected initial_local).Local.branch ~titles:[]
+  |> require_ok Package.error_to_string
+  |> ignore;
+  let scope = Core.pool_repository (Local.pool initial_local) in
+  let prepared =
+    Package.Core.prepare ~package:genesis ~repository:scope
+      ~known_authority:(Some authority)
+    |> require_ok Package.error_to_string
+  in
+  let destination = parent ^ "/native-bob" in
+  Unix.mkdir destination 0o700;
+  let member_identity = device bob in
+  let certificate =
+    Trust.certificates (Trust.authority_membership authority)
+    |> List.find (fun cert ->
+        Trust.device_equal (Trust.certificate_subject cert) member_identity)
+    |> Trust.certificate_id
+  in
+  (* pre-enrolled empty replica setup; this is not clone CLI evidence. *)
+  let destination_repository =
+    Store.init_local_collaborative_with ~root:destination ~bootstrap:(fun raw ->
+        Package.Core.import_prepared ~destination:raw prepared
+        |> require_ok Package.error_to_string;
+        let local =
+          Local.initialize_received ~store:raw ~authority
+            ~records:(Package.Core.prepared_records prepared)
+            ~selected_branch:(Local.selected initial_local).Local.branch
+            ~cursor:0L
+          |> require_ok Local.receive_error_to_string
+        in
+        let project =
+          Model.init
+            ~creator:(Trust.device_id member_identity)
+            ~username:(Model.Username.of_string "bob" |> Result.get_ok)
+            ~initial_snapshot:
+              (Model.Snapshot_id.of_string
+                 (Core.Object_id.to_hex (Local.empty_snapshot local))
+              |> require_ok Model.error_to_string)
+            ~initial_draft:
+              (Model.Draft_id.of_string "bob-native" |> Result.get_ok)
+            ~title:"private work"
+        in
+        let collaboration =
+          Store.collaboration_with_authority ~authority ~revisions:[]
+            ~local_certificate:certificate ~authorizations:[] ~adoptions:[]
+          |> require_ok Store.error_to_string
+        in
+        Ok (project, collaboration, local))
+    |> require_ok Store.error_to_string
+  in
+  ( source,
+    destination,
+    source_repository,
+    destination_repository,
+    alice,
+    bob,
+    scope )
+
+let[@warning "-4-40-42"] native_core_exchange_uses_enrolled_replicas_and_exact_retry
+    () =
+  let module History = Yeokcham_v1_undo in
   let module Native = Yeokcham_v1_sync.Core in
   let module Outbox = Transport.Core_outbox in
+  let load repository =
+    Store.load repository |> require_ok Store.error_to_string
+  in
   with_https_relay (fun client project url ->
       with_directory "yeokcham-native-exchange-" (fun parent ->
           with_test_signer (fun signer_directory ->
-              let source, _, alice, bob = source_and_destination parent in
-              store_test_signer signer_directory alice;
-              store_test_signer signer_directory bob;
-              let open_store root = Store.open_repository ~root |> require_ok Store.error_to_string in
-              let load repository = Store.load repository |> require_ok Store.error_to_string in
-              let source_repository = open_store source in
-              let initial = load source_repository in
-              let collaboration = Option.get initial.Store.collaboration in
-              let authority = Option.get (Store.authority collaboration) in
-              let initial_local = Local.initialize
-                  ~store:(Store.underlying_store source_repository) ~authority
-                  ~certificate:(Store.local_certificate collaboration) ~signing_capability:alice
-                  ~cursor:(History.current initial.Store.history).History.id |> require_ok Fun.id in
-              Store.save_collaborative ~local:initial_local source_repository
-                ~expected:initial.Store.head ~project:initial.Store.project ~collaboration
-              |> require_ok Store.error_to_string |> ignore;
-              let genesis = parent ^ "/genesis" in
-              Package.Core.create ~source:(Store.underlying_store source_repository)
-                ~destination:genesis ~authority ~records:(Local.record_objects initial_local)
-                ~selected_branch:(Local.selected initial_local).Local.branch ~titles:[]
-              |> require_ok Package.error_to_string |> ignore;
-              let scope = Core.pool_repository (Local.pool initial_local) in
-              let prepared = Package.Core.prepare ~package:genesis ~repository:scope
-                  ~known_authority:(Some authority) |> require_ok Package.error_to_string in
-              let destination = parent ^ "/native-bob" in
-              Unix.mkdir destination 0o700;
-              let member = device bob in
-              let certificate = Trust.certificates (Trust.authority_membership authority)
-                |> List.find (fun cert -> Trust.device_equal (Trust.certificate_subject cert) member)
-                |> Trust.certificate_id in
-              (* pre-enrolled empty replica setup; this is not clone CLI evidence. *)
-              let destination_repository = Store.init_local_collaborative_with ~root:destination
-                  ~bootstrap:(fun raw ->
-                    Package.Core.import_prepared ~destination:raw prepared |> require_ok Package.error_to_string;
-                    let local = Local.initialize_received ~store:raw ~authority
-                        ~records:(Package.Core.prepared_records prepared)
-                        ~selected_branch:(Local.selected initial_local).Local.branch ~cursor:0L
-                      |> require_ok Local.receive_error_to_string in
-                    let project = Model.init ~creator:(Trust.device_id member)
-                        ~username:(Model.Username.of_string "bob" |> Result.get_ok)
-                        ~initial_snapshot:(Model.Snapshot_id.of_string (Core.Object_id.to_hex (Local.empty_snapshot local)) |> require_ok Model.error_to_string)
-                        ~initial_draft:(Model.Draft_id.of_string "bob-native" |> Result.get_ok) ~title:"private work" in
-                    let collaboration = Store.collaboration_with_authority ~authority
-                        ~revisions:[] ~local_certificate:certificate ~authorizations:[] ~adoptions:[]
-                      |> require_ok Store.error_to_string in
-                    Ok (project, collaboration, local)) |> require_ok Store.error_to_string in
-              List.iter (fun root -> Transport_config.add ~root ~name:"team" ~url
-                  |> require_ok Transport_config.error_to_string) [ source; destination ];
-              let write path bytes = Out_channel.with_open_bin path (fun out -> output_string out bytes) in
-              let read path = In_channel.with_open_bin path In_channel.input_all in
+              let ( source,
+                    destination,
+                    source_repository,
+                    destination_repository,
+                    alice,
+                    _,
+                    scope ) =
+                native_core_replicas parent signer_directory
+              in
+              List.iter
+                (fun root ->
+                  Transport_config.add ~root ~name:"team" ~url
+                  |> require_ok Transport_config.error_to_string)
+                [ source; destination ];
+              let write path bytes =
+                Out_channel.with_open_bin path (fun out ->
+                    output_string out bytes)
+              in
+              let read path =
+                In_channel.with_open_bin path In_channel.input_all
+              in
               let sentinel = "PRIVATE ALICE SENTINEL NEVER EXPORTED 92fd432" in
               write (source ^ "/private.txt") sentinel;
               write (source ^ "/main.ml") "let version = 2\r\n";
-              let binary = String.init 300731 (fun i -> Char.chr ((i * 7) mod 251)) in
+              let binary =
+                String.init 300731 (fun i -> Char.chr (i * 7 mod 251))
+              in
               write (source ^ "/asset.bin") binary;
               write (source ^ "/run.sh") "#!/bin/sh\nprintf exact\n";
               Unix.chmod (source ^ "/run.sh") 0o700;
               Unix.symlink "main.ml" (source ^ "/link");
               Unix.mkdir (source ^ "/empty") 0o700;
-              let output, errors, status = run_cli [ "share"; "--root"; source;
-                  "main.ml"; "asset.bin"; "run.sh"; "link"; "empty";
-                  "--title"; "Selected D"; "--format"; "json" ] in
+              let output, errors, status =
+                run_cli
+                  [
+                    "share";
+                    "--root";
+                    source;
+                    "main.ml";
+                    "asset.bin";
+                    "run.sh";
+                    "link";
+                    "empty";
+                    "--title";
+                    "Selected D";
+                    "--format";
+                    "json";
+                  ]
+              in
               require_cli_success "native selected share" errors status;
               let open Yojson.Safe.Util in
-              Alcotest.(check bool) "share returns domain JSON" true
-                (Yojson.Safe.from_string output |> member "schema_version" = `Int 2);
+              Alcotest.(check bool)
+                "share returns domain JSON" true
+                (Yojson.Safe.from_string output
+                |> member "schema_version" = `Int 2);
               let before_send = load source_repository in
               let child = Unix.fork () in
               if child = 0 then (
                 Native.For_test.run ~root:source ~remote:"team"
                   ~load_signing_capability:(fun _ -> Ok alice)
-                  ~observe:(function Native.Courier_sent _ -> Unix._exit 73 | _ -> ()) |> ignore;
+                  ~observe:(function
+                    | Native.Courier_sent _ -> Unix._exit 73 | _ -> ())
+                |> ignore;
                 Unix._exit 74);
               let _, status = Unix.waitpid [] child in
-              Alcotest.(check bool) "interrupted after actual HTTPS courier acceptance" true (status = Unix.WEXITED 73);
+              Alcotest.(check bool)
+                "interrupted after actual HTTPS courier acceptance" true
+                (status = Unix.WEXITED 73);
               let endpoint = Transport.sha256 url in
-              let frozen () = Outbox.find (Store.transport (Option.get (load source_repository).Store.collaboration))
-                  ~remote:"team" ~endpoint |> require_ok Transport.error_to_string |> Option.get in
+              let frozen () =
+                Outbox.find
+                  (Store.transport
+                     (Option.get (load source_repository).Store.collaboration))
+                  ~remote:"team" ~endpoint
+                |> require_ok Transport.error_to_string
+                |> Option.get
+              in
               let pending = frozen () in
-              let courier_id = Transport.publication_id (Outbox.publication pending) in
-              Alcotest.(check bool) "local acknowledgement is still pending" false (Outbox.acknowledged pending);
-              Transport_http.get client ~project ~kind:Transport_http.Publication ~id:courier_id
-              |> require_ok Transport_http.error_to_string |> ignore;
-              let source_key = Filename.concat signer_directory (Model.Device_id.to_string (Trust.device_id (device alice))) in
+              let courier_id =
+                Transport.publication_id (Outbox.publication pending)
+              in
+              Alcotest.(check bool)
+                "local acknowledgement is still pending" false
+                (Outbox.acknowledged pending);
+              Transport_http.get client ~project
+                ~kind:Transport_http.Publication ~id:courier_id
+              |> require_ok Transport_http.error_to_string
+              |> ignore;
+              let source_key =
+                Filename.concat signer_directory
+                  (Model.Device_id.to_string (Trust.device_id (device alice)))
+              in
               Unix.rename source_key (source_key ^ ".unavailable");
-              let output, errors, status = run_cli [ "exchange"; "--root"; source; "team"; "--format"; "json" ] in
+              let output, errors, status =
+                run_cli
+                  [ "exchange"; "--root"; source; "team"; "--format"; "json" ]
+              in
               Unix.rename (source_key ^ ".unavailable") source_key;
-              require_cli_success "fresh-process frozen courier retry without signer" errors status;
+              require_cli_success
+                "fresh-process frozen courier retry without signer" errors
+                status;
               let data = Yojson.Safe.from_string output |> member "data" in
-              Alcotest.(check bool) "retry reports its actual acknowledgement" true
-                (data |> member "outgoing" |> member "state" = `String "acknowledged");
-              Alcotest.(check bool) "retry reuses exact signed identity" true
-                (data |> member "outgoing" |> member "publication_id" = `String courier_id);
-              Alcotest.(check string) "outbound retries do not capture or navigate private history"
+              Alcotest.(check bool)
+                "retry reports its actual acknowledgement" true
+                (data |> member "outgoing" |> member "state"
+               = `String "acknowledged");
+              Alcotest.(check bool)
+                "retry reuses exact signed identity" true
+                (data |> member "outgoing" |> member "publication_id"
+               = `String courier_id);
+              let output, errors, status =
+                run_cli [ "status"; "--root"; source; "--format"; "json" ]
+              in
+              require_cli_success
+                "native status after actual relay acknowledgement" errors status;
+              let rows =
+                Yojson.Safe.from_string output
+                |> member "data"
+                |> member "local_publications"
+                |> to_list
+              in
+              Alcotest.(check bool)
+                "status reports the actual acknowledged publication" true
+                (List.exists
+                   (fun row ->
+                     member "transfer_state" row = `String "acknowledged"
+                     && member "acknowledged_remotes" row
+                        = `List [ `String "team" ])
+                   rows);
+              Alcotest.(check string)
+                "outbound retries do not capture or navigate private history"
                 (History.encode before_send.Store.history |> require_ok Fun.id)
-                (History.encode (load source_repository).Store.history |> require_ok Fun.id);
-              let manifest = Package.Core.decode_manifest ~repository:scope (Outbox.manifest pending)
-                |> require_ok Package.error_to_string in
-              Package.Core.inventory (Store.underlying_store source_repository) manifest
+                (History.encode (load source_repository).Store.history
+                |> require_ok Fun.id);
+              let manifest =
+                Package.Core.decode_manifest ~repository:scope
+                  (Outbox.manifest pending)
+                |> require_ok Package.error_to_string
+              in
+              Package.Core.inventory
+                (Store.underlying_store source_repository)
+                manifest
               |> require_ok Package.error_to_string
               |> List.iter (fun (id, _) ->
-                  let bytes = Transport_http.get client ~project ~kind:Transport_http.Object
-                      ~id:(Object_store.Stored_object_id.to_hex id) |> require_ok Transport_http.error_to_string in
-                  Alcotest.(check bool) "actual relay closure excludes Alice's unselected sentinel" false (contains bytes sentinel));
+                  let bytes =
+                    Transport_http.get client ~project
+                      ~kind:Transport_http.Object
+                      ~id:(Object_store.Stored_object_id.to_hex id)
+                    |> require_ok Transport_http.error_to_string
+                  in
+                  Alcotest.(check bool)
+                    "actual relay closure excludes Alice's unselected sentinel"
+                    false (contains bytes sentinel));
               write (destination ^ "/bob-private.txt") "UNSAVED BOB PRIVATE E";
               let before_receive = load destination_repository in
-              let output, errors, status = run_cli [ "exchange"; "--root"; destination; "team"; "--format"; "json" ] in
+              let output, errors, status =
+                run_cli
+                  [
+                    "exchange";
+                    "--root";
+                    destination;
+                    "team";
+                    "--format";
+                    "json";
+                  ]
+              in
               require_cli_success "native Bob receipt" errors status;
-              Alcotest.(check bool) "receipt reports one new exact shared revision" true
-                (Yojson.Safe.from_string output |> member "data" |> member "received_records" = `Int 1);
+              Alcotest.(check bool)
+                "receipt reports one new exact shared revision" true
+                (Yojson.Safe.from_string output
+                |> member "data" |> member "received_records" = `Int 1);
               let after_receive = load destination_repository in
-              Alcotest.(check string) "receipt preserves exact private cursor and counter"
-                (History.encode before_receive.Store.history |> require_ok Fun.id)
+              Alcotest.(check string)
+                "receipt preserves exact private cursor and counter"
+                (History.encode before_receive.Store.history
+                |> require_ok Fun.id)
                 (History.encode after_receive.Store.history |> require_ok Fun.id);
-              Alcotest.(check bool) "receipt does not materialize selected shared files" false (Sys.file_exists (destination ^ "/main.ml"));
-              Alcotest.(check string) "receipt leaves unsaved private bytes untouched" "UNSAVED BOB PRIVATE E"
+              Alcotest.(check bool)
+                "receipt does not materialize selected shared files" false
+                (Sys.file_exists (destination ^ "/main.ml"));
+              Alcotest.(check string)
+                "receipt leaves unsaved private bytes untouched"
+                "UNSAVED BOB PRIVATE E"
                 (read (destination ^ "/bob-private.txt"));
-              let inbox = Transport.Core_inbox.receipts (Store.transport (Option.get after_receive.Store.collaboration)) in
-              Alcotest.(check int) "verified courier provenance persists with receipt" 1 (List.length inbox);
-              let output, errors, status = run_cli [ "integrate"; "--root"; destination; "--all"; "--yes"; "--format"; "json" ] in
+              let inbox =
+                Transport.Core_inbox.receipts
+                  (Store.transport
+                     (Option.get after_receive.Store.collaboration))
+              in
+              Alcotest.(check int)
+                "incoming and acknowledged outgoing couriers retain provenance"
+                2 (List.length inbox);
+              Alcotest.(check bool)
+                "exact incoming courier remains identifiable" true
+                (List.exists
+                   (fun receipt ->
+                     Transport.publication_id
+                       (Transport.Core_inbox.publication receipt)
+                     = courier_id)
+                   inbox);
+              let labels =
+                Service.Core_receive.public_titles ~root:destination
+                |> require_ok Service.Core_receive.error_to_string
+              in
+              Alcotest.(check bool)
+                "shared display label retains original courier provenance" true
+                (List.exists
+                   (fun label ->
+                     label.Service.Core_receive.title = "Selected D"
+                     && label.Service.Core_receive.courier = courier_id)
+                   labels);
+              let output, errors, status =
+                run_cli
+                  [
+                    "integrate";
+                    "--root";
+                    destination;
+                    "--all";
+                    "--yes";
+                    "--format";
+                    "json";
+                  ]
+              in
               require_cli_success "native Bob acceptance" errors status;
-              Alcotest.(check bool) "integration returns a durable operation" true
+              Alcotest.(check bool)
+                "integration returns a durable operation" true
                 (Yojson.Safe.from_string output |> member "data" <> `Null);
-              Alcotest.(check string) "CRLF selected contents materialize exactly" "let version = 2\r\n" (read (destination ^ "/main.ml"));
-              Alcotest.(check string) "large binary bytes materialize exactly" binary (read (destination ^ "/asset.bin"));
-              Alcotest.(check bool) "executable distinction survives relay and acceptance" true
-                ((Unix.stat (destination ^ "/run.sh")).Unix.st_perm land 0o111 <> 0);
-              Alcotest.(check string) "symlink target survives relay and acceptance" "main.ml" (Unix.readlink (destination ^ "/link"));
-              Alcotest.(check bool) "empty directory survives relay and acceptance" true
+              Alcotest.(check string)
+                "CRLF selected contents materialize exactly"
+                "let version = 2\r\n"
+                (read (destination ^ "/main.ml"));
+              Alcotest.(check string)
+                "large binary bytes materialize exactly" binary
+                (read (destination ^ "/asset.bin"));
+              Alcotest.(check bool)
+                "executable distinction survives relay and acceptance" true
+                ((Unix.stat (destination ^ "/run.sh")).Unix.st_perm land 0o111
+                <> 0);
+              Alcotest.(check string)
+                "symlink target survives relay and acceptance" "main.ml"
+                (Unix.readlink (destination ^ "/link"));
+              Alcotest.(check bool)
+                "empty directory survives relay and acceptance" true
                 ((Unix.lstat (destination ^ "/empty")).Unix.st_kind = Unix.S_DIR);
-              Alcotest.(check string) "integration retains later private E" "UNSAVED BOB PRIVATE E" (read (destination ^ "/bob-private.txt"));
-              let output, errors, status = run_cli [ "exchange"; "--root"; destination; "team" ] in
-              require_cli_success "native Bob accepted-history exchange" errors status;
-              expect_output_contains "plain exchange reports real acknowledgement" "outgoing: acknowledged" output;
+              Alcotest.(check string)
+                "integration retains later private E" "UNSAVED BOB PRIVATE E"
+                (read (destination ^ "/bob-private.txt"));
+              let output, errors, status =
+                run_cli [ "exchange"; "--root"; destination; "team" ]
+              in
+              require_cli_success "native Bob accepted-history exchange" errors
+                status;
+              expect_output_contains
+                "plain exchange reports real acknowledgement"
+                "outgoing: acknowledged" output;
+              let bob_batch =
+                Outbox.find
+                  (Store.transport
+                     (Option.get
+                        (load destination_repository).Store.collaboration))
+                  ~remote:"team" ~endpoint
+                |> require_ok Transport.error_to_string
+                |> Option.get
+              in
+              let bob_manifest =
+                Package.Core.decode_manifest ~repository:scope
+                  (Outbox.manifest bob_batch)
+                |> require_ok Package.error_to_string
+              in
+              Package.Core.inventory
+                (Store.underlying_store destination_repository)
+                bob_manifest
+              |> require_ok Package.error_to_string
+              |> List.iter (fun (id, _) ->
+                  let bytes =
+                    Transport_http.get client ~project
+                      ~kind:Transport_http.Object
+                      ~id:(Object_store.Stored_object_id.to_hex id)
+                    |> require_ok Transport_http.error_to_string
+                  in
+                  Alcotest.(check bool)
+                    "actual accepted-history relay closure excludes Bob's \
+                     private E"
+                    false
+                    (contains bytes "UNSAVED BOB PRIVATE E"));
               let alice_before_receipt = load source_repository in
-              let output, errors, status = run_cli [ "exchange"; "--root"; source; "team" ] in
-              require_cli_success "Alice receives Bob's accepted history" errors status;
-              expect_output_contains "plain exchange reports verified coverage" "verified local shared closure" output;
-              Alcotest.(check string) "accepted-history receipt leaves Alice's history untouched"
-                (History.encode alice_before_receipt.Store.history |> require_ok Fun.id)
-                (History.encode (load source_repository).Store.history |> require_ok Fun.id);
-              Alcotest.(check string) "Alice's private sentinel survives accepted-history receipt" sentinel (read (source ^ "/private.txt"));
-              Alcotest.(check bool) "Bob's private E is absent from Alice" false (Sys.file_exists (source ^ "/bob-private.txt")))))
+              let output, errors, status =
+                run_cli [ "exchange"; "--root"; source; "team" ]
+              in
+              require_cli_success "Alice receives Bob's accepted history" errors
+                status;
+              expect_output_contains "plain exchange reports verified coverage"
+                "verified local shared closure" output;
+              Alcotest.(check string)
+                "accepted-history receipt leaves Alice's history untouched"
+                (History.encode alice_before_receipt.Store.history
+                |> require_ok Fun.id)
+                (History.encode (load source_repository).Store.history
+                |> require_ok Fun.id);
+              Alcotest.(check string)
+                "Alice's private sentinel survives accepted-history receipt"
+                sentinel
+                (read (source ^ "/private.txt"));
+              Alcotest.(check bool)
+                "Bob's private E is absent from Alice" false
+                (Sys.file_exists (source ^ "/bob-private.txt")))))
+
+let[@warning "-4-40-42"] native_missing_remote_objects_cannot_publish_private_cache_bytes
+    () =
+  let module Outbox = Transport.Core_outbox in
+  let module History = Yeokcham_v1_undo in
+  with_https_relay (fun client project url ->
+      with_directory "yeokcham-native-private-cache-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let ( source,
+                    destination,
+                    source_repository,
+                    destination_repository,
+                    alice,
+                    _,
+                    _ ) =
+                native_core_replicas parent signer_directory
+              in
+              let secret =
+                "PRIVATE CACHE CONTENT MUST NOT BE SUPPLIED TO A PEER BY HASH \
+                 ALONE 870c9a"
+              in
+              let write path =
+                Out_channel.with_open_bin path (fun out ->
+                    output_string out secret)
+              in
+              write (destination ^ "/private.txt");
+              Service.save ~root:destination
+              |> require_ok Service.error_to_string
+              |> ignore;
+              write (source ^ "/public.txt");
+              Service.share_selected ~root:source ~paths:[ [ "public.txt" ] ]
+                ~update:None ~title:(Some "advertised missing contents")
+                ~dry_run:false ~signing_capability:(Some alice)
+              |> require_ok Service.error_to_string
+              |> ignore;
+              let blob =
+                Yeokcham_snapshot.Content.store
+                  (Store.underlying_store source_repository)
+                  secret
+                |> require_ok Yeokcham_snapshot.error_to_string
+                |> Yeokcham_snapshot.Content.stored_object_id
+              in
+              Object_store.get
+                (Store.underlying_store destination_repository)
+                blob
+              |> require_ok Object_store.error_to_string
+              |> ignore;
+              let outgoing =
+                Service.Core_outbound.prepare ~root:source ~remote:"team"
+                  ~endpoint:(Transport.sha256 url)
+                  ~signing_capability:(Some alice)
+                |> require_ok Service.Core_outbound.error_to_string
+                |> Option.get
+              in
+              Fun.protect
+                ~finally:(fun () ->
+                  Package.dispose_artifact
+                    outgoing.Service.Core_outbound.artifact)
+                (fun () ->
+                  Package.iter_artifact_objects
+                    outgoing.Service.Core_outbound.artifact ~f:(fun id bytes ->
+                      if Object_store.Stored_object_id.equal blob id then Ok ()
+                      else (
+                        Transport_http.put client ~project
+                          ~kind:Transport_http.Object
+                          ~id:(Object_store.Stored_object_id.to_hex id)
+                          ~bytes
+                        |> require_ok Transport_http.error_to_string;
+                        Ok ()))
+                  |> require_ok Package.error_to_string;
+                  let batch = outgoing.Service.Core_outbound.batch in
+                  Transport_http.put client ~project
+                    ~kind:Transport_http.Manifest
+                    ~id:(Transport.sha256 (Outbox.manifest batch))
+                    ~bytes:(Outbox.manifest batch)
+                  |> require_ok Transport_http.error_to_string;
+                  let courier = Outbox.publication batch in
+                  Transport_http.put client ~project
+                    ~kind:Transport_http.Publication
+                    ~id:(Transport.publication_id courier)
+                    ~bytes:(Transport.encode_publication courier)
+                  |> require_ok Transport_http.error_to_string);
+              Transport_config.add ~root:destination ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              let before =
+                Store.load destination_repository
+                |> require_ok Store.error_to_string
+              in
+              let output, _, status =
+                run_cli
+                  [
+                    "exchange";
+                    "--root";
+                    destination;
+                    "team";
+                    "--format";
+                    "json";
+                  ]
+              in
+              Alcotest.(check bool)
+                "missing peer contents are unavailable despite a private local \
+                 hash match"
+                true (status = Unix.WEXITED 5);
+              let open Yojson.Safe.Util in
+              Alcotest.(check bool)
+                "missing remote object is reported explicitly" true
+                (Yojson.Safe.from_string output
+                |> member "error" |> member "code"
+                = `String "exchange-unavailable");
+              let after =
+                Store.load destination_repository
+                |> require_ok Store.error_to_string
+              in
+              Alcotest.(check bool)
+                "unavailable incoming graph cannot publish a state root" true
+                (Object_store.Mutable_ref.equal before.Store.head
+                   after.Store.head);
+              Alcotest.(check string)
+                "private history/cursor/counter remain unchanged"
+                (History.encode before.Store.history |> require_ok Fun.id)
+                (History.encode after.Store.history |> require_ok Fun.id);
+              Alcotest.(check string)
+                "private working bytes survive" secret
+                (In_channel.with_open_bin
+                   (destination ^ "/private.txt")
+                   In_channel.input_all);
+              let remote =
+                Transport_http.get client ~project ~kind:Transport_http.Object
+                  ~id:(Object_store.Stored_object_id.to_hex blob)
+              in
+              Alcotest.(check bool)
+                "automatic outbound work did not disclose private cached bytes"
+                true
+                (remote = Error (Transport_http.Unexpected_status 404)))))
 
 let () =
   Alcotest.run "V1 transport"
@@ -2442,8 +2851,12 @@ let () =
         ] );
       ( "relay",
         [
-          Alcotest.test_case "native Core exchange preserves privacy and exact retry through TLS" `Slow
-            native_core_exchange_uses_enrolled_replicas_and_exact_retry;
+          Alcotest.test_case
+            "native Core exchange preserves privacy and exact retry through TLS"
+            `Slow native_core_exchange_uses_enrolled_replicas_and_exact_retry;
+          Alcotest.test_case
+            "missing native objects cannot expose private cached bytes" `Slow
+            native_missing_remote_objects_cannot_publish_private_cache_bytes;
           Alcotest.test_case "create-only storage and pagination" `Quick
             relay_is_create_only_and_paginated;
           Alcotest.test_case "bootstrap storage is create-only and SHA-bound"
