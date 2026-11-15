@@ -103,6 +103,62 @@ let initialize root =
 let load repository = S.load repository |> ok S.error_to_string
 let local loaded = loaded.S.local |> Option.get
 
+let cli root arguments =
+  let binary =
+    List.find Sys.file_exists
+      [ "../bin/yeokcham_v1.exe"; "_build/default/bin/yeokcham_v1.exe" ]
+  in
+  let output = Filename.temp_file "yeokcham-local-core-cli-" "" in
+  let errors = Filename.temp_file "yeokcham-local-core-cli-errors-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.unlink output;
+      Unix.unlink errors)
+    (fun () ->
+      let stdout = Unix.openfile output [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+      let stderr = Unix.openfile errors [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+      let child =
+        Unix.create_process binary
+          (Array.of_list ((binary :: arguments) @ [ "--root"; root ]))
+          Unix.stdin stdout stderr
+      in
+      Unix.close stdout;
+      Unix.close stderr;
+      let _, status = Unix.waitpid [] child in
+      let read path = In_channel.with_open_bin path In_channel.input_all in
+      (status, read output, read errors))
+
+let failed_inspection_cli root command exit_code code =
+  let status, output, errors = cli root [ command; "--format"; "json" ] in
+  Alcotest.(check bool)
+    (command ^ " inspection exit: " ^ errors)
+    true
+    (status = Unix.WEXITED exit_code);
+  let json = Yojson.Safe.from_string output in
+  let open Yojson.Safe.Util in
+  Alcotest.(check int)
+    "domain JSON schema" 2
+    (json |> member "schema_version" |> to_int);
+  Alcotest.(check string)
+    "actionable inspection code" code
+    (json |> member "code" |> to_string);
+  Alcotest.(check bool)
+    "failure preserves domain result" true
+    (json |> member "data" <> `Null);
+  List.iter
+    (fun action ->
+      let arguments =
+        action |> member "arguments" |> to_list |> List.map to_string
+      in
+      Alcotest.(check bool)
+        "unverified state suggests no write/recovery action" true
+        (List.for_all
+           (fun argument ->
+             not (List.mem argument [ "undo"; "restore"; "integrate"; "save" ]))
+           arguments))
+    (json |> member "next_actions" |> to_list);
+  json |> member "data"
+
 let private_initialization () =
   with_root (fun root ->
       let repository, _, _, authority, _ = initialize root in
@@ -273,7 +329,9 @@ let incomplete_records_and_invalid_positions () =
         (L.decode
            ~store:(S.underlying_store repository)
            ~authority
-           (L.encode local0 |> ok Fun.id)))
+           (L.encode local0 |> ok Fun.id));
+      reject "metadata fabricated a missing signed record"
+        (S.inspect_repository ~root))
 
 let branch_collision_and_entropy () =
   with_root (fun root ->
@@ -382,6 +440,8 @@ let[@warning "-4"] invalid_mappings_signatures_and_acceptance () =
       in
       reject "bad signature accepted"
         (L.decode ~store ~authority (append_record invalid));
+      reject "metadata trusted a bad signature"
+        (L.Metadata.decode ~store ~authority (append_record invalid));
       let swapped =
         match fields with
         | Yeokcham_encoding.Array
@@ -408,7 +468,39 @@ let[@warning "-4"] invalid_mappings_signatures_and_acceptance () =
         | _ -> Alcotest.fail "unexpected genesis reference pairs"
       in
       reject "logical/physical mapping mismatch accepted"
-        (L.decode ~store ~authority swapped))
+        (L.decode ~store ~authority swapped);
+      reject "metadata trusted a swapped logical/physical mapping"
+        (L.Metadata.decode ~store ~authority swapped);
+      reject "metadata ignored its control size bound"
+        (L.Metadata.decode ~store ~authority
+           (String.make ((8 * 1024 * 1024) + 1) 'x'));
+      (match fields with
+      | Encoding.Array (_ :: rest) ->
+          reject "metadata accepted an unsupported mandatory control version"
+            (L.Metadata.decode ~store ~authority
+               (array (Encoding.integer 99L :: rest) |> Encoding.encode))
+      | _ -> Alcotest.fail "expected canonical control fields");
+      match fields with
+      | Encoding.Array
+          [
+            version;
+            empty;
+            selected;
+            Encoding.Array (first :: records);
+            positions;
+          ] ->
+          reject "metadata accepted duplicate canonical record references"
+            (L.Metadata.decode ~store ~authority
+               (array
+                  [
+                    version;
+                    empty;
+                    selected;
+                    array (first :: first :: records);
+                    positions;
+                  ]
+               |> Encoding.encode))
+      | _ -> Alcotest.fail "expected canonical record references")
 
 let[@warning "-4"] divergent_names_are_retained_and_refused () =
   with_root (fun root ->
@@ -1460,9 +1552,75 @@ let[@warning "-4"] signed_false_acceptance_cannot_enter_local_state () =
       | Ok _ ->
           Alcotest.fail
             "a valid signature replaced accepted contents with private bytes");
+      let metadata = L.Metadata.decode ~store ~authority encoded |> ok Fun.id in
+      Alcotest.(check bool)
+        "metadata inspection does not prove a signed false result" true
+        (match L.Metadata.verify_contents ~store metadata with
+        | Error (Composition.Graph.Invalid_graph _) -> true
+        | _ -> false);
       Alcotest.(check bool)
         "refusal retains root" true
-        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let envelope =
+        Raw.get store before.S.object_id |> ok Raw.error_to_string
+      in
+      let payload =
+        match Yeokcham_envelope.payload envelope with
+        | Encoding.Array [ tag; version; inner; history; _ ] ->
+            array [ tag; version; inner; history; Encoding.bytes encoded ]
+        | _ -> Alcotest.fail "expected current local wrapper"
+      in
+      let target =
+        Yeokcham_envelope.create ~object_type:Yeokcham_envelope.V1_project_state
+          ~object_format_version:Yeokcham_envelope.current_object_format_version
+          ~mandatory_features:Yeokcham_envelope.supported_mandatory_features
+          ~payload ()
+        |> ok Yeokcham_envelope.creation_error_to_string
+        |> Raw.put store |> ok Raw.error_to_string
+      in
+      let forged_head =
+        Raw.compare_and_swap_ref store ~name:S.state_head_name
+          ~expected:(Some before.S.head) ~target:(Some target)
+        |> ok Raw.error_to_string
+      in
+      reject "live false accepted claim passed strict load" (S.load repository);
+      (match S.inspect repository |> ok S.error_to_string with
+      | S.Verified _ ->
+          Alcotest.fail "signed false result authorized writable state"
+      | S.Metadata_only metadata ->
+          Alcotest.(check bool)
+            "live metadata retains explicit invalid proof" true
+            (match metadata.S.metadata_contents with
+            | Some (Error (Composition.Graph.Invalid_graph _)) -> true
+            | _ -> false));
+      let open Yojson.Safe.Util in
+      let status =
+        failed_inspection_cli root "status" 6 "saved-state-unverified"
+      in
+      Alcotest.(check string)
+        "signatures are distinct from result proof" "verified"
+        (status |> member "record_signatures" |> to_string);
+      Alcotest.(check string)
+        "false result state is unverified" "unverified"
+        (status |> member "state_validation" |> member "state" |> to_string);
+      let history =
+        failed_inspection_cli root "history" 6 "saved-state-unverified"
+      in
+      Alcotest.(check int)
+        "invalid proof still exposes real private history"
+        (List.length (H.nodes before.S.history))
+        (history |> member "entries" |> to_list |> List.length);
+      let exit_status, _, errors = cli root [ "save"; "--format"; "json" ] in
+      Alcotest.(check bool)
+        ("false proof refuses CLI save: " ^ errors)
+        true
+        (exit_status = Unix.WEXITED 6);
+      Alcotest.(check bool)
+        "all false-proof inspection/refusal preserves root" true
+        (Raw.Mutable_ref.equal forged_head
+           (Option.get
+              (Raw.read_ref store ~name:S.state_head_name
+              |> ok Raw.error_to_string))))
 
 let stage_publication root =
   let repository, capability, certificate, authority, _ = initialize root in
@@ -3495,6 +3653,174 @@ let branch_creation_signing_releases_writer_and_revalidates () =
                 (List.length (H.nodes after.S.history)))))
     [ 0; 1; 2 ]
 
+let[@warning "-4"] metadata_inspection_survives_missing_shared_chunks_without_authorizing_writes
+    () =
+  with_root (fun parent ->
+      let root = Filename.concat parent "workspace\027[31m" in
+      Unix.mkdir root 0o700;
+      let repository, capability, certificate, authority, _ = initialize root in
+      let bytes =
+        String.init ((2 * 1024 * 1024) + 31) (fun i -> Char.chr (i mod 251))
+      in
+      let revision, result =
+        add_incoming_revision repository capability certificate authority
+          "shared.bin" bytes
+      in
+      let plan = native_plan root [ revision ] in
+      ignore (native_apply root plan (Some capability));
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let tree =
+        Composition.load store result |> ok Composition.error_to_string
+      in
+      let content =
+        match List.assoc [ "shared.bin" ] (Composition.entries tree) with
+        | Composition.File file -> file.content
+        | Composition.Directory -> Alcotest.fail "expected shared file"
+      in
+      let content_id = Snapshot.Content.stored_object_id content in
+      let manifest =
+        Snapshot.Manifest.load_metadata store
+          (Snapshot.Manifest.of_stored_object_id content_id)
+        |> ok Snapshot.error_to_string
+      in
+      let chunk =
+        List.hd (Snapshot.Manifest.chunks manifest)
+        |> fst |> Snapshot.Chunk.stored_object_id
+      in
+      let envelope = Raw.get store chunk |> ok Raw.error_to_string in
+      Unix.unlink (Raw.object_path store chunk);
+      reject "strict loader accepted missing shared bytes" (S.load repository);
+      let inspect () =
+        match S.inspect repository |> ok S.error_to_string with
+        | S.Verified _ -> Alcotest.fail "missing bytes became a verified state"
+        | S.Metadata_only metadata -> metadata
+      in
+      let metadata = inspect () in
+      Alcotest.(check string)
+        "metadata preserves full history/cursor/counter"
+        (H.encode before.S.history |> ok Fun.id)
+        (H.encode metadata.S.metadata_history |> ok Fun.id);
+      Alcotest.(check bool)
+        "historical signed branch declarations stay inspectable" true
+        (L.Metadata.branches (Option.get metadata.S.metadata_local)
+        = L.branches (local before));
+      Alcotest.(check bool)
+        "missing public contents remain an explicit failed proof" true
+        (match metadata.S.metadata_contents with
+        | Some
+            (Error (Composition.Graph.Content_error (Composition.Unavailable _)))
+          ->
+            true
+        | _ -> false);
+      let check_cli exit_code code =
+        let open Yojson.Safe.Util in
+        let status = failed_inspection_cli root "status" exit_code code in
+        Alcotest.(check string)
+          "exact saved position"
+          (Int64.to_string (H.current before.S.history).H.id)
+          (status |> member "saved" |> member "history" |> member "sequence"
+         |> to_string);
+        Alcotest.(check string)
+          "exact selected branch"
+          (C.Branch_id.to_hex (L.selected (local before)).L.branch)
+          (status |> member "branch" |> member "id" |> to_string);
+        Alcotest.(check string)
+          "no working-tree capture" "not_attempted"
+          (status |> member "capture" |> member "state" |> to_string);
+        Alcotest.(check bool)
+          "unknown changes remain unknown" true
+          (status |> member "changes" = `Null);
+        let history = failed_inspection_cli root "history" exit_code code in
+        let entries = history |> member "entries" |> to_list in
+        Alcotest.(check int)
+          "history remains complete"
+          (List.length (H.nodes before.S.history))
+          (List.length entries);
+        let current = history |> member "current" |> to_string in
+        let current =
+          List.find
+            (fun row -> row |> member "id" |> to_string = current)
+            entries
+        in
+        Alcotest.(check string)
+          "broken current snapshot is unavailable" "unavailable"
+          (current |> member "availability" |> to_string);
+        Alcotest.(check bool)
+          "unavailable comparison remains unknown" true
+          (current |> member "changed_paths" = `Null);
+        List.iter
+          (fun command ->
+            let result, output, errors = cli root [ command ] in
+            Alcotest.(check bool)
+              (command ^ " plain inspection exit: " ^ errors)
+              true
+              (result = Unix.WEXITED exit_code);
+            Alcotest.(check bool)
+              "plain failure escapes terminal controls in native paths" false
+              (String.contains output '\027');
+            Alcotest.(check bool)
+              "plain output includes saved snapshot identity" true
+              (let identity =
+                 M.Snapshot_id.to_string (H.current before.S.history).H.snapshot
+               in
+               let rec contains offset =
+                 offset + String.length identity <= String.length output
+                 && (String.sub output offset (String.length identity)
+                     = identity
+                    || contains (offset + 1))
+               in
+               contains 0))
+          [ "status"; "history" ]
+      in
+      check_cli 5 "saved-contents-unavailable";
+      reject "metadata inspection authorized capture" (Service.save ~root);
+      reject "metadata inspection authorized acceptance"
+        (Native_integrate.prepare ~root ~selected_revisions:[]
+           ~reconcile_heads:None);
+      reject "metadata project escaped strict previous-root validation"
+        (S.save_collaborative repository ~expected:metadata.S.metadata_head
+           ~project:metadata.S.metadata_project
+           ~collaboration:(Option.get metadata.S.metadata_collaboration));
+      Alcotest.(check bool)
+        "inspection/writes do not heal from working files" false
+        (Sys.file_exists (Raw.object_path store chunk));
+      Alcotest.(check string)
+        "ordinary shared bytes remain unchanged" bytes
+        (read_file root "shared.bin");
+      Alcotest.(check bool)
+        "read-only failure preserves exact root" true
+        (Raw.Mutable_ref.equal before.S.head
+           (Option.get
+              (Raw.read_ref store ~name:S.state_head_name
+              |> ok Raw.error_to_string)));
+      Raw.put store envelope |> ok Raw.error_to_string |> ignore;
+      Alcotest.(check bool)
+        "restoring exact immutable data permits full validation" true
+        (match S.inspect repository |> ok S.error_to_string with
+        | S.Verified _ -> true
+        | S.Metadata_only _ -> false);
+      let chunk_path = Raw.object_path store chunk in
+      Out_channel.with_open_bin chunk_path (fun out ->
+          output_string out "corrupt immutable object");
+      check_cli 6 "saved-state-unverified";
+      reject "corrupt public contents authorized writes" (Service.save ~root);
+      reject "corrupt immutable object was replaced implicitly"
+        (Raw.put store envelope);
+      Alcotest.(check string)
+        "corruption remains available for explicit diagnosis"
+        "corrupt immutable object"
+        (In_channel.with_open_bin chunk_path In_channel.input_all);
+      Alcotest.(check string)
+        "corrupt-content inspection preserves working bytes" bytes
+        (read_file root "shared.bin");
+      Alcotest.(check bool)
+        "corrupt-content inspection preserves exact root" true
+        (Raw.Mutable_ref.equal before.S.head
+           (Option.get
+              (Raw.read_ref store ~name:S.state_head_name
+              |> ok Raw.error_to_string))))
+
 let native_integration_preserves_private_work_and_retries () =
   with_root (fun root ->
       let repository, capability, _, _, _ = initialize root in
@@ -4941,5 +5267,10 @@ let () =
           Alcotest.test_case
             "branch signing releases writer and refuses provider-time changes"
             `Quick branch_creation_signing_releases_writer_and_revalidates;
+          Alcotest.test_case
+            "read-only metadata remains available without shared chunks or \
+             write authority"
+            `Quick
+            metadata_inspection_survives_missing_shared_chunks_without_authorizing_writes;
         ] );
     ]

@@ -74,6 +74,20 @@ type loaded = {
   object_id : Yeokcham_store.Stored_object_id.t;
 }
 
+type metadata_inspection = private {
+  metadata_history : Yeokcham_v1_undo.t;
+  metadata_local : Local.Metadata.t option;
+  metadata_project : Yeokcham_v1_model.project;
+  metadata_collaboration : collaboration option;
+  metadata_head : Yeokcham_store.Mutable_ref.t;
+  metadata_object_id : Yeokcham_store.Stored_object_id.t;
+  metadata_failure : error;
+  metadata_contents :
+    (unit, Yeokcham_v1_composition.Graph.failure) result option;
+}
+
+type inspection = Verified of loaded | Metadata_only of metadata_inspection
+
 val local_shared_snapshots : loaded -> Yeokcham_v1_model.Snapshot_id.t list
 (** Public revision bases/results and accepted snapshots are independent roots,
     including derived selected results absent from private checkpoints. *)
@@ -121,6 +135,16 @@ val init_with :
 
 val open_repository : root:string -> (repository, error) result
 val load : repository -> (loaded, error) result
+
+val inspect : repository -> (inspection, error) result
+(** Read-only, one captured root. Metadata_only verifies control/signatures/refs
+    and history positions but cannot authorize application or publication. The
+    full validation failure and separate public composition check remain
+    explicit. *)
+
+val inspect_repository : root:string -> (inspection, error) result
+(** Opens the raw repository for inspection without returning a writable V1
+    repository or requiring [open_repository]'s complete content proof. *)
 
 val save :
   ?history:Yeokcham_v1_undo.t ->

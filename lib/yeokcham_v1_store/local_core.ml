@@ -500,7 +500,30 @@ let select_saved state branch =
   then Ok { state with selected_branch = branch }
   else Error "branch has no private position"
 
-let encode state =
+type metadata = {
+  metadata_pool : Core.pool;
+  metadata_records : (Core.Record_id.t * Store.Stored_object_id.t) list;
+  metadata_empty : Core.Object_id.t;
+  metadata_selected : Core.Branch_id.t;
+  metadata_positions : position list;
+  metadata_publication_root : Store.Stored_object_id.t option;
+  metadata_operation_root : Store.Stored_object_id.t option;
+}
+
+let metadata_of_state state =
+  {
+    metadata_pool = state.pool;
+    metadata_records = state.records;
+    metadata_empty = state.empty;
+    metadata_selected = state.selected_branch;
+    metadata_positions = state.positions;
+    metadata_publication_root = state.publication_root;
+    metadata_operation_root = state.operation_root;
+  }
+
+let max_control_bytes = 8 * 1024 * 1024
+
+let encode_metadata metadata =
   let* record_values =
     List.fold_left
       (fun result (id, stored_id) ->
@@ -513,7 +536,7 @@ let encode state =
             ]
         in
         Ok (value :: values))
-      (Ok []) state.records
+      (Ok []) metadata.metadata_records
   in
   let* records = array (List.rev record_values) in
   let* positions =
@@ -529,31 +552,23 @@ let encode state =
             ]
         in
         Ok (value :: values))
-      (Ok []) state.positions
+      (Ok []) metadata.metadata_positions
   in
   let* positions = array (List.rev positions) in
   let fields =
     [
-      Encoding.bytes (Core.Object_id.to_raw state.empty);
-      Encoding.bytes (Core.Branch_id.to_raw state.selected_branch);
+      Encoding.bytes (Core.Object_id.to_raw metadata.metadata_empty);
+      Encoding.bytes (Core.Branch_id.to_raw metadata.metadata_selected);
       records;
       positions;
     ]
   in
-  let* publication_fields =
-    match (state.publication_root, state.publications) with
-    | None, [] -> Ok Encoding.null
-    | Some root, _ :: _ ->
-        Ok (Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
-    | _ -> Error "publication root and receipts disagree"
+  let root_field =
+    Option.fold ~none:Encoding.null ~some:(fun root ->
+        Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
   in
-  let* operation_field =
-    match (state.operation_root, state.operations) with
-    | None, [] -> Ok Encoding.null
-    | Some root, _ :: _ ->
-        Ok (Encoding.bytes (Store.Stored_object_id.to_raw_bytes root))
-    | _ -> Error "operation root and operations disagree"
-  in
+  let publication_fields = root_field metadata.metadata_publication_root in
+  let operation_field = root_field metadata.metadata_operation_root in
   let shared_only =
     List.exists
       (fun row ->
@@ -561,8 +576,8 @@ let encode state =
           (List.exists
              (fun position ->
                Core.Branch_id.equal position.branch row.Core.branch_id)
-             state.positions))
-      (branches state)
+             metadata.metadata_positions))
+      (Core.branch_states metadata.metadata_pool)
   in
   let* value =
     if shared_only then
@@ -571,28 +586,45 @@ let encode state =
         @ [ publication_fields; operation_field ])
     else
       match
-        ( state.operation_root,
-          state.operations,
-          state.publication_root,
-          state.publications )
+        (metadata.metadata_operation_root, metadata.metadata_publication_root)
       with
-      | Some root, _ :: _, _, _ ->
+      | Some root, _ ->
           array
             ((Encoding.integer 3L :: fields)
             @ [
                 publication_fields;
                 Encoding.bytes (Store.Stored_object_id.to_raw_bytes root);
               ])
-      | None, [], None, [] -> array (Encoding.integer 1L :: fields)
-      | None, [], Some root, _ :: _ ->
+      | None, None -> array (Encoding.integer 1L :: fields)
+      | None, Some root ->
           array
             ((Encoding.integer 2L :: fields)
             @ [ Encoding.bytes (Store.Stored_object_id.to_raw_bytes root) ])
-      | _ -> Error "operation root and operations disagree"
   in
-  Ok (Encoding.encode value)
+  let bytes = Encoding.encode value in
+  if String.length bytes > max_control_bytes then
+    Error "local core control exceeds 8 MiB"
+  else Ok bytes
 
-let[@warning "-4"] decode ~store ~authority bytes =
+let encode state =
+  let* () =
+    match (state.publication_root, state.publications) with
+    | None, [] | Some _, _ :: _ -> Ok ()
+    | _ -> Error "publication root and receipts disagree"
+  in
+  let* () =
+    match (state.operation_root, state.operations) with
+    | None, [] | Some _, _ :: _ -> Ok ()
+    | _ -> Error "operation root and operations disagree"
+  in
+  encode_metadata (metadata_of_state state)
+
+let[@warning "-4"] decode_metadata ~store ~authority bytes =
+  let* () =
+    if String.length bytes > max_control_bytes then
+      Error "local core control exceeds 8 MiB"
+    else Ok ()
+  in
   let* value =
     Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string
   in
@@ -766,56 +798,19 @@ let[@warning "-4"] decode ~store ~authority bytes =
           else Error "local core records have missing causal references"
     in
     let* pool = retain (Core.empty_pool ~repository) pending in
-    let* () =
-      Composition.Graph.validate store pool
-      |> Result.map_error Composition.Graph.error_to_string
-    in
-    let* publications =
-      match publication_root with
-      | None -> Ok []
-      | Some root -> Publication_receipt.load store ~scope:repository root
-    in
-    let* () = Publication_receipt.validate store pool publications in
-    let* operations =
-      match operation_root with
-      | None -> Ok []
-      | Some root -> Operation.load store ~scope:repository root
-    in
-    let* () = Operation.validate ~store ~authority pool operations in
-    let* () =
-      if
-        List.exists
-          (fun operation ->
-            List.exists
-              (fun publication ->
-                Core.Operation_id.equal operation.Operation.token
-                  publication.operation
-                || List.exists
-                     (fun recovery ->
-                       Core.Operation_id.equal recovery.Operation.attempt
-                         publication.operation)
-                     (Option.to_list operation.Operation.recovery
-                     @ operation.Operation.previous_recoveries))
-              publications)
-          operations
-      then Error "duplicate operation token across publication/integration"
-      else Ok ()
-    in
-    let state =
+    let metadata =
       {
-        pool;
-        records = ids;
-        empty;
-        selected_branch;
-        positions;
-        publications;
-        publication_root;
-        operations;
-        operation_root;
+        metadata_pool = pool;
+        metadata_records = ids;
+        metadata_empty = empty;
+        metadata_selected = selected_branch;
+        metadata_positions = positions;
+        metadata_publication_root = publication_root;
+        metadata_operation_root = operation_root;
       }
     in
     let branch_ids =
-      branches state |> List.map (fun row -> row.Core.branch_id)
+      Core.branch_states pool |> List.map (fun row -> row.Core.branch_id)
     in
     let position_ids = List.map (fun position -> position.branch) positions in
     if
@@ -839,7 +834,7 @@ let[@warning "-4"] decode ~store ~authority bytes =
                   List.find
                     (fun row ->
                       Core.Branch_id.equal row.Core.branch_id position.branch)
-                    (branches state)
+                    (Core.branch_states pool)
                 in
                 let rec reachable seen = function
                   | [] -> false
@@ -863,15 +858,101 @@ let[@warning "-4"] decode ~store ~authority bytes =
                 Error "private branch basis is not a retained accepted version")
           (Ok ()) positions
       in
-      let* canonical = encode state in
+      let* canonical = encode_metadata metadata in
       if
         canonical = bytes
         && ids
            = List.sort_uniq
                (fun (a, _) (b, _) -> Core.Record_id.compare a b)
                ids
-      then Ok state
+      then Ok metadata
       else Error "noncanonical local core state"
+
+let[@warning "-4"] decode ~store ~authority bytes =
+  let* metadata = decode_metadata ~store ~authority bytes in
+  let {
+    metadata_pool = pool;
+    metadata_records = ids;
+    metadata_empty = empty;
+    metadata_selected = selected_branch;
+    metadata_positions = positions;
+    metadata_publication_root = publication_root;
+    metadata_operation_root = operation_root;
+  } =
+    metadata
+  in
+  let repository = Core.pool_repository pool in
+  let* () =
+    Composition.Graph.validate store pool
+    |> Result.map_error Composition.Graph.error_to_string
+  in
+  let* publications =
+    match publication_root with
+    | None -> Ok []
+    | Some root -> Publication_receipt.load store ~scope:repository root
+  in
+  let* () = Publication_receipt.validate store pool publications in
+  let* operations =
+    match operation_root with
+    | None -> Ok []
+    | Some root -> Operation.load store ~scope:repository root
+  in
+  let* () = Operation.validate ~store ~authority pool operations in
+  let* () =
+    if
+      List.exists
+        (fun operation ->
+          List.exists
+            (fun publication ->
+              Core.Operation_id.equal operation.Operation.token
+                publication.operation
+              || List.exists
+                   (fun recovery ->
+                     Core.Operation_id.equal recovery.Operation.attempt
+                       publication.operation)
+                   (Option.to_list operation.Operation.recovery
+                   @ operation.Operation.previous_recoveries))
+            publications)
+        operations
+    then Error "duplicate operation token across publication/integration"
+    else Ok ()
+  in
+  let state =
+    {
+      pool;
+      records = ids;
+      empty;
+      selected_branch;
+      positions;
+      publications;
+      publication_root;
+      operations;
+      operation_root;
+    }
+  in
+  let* canonical = encode state in
+  if canonical = bytes then Ok state else Error "noncanonical local core state"
+
+module Metadata = struct
+  type t = metadata
+
+  let decode = decode_metadata
+
+  let selected metadata =
+    List.find
+      (fun p -> Core.Branch_id.equal p.branch metadata.metadata_selected)
+      metadata.metadata_positions
+
+  let positions metadata = metadata.metadata_positions
+  let branches metadata = Core.branch_states metadata.metadata_pool
+  let records metadata = Core.records metadata.metadata_pool
+  let empty_snapshot metadata = metadata.metadata_empty
+
+  let verify_contents ~store metadata =
+    Composition.Graph.validate store metadata.metadata_pool
+end
+
+let metadata = metadata_of_state
 
 module Ids = Map.Make (Core.Record_id)
 

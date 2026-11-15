@@ -140,9 +140,11 @@
 (test
  (name test_local_core)
  (modules test_local_core)
+ (deps ../bin/yeokcham_v1.exe)
  (libraries
   alcotest
   unix
+  yojson
   yeokcham_encoding
   yeokcham_envelope
   yeokcham_store

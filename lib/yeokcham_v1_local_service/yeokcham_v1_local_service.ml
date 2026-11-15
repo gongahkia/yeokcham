@@ -12,6 +12,7 @@ module Model = Yeokcham_v1_model
 module Journal = Yeokcham_v1_restore_journal
 module Restore_proof = Yeokcham_v1_restore_proof
 module Snapshot = Yeokcham_snapshot
+module Composition = Yeokcham_v1_composition
 module Store = Yeokcham_v1_store
 module Trust = Yeokcham_v1_trust
 module Package = Yeokcham_v1_package
@@ -5138,7 +5139,35 @@ type history_page = {
   page_cursor : int64;
   entries : history_entry list;
   next_before : int64 option;
+  page_verification :
+    [ `Verified | `Unavailable of string | `Integrity of string ];
 }
+
+let inspect_saved_state ~root =
+  Store.inspect_repository ~root |> Result.map_error (fun e -> Store_error e)
+
+let inspect_saved_snapshot ~root ~snapshot =
+  let* store =
+    Yeokcham_store.open_repository ~root
+    |> Result.map_error (fun e -> Store_error (Store.Store_error e))
+  in
+  validate_snapshot_closure store snapshot
+
+let metadata_validation_failure metadata =
+  match metadata.Store.metadata_contents with
+  | Some
+      (Error (Composition.Graph.Content_error (Composition.Unavailable message)))
+    ->
+      `Unavailable message
+  | Some
+      (Error
+         (( Composition.Graph.Invalid_graph _ | Composition.Graph.Decision _
+          | Composition.Graph.Content_error
+              ( Composition.Invalid_input _ | Composition.Integrity _
+              | Composition.Conflicts _ ) ) as error)) ->
+      `Integrity (Composition.Graph.error_to_string error)
+  | None | Some (Ok ()) ->
+      `Integrity (Store.error_to_string metadata.Store.metadata_failure)
 
 let history_identity history node =
   match History.workspace history with
@@ -5433,122 +5462,132 @@ let inspect_local_history ~root ~before ~limit =
     Option.fold ~none:false ~some:(fun id -> Int64.compare id 0L < 0) before
   then Error (History_error "history cursor must be nonnegative")
   else
-    with_repository ~root (fun repository loaded ->
-        let store = Store.underlying_store repository in
-        let history = loaded.Store.history in
-        let candidates =
-          History.nodes history |> List.rev
-          |> List.filter (fun node ->
-              Option.fold ~none:true
-                ~some:(fun before -> Int64.compare node.History.id before < 0)
-                before)
-        in
-        let rec page remaining reversed = function
-          | [] -> (List.rev reversed, false)
-          | _ when remaining = 0 -> (List.rev reversed, true)
-          | node :: rest -> page (remaining - 1) (node :: reversed) rest
-        in
-        let page, more = page limit [] candidates in
-        let checked = ref [] in
-        let availability snapshot =
-          match
-            List.assoc_opt (Model.Snapshot_id.to_string snapshot) !checked
-          with
-          | Some availability -> availability
-          | None ->
-              let availability =
-                if not (retained loaded.Store.project snapshot) then
-                  Not_retained
-                else
-                  match validate_snapshot_closure store snapshot with
-                  | Ok () -> Available
-                  | Error e -> Unavailable (error_to_string e)
-              in
-              checked :=
-                (Model.Snapshot_id.to_string snapshot, availability) :: !checked;
-              availability
-        in
-        let entries =
-          List.map
-            (fun node ->
-              let node_availability = availability node.History.snapshot in
-              let history_paths =
-                match (node_availability, node.History.parent) with
-                | Available, Some parent -> (
-                    let* parent = History.find history parent in
-                    match availability parent.History.snapshot with
-                    | Available ->
-                        comparison_differences store
-                          ~before:parent.History.snapshot
-                          ~after:node.History.snapshot
-                        |> Result.map
-                             (List.map (fun difference -> difference.path))
-                        |> Result.map_error error_to_string
-                    | Not_retained -> Error "parent contents are not retained"
-                    | Unavailable reason ->
-                        Error ("parent contents unavailable: " ^ reason))
-                | Available, None -> (
-                    match loaded.Store.local with
-                    | None -> Error "no recorded parent comparison"
-                    | Some local ->
-                        let* empty =
-                          Model.Snapshot_id.of_string
-                            (Model.Core.Object_id.to_hex
-                               (Store.Local.empty_snapshot local))
-                          |> Result.map_error Model.error_to_string
-                        in
-                        comparison_differences store ~before:empty
-                          ~after:node.History.snapshot
-                        |> Result.map
-                             (List.map (fun difference -> difference.path))
-                        |> Result.map_error error_to_string)
-                | Not_retained, _ -> Error "contents are not retained"
-                | Unavailable reason, _ -> Error reason
-              in
-              let history_title =
-                Model.export loaded.Store.project |> fun state ->
-                state.Model.state_drafts
-                |> List.find_opt (fun draft ->
-                    Model.Draft_id.equal draft.Model.draft_id node.History.draft)
-                |> Option.map (fun draft -> draft.Model.title)
-              in
-              let referenced_by_branches =
-                match loaded.Store.local with
-                | None -> []
+    let* inspection = inspect_saved_state ~root in
+    let project, history, local_metadata, page_verification =
+      match inspection with
+      | Store.Verified loaded ->
+          ( loaded.Store.project,
+            loaded.Store.history,
+            Option.map Store.Local.metadata loaded.Store.local,
+            `Verified )
+      | Store.Metadata_only metadata ->
+          ( metadata.Store.metadata_project,
+            metadata.Store.metadata_history,
+            metadata.Store.metadata_local,
+            metadata_validation_failure metadata )
+    in
+    let* store =
+      Yeokcham_store.open_repository ~root
+      |> Result.map_error (fun e -> Store_error (Store.Store_error e))
+    in
+    let candidates =
+      History.nodes history |> List.rev
+      |> List.filter (fun node ->
+          Option.fold ~none:true
+            ~some:(fun before -> Int64.compare node.History.id before < 0)
+            before)
+    in
+    let rec page remaining reversed = function
+      | [] -> (List.rev reversed, false)
+      | _ when remaining = 0 -> (List.rev reversed, true)
+      | node :: rest -> page (remaining - 1) (node :: reversed) rest
+    in
+    let page, more = page limit [] candidates in
+    let checked = ref [] in
+    let availability snapshot =
+      match List.assoc_opt (Model.Snapshot_id.to_string snapshot) !checked with
+      | Some availability -> availability
+      | None ->
+          let availability =
+            if not (retained project snapshot) then Not_retained
+            else
+              match validate_snapshot_closure store snapshot with
+              | Ok () -> Available
+              | Error e -> Unavailable (error_to_string e)
+          in
+          checked :=
+            (Model.Snapshot_id.to_string snapshot, availability) :: !checked;
+          availability
+    in
+    let entries =
+      List.map
+        (fun node ->
+          let node_availability = availability node.History.snapshot in
+          let history_paths =
+            match (node_availability, node.History.parent) with
+            | Available, Some parent -> (
+                let* parent = History.find history parent in
+                match availability parent.History.snapshot with
+                | Available ->
+                    comparison_differences store ~before:parent.History.snapshot
+                      ~after:node.History.snapshot
+                    |> Result.map (List.map (fun difference -> difference.path))
+                    |> Result.map_error error_to_string
+                | Not_retained -> Error "parent contents are not retained"
+                | Unavailable reason ->
+                    Error ("parent contents unavailable: " ^ reason))
+            | Available, None -> (
+                match local_metadata with
+                | None -> Error "no recorded parent comparison"
                 | Some local ->
-                    Store.Local.positions local
-                    |> List.filter_map (fun position ->
-                        if position.Store.Local.cursor = node.History.id then
-                          Some position.Store.Local.branch
-                        else None)
-              in
-              {
-                history_node = node;
-                history_identity = history_identity history node;
-                history_title;
-                availability = node_availability;
-                history_children =
-                  History.children history node.History.id
-                  |> List.map (fun child -> child.History.id);
-                history_paths;
-                referenced_by_branches;
-              })
-            page
-        in
-        let next_before =
-          if more then
-            Option.map
-              (fun node -> node.History.id)
-              (List.nth_opt page (List.length page - 1))
-          else None
-        in
-        Ok
+                    let* empty =
+                      Model.Snapshot_id.of_string
+                        (Model.Core.Object_id.to_hex
+                           (Store.Local.Metadata.empty_snapshot local))
+                      |> Result.map_error Model.error_to_string
+                    in
+                    comparison_differences store ~before:empty
+                      ~after:node.History.snapshot
+                    |> Result.map (List.map (fun difference -> difference.path))
+                    |> Result.map_error error_to_string)
+            | Not_retained, _ -> Error "contents are not retained"
+            | Unavailable reason, _ -> Error reason
+          in
+          let history_title =
+            Model.export project |> fun state ->
+            state.Model.state_drafts
+            |> List.find_opt (fun draft ->
+                Model.Draft_id.equal draft.Model.draft_id node.History.draft)
+            |> Option.map (fun draft -> draft.Model.title)
+          in
+          let referenced_by_branches =
+            match local_metadata with
+            | None -> []
+            | Some local ->
+                Store.Local.Metadata.positions local
+                |> List.filter_map (fun position ->
+                    if position.Store.Local.cursor = node.History.id then
+                      Some position.Store.Local.branch
+                    else None)
+          in
           {
-            page_workspace = History.workspace history;
-            page_cursor = (History.current history).History.id;
-            entries;
-            next_before;
+            history_node = node;
+            history_identity = history_identity history node;
+            history_title;
+            availability = node_availability;
+            history_children =
+              History.children history node.History.id
+              |> List.map (fun child -> child.History.id);
+            history_paths;
+            referenced_by_branches;
           })
+        page
+    in
+    let next_before =
+      if more then
+        Option.map
+          (fun node -> node.History.id)
+          (List.nth_opt page (List.length page - 1))
+      else None
+    in
+    Ok
+      {
+        page_workspace = History.workspace history;
+        page_cursor = (History.current history).History.id;
+        entries;
+        next_before;
+        page_verification;
+      }
 
 let share_selected_with ~observe ~root ~paths ~update ~title ~dry_run
     ~signing_capability =

@@ -196,4 +196,16 @@ Resume preserves external edits after Materialized and pauses when unexpected
 edits conflict with Applying. An already committed shared acceptance cannot be
 cancelled through private recovery. Use private undo/restore instead; source
 reversion does not unaccept work or restore user files. Native clone/exchange
-and shared conflict resolution remain unfinished P3 work.
+now have automated journeys; shared conflict resolution and full P3 acceptance
+remain unfinished.
+
+When committed public contents are missing, `status` and `history` can still show
+checked saved identities, branch declarations and history topology. They report
+unavailable contents with exit 5; corrupt contents or invalid result proofs return
+exit 6. JSON retains domain data and marks `state_validation` unverified. Status
+does not scan working files in this state, and live differences/recovery state
+remain unknown. A valid historical signature does not prove an accepted result.
+Writes still require full verification; these commands do not recover missing
+objects from current files or authorize a restore. Preserve the store, working
+files and recovery material while diagnosing with `verify`. Native exchange
+re-fetch/repair for an already incomplete local state remains P3 work.

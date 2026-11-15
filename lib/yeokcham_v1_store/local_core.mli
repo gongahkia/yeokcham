@@ -1,7 +1,7 @@
 module Core = Yeokcham_v1_model.Core
 
 module Operation = Integration_operation
-(** Authenticated local branch metadata for the P2 adapter. Stored in the
+(** Authenticated local branch metadata for the local adapter. Stored in the
     existing project-state root, never a separate mutable ref. *)
 
 type t
@@ -172,7 +172,34 @@ val decode :
   (t, string) result
 (** Verifies canonical typed objects, historical signatures, reference closure
     and actual revision-scope/deterministic accepted-result semantics. Missing
-    required contents or unsupported review/resolution semantics refuse. *)
+    required contents or unsupported review/resolution semantics refuse. Local
+    control bytes are bounded to 8 MiB before decoding and after encoding. *)
+
+module Metadata : sig
+  type t
+
+  val decode :
+    store:Yeokcham_store.repository ->
+    authority:Yeokcham_v1_trust.authority ->
+    string ->
+    (t, string) result
+  (** Canonical control, historical signatures, logical references and private
+      position ancestry only. No accepted-result or correspondence proof. This
+      read-only type cannot be supplied where a verified Local.t is required. *)
+
+  val selected : t -> position
+  val positions : t -> position list
+  val branches : t -> Core.branch_state list
+  val records : t -> (Core.Record_id.t * Core.body) list
+  val empty_snapshot : t -> Core.Object_id.t
+
+  val verify_contents :
+    store:Yeokcham_store.repository ->
+    t ->
+    (unit, Yeokcham_v1_composition.Graph.failure) result
+end
+
+val metadata : t -> Metadata.t
 
 val validate_update : previous:t -> t -> (unit, string) result
 (** Existing authenticated records and branch identities cannot be erased. *)

@@ -1757,8 +1757,8 @@ exact source request ID, local closure and foreground coverage. `--request` refu
 a changed source selection after preview. `--resume DIRECTORY` is exclusive of
 new-clone options. Failure data identifies whether metadata is attached and offers
 an applicable local resume action only after attachment. Clone runs no project hooks.
-Received-branch switching is described below. Conflict resolution, missing-content
-inspection and the remaining authority/error/fault matrix are still P3 work.
+Received-branch switching and missing-content inspection are described below.
+Conflict resolution and the remaining authority/error/fault matrix are still P3 work.
 
 ### P3 received-branch selection (in progress)
 
@@ -1814,3 +1814,66 @@ Plain text distinguishes proposed allocation and saved-private restoration with
 known shared updates; the latter offers an integration preview. Selecting/restoring
 a private branch position does not accept, sign or export work. Catch-up to an
 already verified accepted head uses ordinary integration without another signature.
+
+### P3 inspection with unavailable saved contents (in progress)
+
+`Yeokcham_v1_store.Local.Metadata.t` is a separate abstract inspection type.
+`Metadata.decode ~store ~authority bytes` verifies the existing canonical local
+control (schemas 1–4), logical/stored identities, historical signatures, repository
+scope, causal references, selected position and accepted ancestry. It does not
+load private correspondence/operations or prove public snapshot/composition
+claims. `selected`, `positions`, `branches`, `records` and `empty_snapshot` expose
+those checked declarations. `Local.metadata : Local.t -> Metadata.t` narrows a
+fully verified value; there is no reverse conversion. `Metadata.verify_contents
+~store` returns the actual `Composition.Graph.failure` separately. A signature
+on a false accepted result can pass metadata inspection and must still fail that
+proof. Historical verification does not admit new records under current authority.
+
+Both local control encoders and decoders now enforce TC06's 8 MiB individual
+control bound. The ordered bytes, schemas and registry codes are unchanged.
+Overlarge existing controls refuse explicitly; this change does not implement an
+incremental index replacement or remove stored data.
+
+`Store.inspection = Verified of loaded | Metadata_only of metadata_inspection`.
+The latter private record contains `metadata_history`, `metadata_local`,
+`metadata_project`, `metadata_collaboration`, `metadata_head`, `metadata_object_id`,
+`metadata_failure` and `metadata_contents`. `Store.inspect repository` captures
+one state head, validates the project/history and attempts the complete loader.
+On failure it returns metadata only if the separate signature/reference/position
+checks succeed; the failed proof is retained, never replaced by success.
+`Store.inspect_repository ~root` opens through the raw format/layout boundary for
+this inspection and returns no writable V1 repository. `Store.open_repository`,
+`load`, previous-root checks and all save paths retain complete validation,
+including public results, correspondence, operations and their history bindings.
+
+`Service.inspect_saved_state ~root` exposes this inspection;
+`inspect_saved_snapshot ~root ~snapshot` checks one exact content closure without
+scanning the working tree. `inspect_local_history` adds `page_verification`:
+`Verified`, `Unavailable message` or `Integrity message` (polymorphic variants).
+`metadata_validation_failure` preserves typed public graph errors. Missing public
+content maps to unavailable; corruption, false results and failed semantic checks
+map to integrity. Private-control failures whose loaders expose only strings are
+conservatively unverified/integrity; precise classification remains in the P3 audit.
+
+CLI `status` and `history` emit schema-2 domain data even when the committed
+public closure is incomplete: exit 5/`saved-contents-unavailable` for missing
+content and exit 6/`saved-state-unverified` for corrupt/invalid proof. They expose
+actual saved history/workspace/snapshot IDs, signed branch/head declarations and
+per-snapshot availability. Status adds `record_signatures`, `shared_records`,
+`known_branches` and `state_validation`; history adds `state_validation` while
+preserving topology/paging. Status capture is `not_attempted`, live differences,
+private receipts/operations and transfer/recovery status are unknown, not empty
+success. Plain output includes identities and the validation failure. No recovery
+write action is suggested from an unverified state. Invalid/missing signed
+controls still refuse rather than fabricating authenticated metadata.
+
+These paths do not capture/heal contents from working files, change the state
+root/history, authorize integration or treat declarations as admitted public
+cache contents. The existing composition verifier may stage derived immutable
+objects; it does not publish metadata or apply files. Fresh-process tests remove
+an actual multi-chunk public object, corrupt it, and install a validly signed
+false acceptance into a temporary state root. They verify domain JSON/plain
+outcomes, strict write refusal, exact root/ordinary-byte preservation and explicit
+failure of implicit corrupt-object replacement. This is inspection support, not
+remote repair: exchange still requires full existing state validation, and
+automatic re-fetch/repair plus remaining conflict/error/fault acceptance are P3 work.

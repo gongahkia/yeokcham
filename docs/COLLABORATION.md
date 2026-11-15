@@ -78,6 +78,16 @@ record. No managed background downloads or backup success is claimed. The client
 rescans the bounded relay inventory because its hash-order cursor is not an
 arrival high-water mark.
 
+If admitted public contents later become missing/corrupt, `status` and `history`
+can show checked signed declarations and private history without capturing disk
+contents or changing the state root. Missing content returns exit 5; corruption
+or a failed accepted-result proof returns exit 6. JSON keeps the actual domain
+data and marks the state unverified; signatures alone are not content proof.
+Transfer/recovery state remains unknown. Writers and native exchange still
+require complete validation; inspection does not re-fetch missing objects or
+repair corruption. Preserve current files/store/recovery roots and inspect the
+failure with `verify`; remote repair remains unfinished P3 work.
+
 ## Verified native clone (P3 in progress)
 
 Obtain a repository URL, independently compare the public root-verification
@@ -341,9 +351,10 @@ a decision, deliver work, or materialise a client working tree. Rotate or revoke
 credentials with `relay access rotate` and `relay access revoke`; that changes
 relay access only, not membership.
 
-## A fresh replica through a relay
+## Earlier V1 bootstrap through a relay
 
-There is no general `clone`. An existing equivalent replica explicitly runs
+The native Core clone above is distinct from this earlier V1 record family.
+For this bootstrap path, an existing equivalent replica explicitly runs
 `bootstrap publish REMOTE`. A new, already-enrolled device receives the public
 repository ID, named immutable basis ID, HTTPS URL, and independently compared
 root phrase, then uses `bootstrap`. Bootstrap verifies the signed basis before

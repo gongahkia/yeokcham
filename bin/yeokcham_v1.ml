@@ -3,6 +3,7 @@ module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model
 module Core = Model.Core
 module Local = Yeokcham_v1_store.Local
+module Store = Yeokcham_v1_store
 module Service = Yeokcham_v1_local_service
 module Text_diff = Service.Text_diff
 module Trust = Yeokcham_v1_trust
@@ -4136,9 +4137,221 @@ let render_display_difference difference =
             hunk.Text_diff.lines)
         hunks
 
+let metadata_failure metadata =
+  match Service.metadata_validation_failure metadata with
+  | `Unavailable message ->
+      (5, `Unavailable, "saved-contents-unavailable", message)
+  | `Integrity message ->
+      (6, `Integrity_failure, "saved-state-unverified", message)
+
+let render_metadata_status ~root metadata =
+  let status, outcome, code, message = metadata_failure metadata in
+  let history = metadata.Store.metadata_history in
+  let node = History.current history in
+  let identity = History.identity history node |> Result.to_option in
+  let local = metadata.Store.metadata_local in
+  let selected = Option.map Local.Metadata.selected local in
+  let branch =
+    Option.bind local (fun local ->
+        List.find_opt
+          (fun row ->
+            Core.Branch_id.equal row.Core.branch_id
+              (Local.Metadata.selected local).Local.branch)
+          (Local.Metadata.branches local))
+  in
+  let branch_json row =
+    `Assoc
+      [
+        ("id", `String (Core.Branch_id.to_hex row.Core.branch_id));
+        ( "names",
+          `List (List.map (fun name -> `String name) row.Core.display_names) );
+        ("event_heads", json_ids row.Core.event_heads);
+        ("accepted_heads", json_ids row.Core.accepted_heads);
+      ]
+  in
+  let contents =
+    match
+      Service.inspect_saved_snapshot ~root ~snapshot:node.History.snapshot
+    with
+    | Ok () -> `Assoc [ ("state", `String "available") ]
+    | Error error ->
+        `Assoc
+          [
+            ("state", `String "unavailable");
+            ( "message",
+              `String (public_error_message (Service.error_to_string error)) );
+          ]
+  in
+  let data =
+    `Assoc
+      [
+        ( "state_head",
+          `String
+            (Yeokcham_store.Stored_object_id.to_hex
+               metadata.Store.metadata_object_id) );
+        ( "saved",
+          `Assoc
+            [
+              ( "id",
+                `String
+                  (Option.fold
+                     ~none:("node:" ^ Int64.to_string node.History.id)
+                     ~some:(fun id ->
+                       Core.Workspace_id.to_hex (Core.History_id.workspace id)
+                       ^ ":"
+                       ^ Int64.to_string (Core.History_id.sequence id))
+                     identity) );
+              ("history", json_optional json_history_identity identity);
+              ( "snapshot_id",
+                `String (Model.Snapshot_id.to_string node.History.snapshot) );
+              ("contents", contents);
+            ] );
+        ("branch", json_optional branch_json branch);
+        ( "known_branches",
+          `List
+            (Option.fold ~none:[]
+               ~some:(fun local ->
+                 List.map branch_json (Local.Metadata.branches local))
+               local) );
+        ( "working_basis",
+          json_optional
+            (fun p -> `String (Core.Record_id.to_hex p.Local.basis))
+            selected );
+        ( "state_validation",
+          `Assoc
+            [
+              ("state", `String "unverified");
+              ("message", `String (public_error_message message));
+            ] );
+        ("record_signatures", if local = None then `Null else `String "verified");
+        ( "shared_records",
+          `List
+            (Option.fold ~none:[]
+               ~some:(fun local ->
+                 Local.Metadata.records local
+                 |> List.map (fun (id, body) ->
+                     let fields =
+                       match body.Core.payload with
+                       | Core.Shared_revision revision ->
+                           [
+                             ( "change_id",
+                               `String
+                                 (Core.Change_id.to_hex revision.Core.change) );
+                             ( "previous_revisions",
+                               json_ids revision.Core.previous_revisions );
+                             ( "dependencies",
+                               json_ids revision.Core.dependencies );
+                             ( "base_snapshot",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    revision.Core.base_snapshot) );
+                             ( "result_snapshot",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    revision.Core.result_snapshot) );
+                           ]
+                       | Core.Accepted_version version ->
+                           [
+                             ( "branch_id",
+                               `String
+                                 (Core.Branch_id.to_hex version.Core.branch) );
+                             ( "accepted_parents",
+                               json_ids version.Core.accepted_parents );
+                             ( "chosen_revisions",
+                               json_ids version.Core.chosen_revisions );
+                             ( "result_snapshot",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    version.Core.result_snapshot) );
+                           ]
+                       | Core.Branch_event event ->
+                           [
+                             ( "branch_id",
+                               `String (Core.Branch_id.to_hex event.Core.branch)
+                             );
+                           ]
+                     in
+                     `Assoc
+                       ([
+                          ("id", `String (Core.Record_id.to_hex id));
+                          ( "kind",
+                            `String
+                              (Core.kind_name (Core.kind body.Core.payload)) );
+                        ]
+                       @ fields)))
+               local) );
+        ( "capture",
+          `Assoc
+            [
+              ("state", `String "not_attempted");
+              ( "message",
+                `String
+                  "Saved state requires validation before working-tree \
+                   observation." );
+            ] );
+        ("uncaptured", `Null);
+        ("changes", `Null);
+        ("local_publications", `Null);
+        ("integration_operations", `Null);
+        ("recovery", `Null);
+        ("pending_operations", `Null);
+        ( "recovery_inspection_error",
+          `String
+            "Saved state requires verification before recovery inspection." );
+        ( "transfer_inspection_error",
+          `String
+            "Saved state requires verification before transfer inspection." );
+        ("watcher", `Assoc [ ("state", `String "not-inspected") ]);
+        ("managed_service", `String "not-implemented");
+        ("private_backup", `String "not-configured");
+        ("outgoing", `Assoc [ ("state", `String "unverified") ]);
+      ]
+  in
+  let next_actions =
+    [
+      action ~root [ "history" ]
+        "Inspect saved identities and unavailable contents without changing \
+         files.";
+      action ~root [ "verify" ] "Inspect the repository validation failure.";
+    ]
+  in
+  (match requested_format () with
+  | Json_format ->
+      Cli_data.domain_failure ~command:(command_name ()) ~outcome
+        ~error:Cli_data.{ code; message = public_error_message message }
+        ~data ~warnings:[] ~next_actions ()
+      |> Cli_data.encode |> print_json
+  | Text_format ->
+      Printf.printf "recorded private position %Ld snapshot %s\n"
+        node.History.id
+        (Model.Snapshot_id.to_string node.History.snapshot);
+      Option.iter
+        (fun row ->
+          Printf.printf "branch %s (%s)\n"
+            (String.concat ", "
+               (List.map Output.display_value row.Core.display_names))
+            (Core.Branch_id.to_hex row.Core.branch_id))
+        branch;
+      Printf.printf "state verification unavailable: %s\n"
+        (display_line (public_error_message message));
+      print_endline
+        "Working files were not scanned. Inspect history and run verify for \
+         details.");
+  exit status
+
 let run_status arguments =
   let root = parse_root arguments in
-  let status = Service.inspect_local_status ~root |> require_local in
+  let status =
+    match Service.inspect_local_status ~root with
+    | Ok status -> status
+    | Error original -> (
+        match Service.inspect_saved_state ~root with
+        | Error _ -> fail_local original
+        | Ok (Store.Metadata_only metadata) ->
+            render_metadata_status ~root metadata
+        | Ok (Store.Verified _) ->
+            Service.inspect_local_status ~root |> require_local)
+  in
   let capture, uncaptured, changed_paths =
     match status.Service.capture_observation with
     | Ok comparison ->
@@ -4721,7 +4934,7 @@ let run_history arguments =
     @ List.filter_map
         (fun row ->
           match row.Service.availability with
-          | Service.Available ->
+          | Service.Available when page.Service.page_verification = `Verified ->
               Some
                 (action ~root
                    [
@@ -4733,29 +4946,64 @@ let run_history arguments =
                    ("Preview recovery of "
                    ^ reference row.Service.history_node.History.id
                    ^ "."))
-          | Service.Not_retained | Service.Unavailable _ -> None)
+          | Service.Available | Service.Not_retained | Service.Unavailable _ ->
+              None)
         page.Service.entries
   in
-  match requested_format () with
-  | Json_format ->
-      domain_json ~outcome:`Completed ~code:"history-inspected"
-        ~message:"Saved local history inspected."
-        ~data:
-          (`Assoc
-             [
-               ( "workspace_id",
-                 json_optional
-                   (fun id -> `String (Core.Workspace_id.to_hex id))
-                   page.Service.page_workspace );
-               ("current", `String (reference page.Service.page_cursor));
-               ("entries", `List (List.map row_json page.Service.entries));
-               ( "next_before",
-                 json_optional
-                   (fun before -> `String (Int64.to_string before))
-                   page.Service.next_before );
-               ("archive", `String "not-configured");
-             ])
-        ~next_actions ()
+  let failure =
+    match page.Service.page_verification with
+    | `Verified -> None
+    | `Unavailable message ->
+        Some (5, `Unavailable, "saved-contents-unavailable", message)
+    | `Integrity message ->
+        Some (6, `Integrity_failure, "saved-state-unverified", message)
+  in
+  let next_actions =
+    next_actions
+    @
+    if failure = None then []
+    else
+      [
+        action ~root [ "verify" ]
+          "Inspect the unavailable or invalid repository state.";
+      ]
+  in
+  let data =
+    `Assoc
+      [
+        ( "workspace_id",
+          json_optional
+            (fun id -> `String (Core.Workspace_id.to_hex id))
+            page.Service.page_workspace );
+        ("current", `String (reference page.Service.page_cursor));
+        ("entries", `List (List.map row_json page.Service.entries));
+        ( "next_before",
+          json_optional
+            (fun before -> `String (Int64.to_string before))
+            page.Service.next_before );
+        ("archive", `String "not-configured");
+        ( "state_validation",
+          match failure with
+          | None -> `Assoc [ ("state", `String "verified") ]
+          | Some (_, _, _, reason) ->
+              `Assoc
+                [
+                  ("state", `String "unverified");
+                  ("message", `String (public_error_message reason));
+                ] );
+      ]
+  in
+  (match requested_format () with
+  | Json_format -> (
+      match failure with
+      | Some (_, outcome, code, message) ->
+          Cli_data.domain_failure ~command:(command_name ()) ~outcome
+            ~error:Cli_data.{ code; message = public_error_message message }
+            ~data ~warnings:[] ~next_actions ()
+          |> Cli_data.encode |> print_json
+      | None ->
+          domain_json ~outcome:`Completed ~code:"history-inspected"
+            ~message:"Saved local history inspected." ~data ~next_actions ())
   | Text_format ->
       Printf.printf "current %s\n" (reference page.Service.page_cursor);
       List.iter
@@ -4796,7 +5044,13 @@ let run_history arguments =
           Printf.printf "more: history --before %Ld --limit %d\n" before limit)
         page.Service.next_before;
       print_endline
-        "archive not configured; availability describes local retained contents"
+        "archive not configured; availability describes local retained contents";
+      Option.iter
+        (fun (_, _, _, reason) ->
+          Printf.printf "state verification unavailable: %s\n"
+            (display_line (public_error_message reason)))
+        failure);
+  Option.iter (fun (status, _, _, _) -> exit status) failure
 
 let run_undo_tree arguments =
   let root = parse_root arguments in

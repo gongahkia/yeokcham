@@ -813,7 +813,21 @@ type history_page = {
   page_cursor : int64;
   entries : history_entry list;
   next_before : int64 option;
+  page_verification :
+    [ `Verified | `Unavailable of string | `Integrity of string ];
 }
+
+val inspect_saved_state :
+  root:string -> (Yeokcham_v1_store.inspection, error) result
+
+val inspect_saved_snapshot :
+  root:string ->
+  snapshot:Yeokcham_v1_model.Snapshot_id.t ->
+  (unit, error) result
+
+val metadata_validation_failure :
+  Yeokcham_v1_store.metadata_inspection ->
+  [ `Unavailable of string | `Integrity of string ]
 
 val compare_local_states :
   root:string ->

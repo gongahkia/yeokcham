@@ -65,6 +65,20 @@ type loaded = {
   object_id : Store.Stored_object_id.t;
 }
 
+type metadata_inspection = {
+  metadata_history : History.t;
+  metadata_local : Local.Metadata.t option;
+  metadata_project : Model.project;
+  metadata_collaboration : collaboration option;
+  metadata_head : Store.Mutable_ref.t;
+  metadata_object_id : Store.Stored_object_id.t;
+  metadata_failure : error;
+  metadata_contents :
+    (unit, Yeokcham_v1_composition.Graph.failure) result option;
+}
+
+type inspection = Verified of loaded | Metadata_only of metadata_inspection
+
 let state_head_name = "v1-project-state"
 let underlying_store repository = repository.store
 let ( let* ) = Result.bind
@@ -582,11 +596,7 @@ let authority_for_local = function
         (Invalid_collaboration_state
            "local core state requires signed collaboration")
 
-let validate_local_history ~project history local =
-  let* () =
-    Local.validate_history history local
-    |> Result.map_error (fun e -> History_error e)
-  in
+let validate_position_history ~project history ~positions ~selected =
   let* () =
     match History.workspace history with
     | Some _ -> Ok ()
@@ -614,13 +624,20 @@ let validate_local_history ~project history local =
         else
           Error
             (History_error "local branch working contents must remain retained"))
-      (Ok ()) (Local.positions local)
+      (Ok ()) positions
   in
-  if (Local.selected local).Local.cursor = (History.current history).History.id
-  then Ok ()
+  if selected.Local.cursor = (History.current history).History.id then Ok ()
   else Error (History_error "selected branch and history cursor disagree")
 
-let[@warning "-4"] decode_project_object store object_id =
+let validate_local_history ~project history local =
+  let* () =
+    Local.validate_history history local
+    |> Result.map_error (fun e -> History_error e)
+  in
+  validate_position_history ~project history ~positions:(Local.positions local)
+    ~selected:(Local.selected local)
+
+let[@warning "-4"] decode_project_parts store object_id =
   let* object_ =
     Store.get store object_id
     |> Result.map_error (fun error -> Store_error error)
@@ -655,18 +672,31 @@ let[@warning "-4"] decode_project_object store object_id =
           History.decode history |> Result.map_error (fun e -> History_error e)
         in
         let* history = validate_history project history in
-        let* authority = authority_for_local collaboration in
-        let* local =
-          Local.decode ~store ~authority local
-          |> Result.map_error (fun e -> History_error e)
-        in
-        let* () = validate_local_history ~project history local in
         Ok (project, collaboration, history, Some local)
     | Encoding.Array (Encoding.Text "yeokcham-local-state" :: _) ->
         Error (History_error "unsupported local state wrapper")
     | payload ->
         let* project, collaboration = decode_inner (Encoding.encode payload) in
         Ok (project, collaboration, history_for_project project, None)
+
+let decode_local_parts store (project, collaboration, history, local_bytes) =
+  let* local =
+    match local_bytes with
+    | None -> Ok None
+    | Some bytes ->
+        let* authority = authority_for_local collaboration in
+        let* local =
+          Local.decode ~store ~authority bytes
+          |> Result.map_error (fun e -> History_error e)
+        in
+        let* () = validate_local_history ~project history local in
+        Ok (Some local)
+  in
+  Ok (project, collaboration, history, local)
+
+let decode_project_object store object_id =
+  let* parts = decode_project_parts store object_id in
+  decode_local_parts store parts
 
 let store_with_history ?local store project collaboration history =
   let* history = validate_history project history in
@@ -767,6 +797,60 @@ let load repository =
             decode_project_object repository.store object_id
           in
           Ok { project; collaboration; history; local; head; object_id })
+
+let inspect repository =
+  let* head = current_head repository in
+  let* head = head |> Option.to_result ~none:Missing_state_head in
+  let* object_id =
+    Store.Mutable_ref.target head |> Option.to_result ~none:Empty_state_head
+  in
+  let* ((project, collaboration, history, local_bytes) as parts) =
+    decode_project_parts repository.store object_id
+  in
+  match decode_local_parts repository.store parts with
+  | Ok (project, collaboration, history, local) ->
+      Ok (Verified { project; collaboration; history; local; head; object_id })
+  | Error metadata_failure ->
+      let* metadata_local =
+        match local_bytes with
+        | None -> Ok None
+        | Some bytes ->
+            let* authority = authority_for_local collaboration in
+            let* local =
+              Local.Metadata.decode ~store:repository.store ~authority bytes
+              |> Result.map_error (fun error -> History_error error)
+            in
+            let* () =
+              validate_position_history ~project history
+                ~positions:(Local.Metadata.positions local)
+                ~selected:(Local.Metadata.selected local)
+            in
+            Ok (Some local)
+      in
+      let metadata_contents =
+        Option.map
+          (Local.Metadata.verify_contents ~store:repository.store)
+          metadata_local
+      in
+      Ok
+        (Metadata_only
+           {
+             metadata_history = history;
+             metadata_local;
+             metadata_project = project;
+             metadata_collaboration = collaboration;
+             metadata_head = head;
+             metadata_object_id = object_id;
+             metadata_failure;
+             metadata_contents;
+           })
+
+let inspect_repository ~root =
+  let* store =
+    Store.open_repository ~root
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  inspect { store }
 
 let local_branch_snapshots loaded =
   match loaded.local with
