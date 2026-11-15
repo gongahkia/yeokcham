@@ -1,4 +1,4 @@
-# Core-workflow interfaces (P1/P2, P3 in progress)
+# Core-workflow interfaces (P1–P3)
 
 P1 supplies the pure canonical model/record/trust interfaces. P2 connects them
 to durable local branches, workspace/history identities, capture, inspection and
@@ -7,10 +7,13 @@ verified local selection/recovery. Read actual signatures in
 [record Core](../../lib/yeokcham_v1_record/core_record.mli),
 [trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli) and the local
 adapters below. P1 left V1 CLI/wrappers unchanged; P2 extends the existing local
-state root while preserving public package/transport formats. P3 composition/accepted-result verification is now in progress below; clone,
-exchange and complete conflict/recovery journeys remain in progress. Local
-integration execution and its CLI are described below. See the
-[P2 report](reports/P02-attempt-01.md). TC01/TC02/TC06 remain the authority in
+state root while preserving public package/transport formats. P3 connects selected
+sharing, native clone/exchange, exact composition, confirmed recoverable integration
+and shared/private conflict choices. See the [P3 report](reports/P03-attempt-01.md)
+and [acceptance receipt](results/P03-acceptance.json) for final verified scope.
+Sections below preserve the implementation sequence; earlier checkpoint test
+counts are historical. P4 native onboarding/human evaluation remains unstarted.
+TC01/TC02/TC06 remain the authority in
 [Technical contracts](../TECHNICAL_CONTRACTS.md).
 
 ## Registry and canonical bytes
@@ -340,8 +343,8 @@ The connected CLI branch/switch adapter is described below.
 `Trust.Core.sign`/`receive`. It never accepts existing worktree files. The P2
 adapter originally admitted only empty genesis/forks. P3 now admits nonempty
 results only through the actual graph-composition verifier below. Required
-policy/review and resolution support are still explicitly unsupported at this
-checkpoint; no integration CLI success follows merely from staging metadata. Historical
+policy/review still refuses explicitly. Resolution records now cross the exact
+proof boundary described below; staging metadata alone does not accept work. Historical
 state reload verifies signatures and causal references. New records pass
 current admission separately; a late revoked signer cannot bypass this boundary
 by decoding historically valid bytes.
@@ -525,7 +528,7 @@ ignore-rule read set and raw directory names (without reading ignored contents).
 These observations do not reserve names or constitute a filesystem transaction.
 These primitives support staged P2 in-place navigation and copy-out. The legacy
 shared workspace-activation adapter is separate and retains its conservative
-behavior; P2 does not claim to replace that future P3 integration path.
+behavior; shared catch-up uses the P3 integration path described below.
 
 `Yeokcham_v1_local_service.Safe_apply` prepares bounded canonical physical plans
 under `.yeokcham/restore-staging/OPERATION/`, binds them to safety/target snapshot
@@ -775,7 +778,7 @@ ignore4 and tiny harness regressions remain part of CI. No native macOS/Windows,
 managed scheduling, private archive/backup or P3 shared-loop claim follows from
 these Linux tests.
 
-## P3 composition and exact edit scopes (in progress)
+## P3 composition and exact edit scopes
 
 `Yeokcham_v1_composition.Line_hunks` implements TC06 base-indexed half-open
 hunks with exact line bytes, deletion-first LCS ties, prefix/suffix trimming,
@@ -812,12 +815,11 @@ Python scope envelope/identity fixtures are in `test/golden/composition/` and
 checked by `tools/generate_composition_vectors.py`. Focused profile/tree/scope
 and malformed-input/property cases are in `test/test_composition.ml`.
 
-The later P3 checkpoints below supply accepted-result graph verification and
-scoped publication receipts. Selected share CLI, clone/exchange, integration
-plans/execution and conflict resolution remain incomplete.
+The P3 sections below supply accepted-result graph verification, scoped publication
+receipts and their actual share, clone/exchange, integration and conflict consumers.
 
 
-### P3 accepted-result graph and signed store boundary (in progress)
+### P3 accepted-result graph and signed store boundary
 
 `Composition.Graph` exposes `accepted`, `represented`, `common_base`, `compose`
 and `validate`. It validates full revision scope/content correspondence and
@@ -840,8 +842,8 @@ verified source accepted snapshot rather than substituting empty contents.
 `Store.Local.prepare_revision` and `prepare_acceptance` stage canonical signed
 records and return metadata plus the logical record identity. The latter checks
 exact current accepted heads and creates an advance/reconciliation event. These
-APIs do not publish a root, materialize files or create a durable outbox. Actual
-journaled service execution/atomic history/outbound publication is still needed.
+APIs do not publish a root, materialize files or create a durable outbox. The
+journaled service below owns atomic history/outbound publication and safe application.
 Change ID generation uses the existing typed CSPRNG constructor with three
 collision attempts. `Local.pool` and `record_objects` expose verified public
 records separately from local positions; packaging must never export `Local.encode`.
@@ -854,12 +856,14 @@ before checking a nonempty fork; private file bytes remain absent from the publi
 result. Scope pages/record types remain conservatively retained until their
 collection consumers are extended.
 
-Six graph cases cover updates, dependency bases, concurrent accepted heads,
+The graph suite now has 15 cases covering updates, dependency bases, concurrent accepted heads,
 equal-content ambiguous bases, false results/nonempty genesis, inherited-head
-loss and unrecorded private bases. Native signed local-state suite has 25 cases,
+loss and unrecorded private bases, exact decisions and reconciled successors.
+The native signed local-state suite has 86 cases,
 including a valid signature over an existing wrong snapshot that still fails
-composition proof, and a bounded typed change-ID collision test. This does not
-complete P3 or authorize unsupported resolution/policy behavior.
+composition proof, and bounded typed identity collision tests. The final P3
+report combines these with the connected CLI/transport evidence. Unsupported
+required policy/review still refuses.
 
 
 Status inspection has a writer-busy outcome: if the workspace process lock is
@@ -868,7 +872,7 @@ uncaptured/changes unknown. It does not scan partial live files or claim clean
 contents. The forked writer test plus foreground-watch and runtime journeys
 exercise this boundary; status remains useful while capture/application runs.
 
-### P3 publication receipts and metadata pages (in progress)
+### P3 publication receipts and metadata pages
 
 `Yeokcham_v1_pages.store repository ~namespace rows` stores immutable byte-key/
 value collections; `load` and `closure` verify and return sorted rows or object
@@ -934,10 +938,9 @@ from an old source snapshot. The GC regression actually removes an old unselecte
 blob, then reloads and verifies the receipt successfully. Missing old private
 contents are not misreported as a complete restorable snapshot.
 
-These APIs stage metadata. The actual share service/CLI must still atomically
-publish capture/history, signed records and receipts; transport acknowledgements
-and recoverable integration operations remain later P3 work. No exchange or
-integration success follows from this checkpoint.
+These APIs stage metadata. The actual share service below atomically publishes
+capture/history, signed records and receipts; later sections document transport
+acknowledgements and recoverable integration. Staging alone establishes neither.
 
 `Yeokcham_v1_pages.page_references ~namespace ~expected bytes` discovers direct
 metadata child/value references for transfer before a complete collection is
@@ -955,7 +958,7 @@ closure against the existing verifier over a 17001-row/8-MiB-value collection an
 show that a structurally traversable false child maximum still fails admission.
 This primitive alone does not implement Core export, remote receipt or clone.
 
-### P3 selected-publication service and CLI (in progress)
+### P3 selected-publication service and CLI
 
 `Local_service.Share` aliases `Native_share`. `Share.prepare ~store ~loaded
 ~observed ~observation ~paths ~update ~title` returns an opaque prepared value;
@@ -1022,9 +1025,10 @@ Actual root-boundary fault injection is available through trusted
 `Before_metadata_publish`/`After_metadata_publish` seam. The fork tests verify
 that history never commits separately from its revision/receipt and that a
 lost response adds no duplicate record, root update or history node. This does
-not yet complete public export, transfer acknowledgement, clone or integration.
+not alone establish public export, transfer acknowledgement, clone or integration;
+the connected consumers and their tests are described below.
 
-### P3 exact integration plans and private continuation (in progress)
+### P3 exact integration plans and private continuation
 
 `Yeokcham_v1_integration` is exposed as `Local_service.Integration`; its
 `Preservation` module is also exposed as `Local_service.Preservation`.
@@ -1108,12 +1112,12 @@ is `Integration_plan_record`, so corrupt proposals are diagnosed separately from
 an unreadable state head. Corruption refuses replacement and blocks GC planning.
 
 This supplies the actual library planner/retained proposal. The following
-checkpoints add durable service execution and ordinary CLI integration;
-resolution and native exchange remain in progress. Private recovery is described
+sections add durable service execution, ordinary CLI integration, resolution and
+native exchange. Private recovery is described
 after the integration consumer below.
 
 
-### P3 durable integration service (in progress)
+### P3 durable integration service
 
 `Local_service.Integrate` is `Native_integration`. Its `prepare ~root
 ~selected_revisions ~reconcile_heads` captures and retains an exact proposal and
@@ -1206,11 +1210,11 @@ restart without a signer, one acceptance/history child, private D/E separation,
 late edits after Materialized, external-edit pauses, unrelated receipt retention,
 GC roots, stale confirmation, provider-time revalidation, absence of a writer
 lock during provider callbacks and bounded token collision/entropy refusal.
-Conflict resolution and native clone/exchange remain P3 requirements; these
-service tests do not complete P3.
+The conflict and native clone/exchange sections add the distinct end-to-end
+evidence; service tests alone do not establish that workflow.
 
 
-### P3 integration CLI consumer (in progress)
+### P3 integration CLI consumer
 
 `integrate [CHANGE...]` resolves generated change IDs to their sole causal revision
 or accepts explicit retained revision IDs. Omitted selection uses a sole eligible
@@ -1252,11 +1256,11 @@ Exit categories reuse selection conventions: invalid 2, choice/stale 3, conflict
 Fresh-process disposable-signer journeys cover D/E separation, exact revision and
 contextual/all selection, saved-plan confirmation, cancellation, provider-free
 preview/retry/no-op, stale inputs, text/JSON diffs, operation show/resume and
-status. They are local CLI evidence. Native relay exchange/clone, complete
-conflict resolution are still unimplemented P3 scope;
-legacy resolution/package commands do not satisfy those criteria.
+status. They are local CLI evidence. The later native relay/clone and conflict
+sections document the connected shared workflow; legacy resolution/package
+commands remain distinct.
 
-### P3 private integration recovery (in progress)
+### P3 private integration recovery
 
 `Local_service.Integrate.recover ~root ~operation ~dry_run ~mode ~replan
 ~expected_plan` returns `recovery_outcome` with exact recovery digest, operation,
@@ -1353,10 +1357,10 @@ CLI commands are `operation recover ID [--preview|--yes] [--plan DIGEST]
 preview and terminal cancellation leave files/history unchanged. Schema-2 JSON
 includes mode, observed/chosen identities, comparisons/availability, recovery
 phase/pause, retention and prior-observation IDs. Completed historical retries
-do not claim to inspect the current tree. These local recovery journeys do not
-complete conflict resolution, Core exchange or the P3 two-person pilot.
+do not claim to inspect the current tree. These local recovery journeys are
+complemented by the separate Core exchange and two-person resolution tests below.
 
-### P3 public Core package boundary (in progress)
+### P3 public Core package boundary
 
 `Yeokcham_v1_package.Core` extends the existing package/artifact boundary. It
 uses public Core records and paged inventories, independently of legacy
@@ -1439,7 +1443,7 @@ journey identified repeated OCaml SHA-256 work. Functional fixture timings are
 diagnostics, not G01 measurements or native performance qualification. Independent
 vectors and persistent-context/offset feed tests verify the native adapter.
 
-### P3 atomic Core metadata receipt (in progress)
+### P3 atomic Core metadata receipt
 
 `Local_service.Core_receive` aliases `Native_receipt`. `receive ~root ~package`
 first runs isolated `Package.Core.prepare` against the known authority root and
@@ -1496,9 +1500,9 @@ JSON/plain branch inspection and receipt during a Prepared integration followed
 by successful resume without losing new records. These are actual service/root
 consumers of public Core packages. Native relay fetching, frozen outbound
 couriers/acknowledgements, clone and received-branch selection are described below;
-the complete conflict/availability/authority/fault audit remains open.
+the P3 report records the final conflict/availability/authority/fault audit.
 
-### P3 frozen Core outbound batches (in progress)
+### P3 frozen Core outbound batches
 
 `Local_service.Core_outbound` aliases `Native_outbound`. `prepare ~root ~remote
 ~endpoint ~signing_capability` exports the actual public Core pool through
@@ -1562,10 +1566,10 @@ state-root publication boundaries. Forked faults, fresh reconstruction without a
 signer, provider lock probes, later public/private work, wrong acknowledgements,
 endpoint changes, actual GC and exact acceptance acknowledgement are tested.
 An independent CBOR fixture covers schema 2 alongside unchanged signed courier
-bytes. `Sync.Core` supplies the actual HTTP/CLI exchange consumer below. Clone
-remains required; local freeze/ack tests alone do not establish P3 completion.
+bytes. `Sync.Core` supplies the actual HTTP/CLI exchange consumer below. Native
+clone has separate end-to-end evidence; local freeze/ack tests alone do not establish it.
 
-### P3 native HTTPS exchange and courier catalogue (in progress)
+### P3 native HTTPS exchange and courier catalogue
 
 `Yeokcham_v1_sync.Core` aliases `Native_sync`. `run ~root ~remote
 ~load_signing_capability` drives the actual `exchange NAME` CLI. It loads existing
@@ -1671,10 +1675,10 @@ accepted-history exchange. It checks actual relay object bytes for both private
 sentinels. Signers are disposable explicit test capabilities. Bob is initialized
 through the library, so this is native exchange evidence, not clone, native
 custody onboarding, human usability, broad performance qualification or complete
-P3 acceptance. Received-branch selection is described below; resolutions,
-missing-content inspection and the full criterion/fault audit remain required.
+P3 acceptance on its own. Later clone, received-branch, saved-metadata and
+resolution sections supply their separate evidence; the P3 report audits all criteria.
 
-### P3 verified native clone (in progress)
+### P3 verified native clone
 
 `Yeokcham_v1_sync.Clone` aliases `Native_clone`. `source : string -> (source,error)
 result` parses `https://RELAY/v1/repositories/REPOSITORY_ID` into credential-free
@@ -1776,9 +1780,10 @@ a changed source selection after preview. `--resume DIRECTORY` is exclusive of
 new-clone options. Failure data identifies whether metadata is attached and offers
 an applicable local resume action only after attachment. Clone runs no project hooks.
 Received-branch switching and missing-content inspection are described below.
-Conflict resolution and the remaining authority/error/fault matrix are still P3 work.
+Native conflict resolution and the scoped authority/error/fault evidence are
+described below and audited in the P3 report.
 
-### P3 received-branch selection (in progress)
+### P3 received-branch selection
 
 `Local.selection_target : t -> string -> (selection_target,string) result`
 resolves a unique authenticated name and unambiguous current event/accepted heads.
@@ -1833,7 +1838,7 @@ known shared updates; the latter offers an integration preview. Selecting/restor
 a private branch position does not accept, sign or export work. Catch-up to an
 already verified accepted head uses ordinary integration without another signature.
 
-### P3 inspection with unavailable saved contents (in progress)
+### P3 inspection with unavailable saved contents
 
 `Yeokcham_v1_store.Local.Metadata.t` is a separate abstract inspection type.
 `Metadata.decode ~store ~authority bytes` verifies the existing canonical local
@@ -1871,7 +1876,7 @@ scanning the working tree. `inspect_local_history` adds `page_verification`:
 `metadata_validation_failure` preserves typed public graph errors. Missing public
 content maps to unavailable; corruption, false results and failed semantic checks
 map to integrity. Private-control failures whose loaders expose only strings are
-conservatively unverified/integrity; precise classification remains in the P3 audit.
+conservatively unverified/integrity; the P3 report records that limitation.
 
 CLI `status` and `history` emit schema-2 domain data even when the committed
 public closure is incomplete: exit 5/`saved-contents-unavailable` for missing
@@ -1894,9 +1899,10 @@ false acceptance into a temporary state root. They verify domain JSON/plain
 outcomes, strict write refusal, exact root/ordinary-byte preservation and explicit
 failure of implicit corrupt-object replacement. This is inspection support, not
 remote repair: exchange still requires full existing state validation, and
-automatic re-fetch/repair plus remaining conflict/error/fault acceptance are P3 work.
+automatic re-fetch/repair of an already incomplete store remains unsupported under
+the wider G08 scope. Native conflict/error/fault evidence is audited separately.
 
-### P3 exact public resolution proof and native application (in progress)
+### P3 exact public resolution proof and native application
 
 Registry 47 is `Core_resolution_revision`; the original 41–46 meanings and bytes
 are unchanged. Its kind/domain are `resolution-revision` and

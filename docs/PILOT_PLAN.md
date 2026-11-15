@@ -1,6 +1,6 @@
 # First usable Yeokcham: core workflow pilot
 
-Updated November 15, 2026.
+Updated November 16, 2026.
 
 ## Priority and status
 
@@ -14,9 +14,11 @@ P0 evaluation and P1 core foundation are complete. The
 `06b662a8bab5c783117e5fcf45e36b7d942cfc64`, actual checks and
 [interfaces](implementation/INTERFACES.md). P2 local work is complete; see its
 [report](implementation/reports/P02-attempt-01.md) and
-[acceptance receipt](implementation/results/P02-acceptance.json). P3 is in progress
-under its [scoped task](implementation/goals/P03-shared-workflow.md); P4 is unstarted.
-G01 remains complete; G02 has partial P1 coverage and is not
+[acceptance receipt](implementation/results/P02-acceptance.json). P3 is complete
+under its [scoped task](implementation/goals/P03-shared-workflow.md); see its
+[report](implementation/reports/P03-attempt-01.md) and
+[receipt](implementation/results/P03-acceptance.json). P4 is eligible and unstarted.
+G01 remains complete; G02 has partial P1/P3 coverage and is not
 complete. G01-G20 remain the full-design backlog.
 This pilot changes delivery order and the first milestone; it does not mark
 original criteria complete or relax privacy, authority, fidelity or recovery.
@@ -33,13 +35,13 @@ P1 added pure interfaces. P2 now delivers private initialization, native ignore/
 stable capture, useful status/history/diff, signed named local branch selection
 and exact confirmed recovery/copy-out. The rows below remain historical P0
 observations, not current P2 status; see the P2 report for current acceptance.
-Shared clone/exchange/integration remains P3.
+P3 now supplies native shared clone/exchange/integration and conflict journeys.
 
 These are user intentions; names may evolve toward [CLI design](CLI_DESIGN.md).
 Git terms provide orientation, without adding a Git interoperability commitment.
 Automatic checkpoints, explicit sharing and accepted versions remain distinct.
 
-| User need | Minimum first-product behavior | Current assessment |
+| User need | Minimum first-product behavior | Historical P0 observation |
 | --- | --- | --- |
 | Start or obtain a project: init/clone | Start privately offline; obtain a verified selected shared version in a usable working directory, with actionable identity/trust setup. | Init works with the disposable signer. Native onboarding failed on this host. No ordinary clone; received packages cannot activate a workspace. A separate relay/bootstrap path exists. |
 | Understand work: status/diff | Changed paths, readable text differences, opaque-file changes, saved/shared/accepted state and next actions. | Status and changes run. Changes show paths/modes/content IDs; generic version diff is absent. Status JSON is only a completion envelope. |
@@ -131,7 +133,7 @@ development ranges including tests/integration; host/participant waits add time.
 | P0: evaluate | This walkthrough, evidence and essential-operation inventory. | Current V1, G01 and existing designs/guides. | complete |
 | P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | complete; [report](implementation/reports/P01-attempt-01.md) |
 | P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | complete; [report](implementation/reports/P02-attempt-01.md) |
-| P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | in progress; scoped acceptance remains incomplete |
+| P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | complete; [report](implementation/reports/P03-attempt-01.md) |
 | P4: harden/handoff | Two-person/source/document/binary journeys, branches/offline cases, fault/retry/private-work tests, native onboarding, pilot responsiveness, concise instructions and actual user feedback; fix blockers. | Focused G18/G20 checks and affected domain tests. | pending; 3-7 days |
 
 P2/P3 share P1 and have real domain dependencies. Branch switching consumes
@@ -190,17 +192,16 @@ for these documentation-only changes.
 
 ## Next handoff
 
-P1 and P2 are complete under their scoped tasks and reports. Continue the
-[scoped P3 shared-workflow task](implementation/goals/P03-shared-workflow.md)
-from the latest [ledger checkpoint](IMPLEMENTATION_PROGRESS.md) and actual
-[interfaces](implementation/INTERFACES.md). Selected sharing, native exchange/clone,
-confirmed recoverable integration, received-branch selection and saved-metadata
-inspection have automated checkpoint evidence. Native conflict preparation now
-has local automated named-version, private-choice and replacement-file journeys;
-the two-person TLS resolution extension now passes alongside requested-branch
-transfer priority and focused refusal/GC tests. The final P3 criterion audit and
-completion evidence remain required. Preserve the original phase
-remainders. P4 remains unstarted.
+P1, P2 and P3 are complete under their scoped tasks and reports. Verify the
+[P3 report](implementation/reports/P03-attempt-01.md),
+[acceptance receipt](implementation/results/P03-acceptance.json),
+[ledger](IMPLEMENTATION_PROGRESS.md) and actual
+[interfaces](implementation/INTERFACES.md). Native selected sharing, verified
+clone/exchange, received-branch selection, exact recoverable integration and
+shared/private conflict choices have controlled two-person TLS and fault evidence.
+Updates after accepted revision reconciliation and recorded-choice retries are
+included. Preserve the original full-phase remainders. P4 is next eligible and
+unstarted; it requires a separate invocation and representative native/human work.
 The user requires one writer on main for this handoff. Future orchestration
 preferences must be reconciled separately before changing that workflow.
 

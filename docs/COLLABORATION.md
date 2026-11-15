@@ -5,7 +5,7 @@ transfer boundaries. Native clone requires prior enrollment; it does not perform
 online membership enrollment or Git migration. Start with the local recovery tutorial before
 adding another person.
 
-## Selected native publication (P3 in progress)
+## Selected native publication (P3)
 
 Ordinary sharing now generates its change/revision identities and captures disk
 contents without a separate save:
@@ -39,9 +39,11 @@ publication receipts separately from accepted heads. Transfer remains pending
 until an exact native courier is acknowledged by a configured relay. Status lists
 the acknowledging remotes and preserves those facts when newer work is pending.
 The legacy package journeys below carry the earlier V1 record family. Native
-conflict journeys remain required before P3 is complete. Native clone is described below.
+clone, conflict preparation and recoverable acceptance are described below.
+The [P3 report](implementation/reports/P03-attempt-01.md) records scoped acceptance;
+native custody onboarding and human evaluation remain P4 work.
 
-## Foreground native exchange (P3 in progress)
+## Foreground native exchange (P3)
 
 For an existing authenticated Core workspace with an already enrolled member and
 device, configure the relay and exchange explicitly:
@@ -90,9 +92,10 @@ data and marks the state unverified; signatures alone are not content proof.
 Transfer/recovery state remains unknown. Writers and native exchange still
 require complete validation; inspection does not re-fetch missing objects or
 repair corruption. Preserve current files/store/recovery roots and inspect the
-failure with `verify`; remote repair remains unfinished P3 work.
+failure with `verify`. Automatic repair of an already incomplete local store is
+unsupported; the wider G08 integrity/availability work remains open.
 
-## Verified native clone (P3 in progress)
+## Verified native clone (P3)
 
 Obtain a repository URL, independently compare the public root-verification
 phrase, and enroll the local device through the existing membership ceremony
@@ -152,10 +155,10 @@ is provided. Preserve unexpected staging contents for inspection.
 All transfers run in the foreground. Reported closure covers verified locally
 known shared work, not proof that a relay disclosed every remote record. Automated
 TLS tests use disposable explicit signing capabilities; they do not qualify native
-custody onboarding or human usability. Complete conflict resolution and the
-remaining P3 audit are still outstanding.
+custody onboarding or human usability. The native conflict journey and final
+P3 acceptance evidence are recorded below and in the P3 report.
 
-## Select a received branch (P3 in progress)
+## Select a received branch (P3)
 
 ```sh
 yeokcham branch list
@@ -181,7 +184,7 @@ later received head. Existing local selection journals, safety roots and recover
 commands apply. Late external edits after materialization remain private disk
 changes. See [local undo](LOCAL_UNDO.md) for exact history selection and copy-out.
 
-## Local shared acceptance (P3 in progress)
+## Local shared acceptance (P3)
 
 The selected Core work recorded above can now be accepted locally:
 

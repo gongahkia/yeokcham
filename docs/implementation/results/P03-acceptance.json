@@ -1,0 +1,1132 @@
+{
+  "schema_version": 1,
+  "slice": "P3",
+  "attempt": 1,
+  "status": "complete",
+  "session": "p3-shared-2026-11-15",
+  "completed_local_date": "2026-11-16",
+  "branch": "main",
+  "starting_revision": "2c7329d3ee930a38d5e8654346fab5d28853c707",
+  "implementation_revision": "2fe8b32e2014ee8f29d36ee2baafbc93d7176553",
+  "implementation_tree": "3106092977d0d75b0602de61968e2245d4d59f03",
+  "design_baseline": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "verified_ancestors": [
+    "2c7329d3ee930a38d5e8654346fab5d28853c707",
+    "e181ff9ec863740ceb511fb888b23472056ebd15",
+    "c9c8f2509db2768279287a02724b69367777c9aa",
+    "822066fbf1f842c42d57a8586c78dfc2e399fd77",
+    "56eb13d271421720299d7e3f0dcd589d80b4d153"
+  ],
+  "environment": {
+    "platform": "Linux-7.2.15-1-omarchy-x86_64-with-glibc2.44",
+    "machine": "x86_64",
+    "tools": {
+      "opam": {
+        "command": [
+          "opam",
+          "--version"
+        ],
+        "exit": 0,
+        "version": "2.6.1"
+      },
+      "ocaml": {
+        "command": [
+          "opam",
+          "exec",
+          "--",
+          "ocamlc",
+          "-version"
+        ],
+        "exit": 0,
+        "version": "5.5.0"
+      },
+      "dune": {
+        "command": [
+          "opam",
+          "exec",
+          "--",
+          "dune",
+          "--version"
+        ],
+        "exit": 0,
+        "version": "3.25.0"
+      },
+      "ocamlformat": {
+        "command": [
+          "opam",
+          "exec",
+          "--",
+          "ocamlformat",
+          "--version"
+        ],
+        "exit": 0,
+        "version": "0.29.0"
+      },
+      "openssl": {
+        "available": true
+      },
+      "socat": {
+        "available": true
+      },
+      "softhsm2-util": {
+        "available": true
+      },
+      "zsh": {
+        "available": true
+      },
+      "fish": {
+        "available": true
+      },
+      "docker": {
+        "available": true
+      }
+    },
+    "docker_socket_exists": true,
+    "docker_socket_readable": false
+  },
+  "environment_script": "/home/gongahkia/.cache/yeokcham-p1-20261114/environment.sh",
+  "acceptance": [
+    {
+      "id": 1,
+      "delivered": "Exact selected share/update, generated identities, scoped private correspondence and public-only verified closure. Concurrent update successors require every predecessor in a recorded accepted base.",
+      "evidence": [
+        "lib/yeokcham_v1_local_service/native_share.ml",
+        "lib/yeokcham_v1_store/publication_receipt.ml",
+        "test/test_native_share_cli.py",
+        "test/test_core_package.ml",
+        "test/test_composition_graph.ml",
+        "test/test_v1_transport.ml"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 2,
+      "delivered": "Pinned HTTPS clone and foreground exchange, enrollment prerequisite, bounded ranges/inventory, exact frozen retries/acks, requested-version priority across all advertised branches/history; receipt does not apply files or move private history.",
+      "evidence": [
+        "lib/yeokcham_v1_sync/native_clone.ml",
+        "lib/yeokcham_v1_sync/native_sync.ml",
+        "lib/yeokcham_v1_local_service/native_receipt.ml",
+        "lib/yeokcham_v1_local_service/native_outbound.ml",
+        "test/test_v1_transport.ml",
+        "test/test_core_package.ml"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 3,
+      "delivered": "TC06 line-hunks-v1 and graph scope/base/dependency proof; canonical exact plans with separate accepted/private outputs; represented-work correspondence and explicit ambiguity/conflicts.",
+      "evidence": [
+        "lib/yeokcham_v1_composition/line_hunks.ml",
+        "lib/yeokcham_v1_composition/yeokcham_v1_composition.ml",
+        "lib/yeokcham_v1_integration/yeokcham_v1_integration.ml",
+        "lib/yeokcham_v1_integration/preservation.ml",
+        "test/test_composition.ml",
+        "test/test_composition_graph.ml",
+        "test/test_integration_control.ml",
+        "test/test_local_core.ml"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 4,
+      "delivered": "Confirmed native integration, exact revalidation, stable plan/operation, actual application facts and atomic accepted/event/history/outbound root; provider-free resume, offline commit, external-edit preservation and no mandatory deliver.",
+      "evidence": [
+        "lib/yeokcham_v1_local_service/native_integration.ml",
+        "lib/yeokcham_v1_local_service/safe_apply.ml",
+        "test/test_local_core.ml",
+        "test/test_native_integration_cli.py",
+        "test/test_native_recovery_cli.py",
+        "test/test_safe_apply.ml"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 5,
+      "delivered": "Named shared/private conflicts, defer/use/file, authenticated scoped R47 proposals, private-only decisions, stored-choice retry, exact all-head reconciliation and explicit unsupported authority/policy/review/adoption refusal.",
+      "evidence": [
+        "lib/yeokcham_v1_local_service/native_resolution.ml",
+        "lib/yeokcham_v1_model/core.ml",
+        "lib/yeokcham_v1_record/core_record.ml",
+        "lib/yeokcham_v1_trust/yeokcham_v1_trust.ml",
+        "test/test_core_trust.ml",
+        "test/test_core_branch_heads.ml",
+        "test/test_composition_graph.ml",
+        "test/test_v1_transport.ml"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 6,
+      "delivered": "Fresh Alice/Bob controlled TLS CLI clone/share/update/receive/resolve/integrate/exchange, domain JSON/plain output and documented exits, actual mutation/root/transfer/ack faults, private sentinels, mixed/large bytes, GC/restart and regression coverage.",
+      "evidence": [
+        "bin/yeokcham_v1.ml",
+        "lib/yeokcham_v1_cli_spec/yeokcham_v1_cli_spec.ml",
+        "test/test_v1_transport.ml",
+        "test/test_local_core.ml",
+        "test/test_core_package.ml",
+        "test/test_native_share_cli.py",
+        "test/test_native_integration_cli.py",
+        "test/test_native_recovery_cli.py"
+      ],
+      "result": "passed"
+    },
+    {
+      "id": 7,
+      "delivered": "Current API/schema/registry and behavior documentation, acceptance audit, exact tested-source evidence, commits/rollback/data implications and criterion-level original-phase remainders.",
+      "evidence": [
+        "docs/implementation/INTERFACES.md",
+        "docs/COLLABORATION.md",
+        "docs/LOCAL_UNDO.md",
+        "docs/PILOT_PLAN.md",
+        "docs/IMPLEMENTATION_WORKFLOW.md",
+        "docs/IMPLEMENTATION_PROGRESS.md",
+        "docs/implementation/reports/P03-attempt-01.md",
+        "docs/implementation/results/P03-acceptance.json"
+      ],
+      "result": "passed"
+    }
+  ],
+  "verification": {
+    "tested_base_revision": "971bc2dd531549094811adcac8f3b4dbb0aca369",
+    "source_manifest_sha256": "feb1d58823ba1a4f95033ef810f01dec967a02698c4392b795ef8b1ba496fb43",
+    "receipt": {
+      "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-checks.json",
+      "sha256": "558a7754205b26144674f29fb6a37e1062a93be8ffcc503d8f4d973446fbf0c4"
+    },
+    "provenance": {
+      "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-provenance.json",
+      "sha256": "c98a5e7d82898adac623b8596b8515f9ffb4a34f5a4f177113830f2924f9c721"
+    },
+    "all_tested_tracked_hashes_match_implementation_commit": true,
+    "source_stable_during_checks": true,
+    "commands": [
+      {
+        "label": "build",
+        "command": [
+          "make",
+          "build"
+        ],
+        "exit": 0,
+        "seconds": 5.57,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-build.log",
+        "sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff"
+      },
+      {
+        "label": "lint",
+        "command": [
+          "make",
+          "lint"
+        ],
+        "exit": 0,
+        "seconds": 1.08,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-lint.log",
+        "sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d"
+      },
+      {
+        "label": "graph",
+        "command": [
+          "_build/default/test/test_composition_graph.exe"
+        ],
+        "exit": 0,
+        "seconds": 0.675,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-graph.log",
+        "sha256": "9cde3f66bd4b5059dab877e59f5f94319794aa5bc9b83a18de6f817869238076"
+      },
+      {
+        "label": "native-share",
+        "command": [
+          "python3",
+          "-B",
+          "test/test_native_share_cli.py",
+          "_build/default/bin/yeokcham_v1.exe"
+        ],
+        "exit": 0,
+        "seconds": 3.26,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-native-share.log",
+        "sha256": "53b626288e592875c7c0a45676d9ee5127ac21d6ea00644f2d209f470d79861c"
+      },
+      {
+        "label": "native-integrate",
+        "command": [
+          "python3",
+          "-B",
+          "test/test_native_integration_cli.py",
+          "_build/default/bin/yeokcham_v1.exe"
+        ],
+        "exit": 0,
+        "seconds": 27.505,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-native-integrate.log",
+        "sha256": "dadcbddb9de2fcc4598c61b6e176d820297705d4983dd0c14b1f29550dafbac2"
+      },
+      {
+        "label": "native-recovery",
+        "command": [
+          "python3",
+          "-B",
+          "test/test_native_recovery_cli.py",
+          "_build/default/bin/yeokcham_v1.exe",
+          "_build/default/test/native_recovery_fixture.exe"
+        ],
+        "exit": 0,
+        "seconds": 0.515,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-native-recovery.log",
+        "sha256": "8cda0d179fb90c96eb022d824e9dbde3915e5c7e36f88d33bef0850f70239c3c"
+      },
+      {
+        "label": "ci",
+        "command": [
+          "make",
+          "ci"
+        ],
+        "exit": 0,
+        "seconds": 266.46,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-ci.log",
+        "sha256": "283710891ab808165820d3a93ab0d9f7e13dbc7093b92a049da5e406a991b828"
+      },
+      {
+        "label": "core-vectors",
+        "command": [
+          "python3",
+          "-B",
+          "test/generate_core_vectors.py"
+        ],
+        "exit": 0,
+        "seconds": 0.068,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-core-vectors.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "label": "composition-vectors",
+        "command": [
+          "python3",
+          "-B",
+          "tools/generate_composition_vectors.py"
+        ],
+        "exit": 0,
+        "seconds": 0.075,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-composition-vectors.log",
+        "sha256": "52d4165ea5bb10e77dbc93f273cdddd74420b90903706decae1fabdb2e54748a"
+      },
+      {
+        "label": "package-vectors",
+        "command": [
+          "python3",
+          "-B",
+          "tools/generate_core_package_vectors.py"
+        ],
+        "exit": 0,
+        "seconds": 0.096,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-package-vectors.log",
+        "sha256": "7c6aff2c532af1d9f1badfc26b1b656a19a052f1323bf79e0fd99e62b6b267d0"
+      },
+      {
+        "label": "integration-vectors",
+        "command": [
+          "python3",
+          "-B",
+          "tools/generate_integration_vectors.py"
+        ],
+        "exit": 0,
+        "seconds": 0.088,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-integration-vectors.log",
+        "sha256": "16f820bb8770ba97134e616fbd2821cb2df03e018e330c49105b25cbe75bb9d1"
+      },
+      {
+        "label": "local-vectors",
+        "command": [
+          "python3",
+          "-B",
+          "tools/generate_local_vectors.py"
+        ],
+        "exit": 0,
+        "seconds": 0.065,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-local-vectors.log",
+        "sha256": "f9ff9c8e9116916faea79c3d3b79916b03e5f93b45b54fda63353e9d7dd8698d"
+      },
+      {
+        "label": "diff-check",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit": 0,
+        "seconds": 0.009,
+        "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-diff-check.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "fresh_ci_reported": {
+      "ocaml_suites": 25,
+      "ocaml_cases": 353,
+      "python_blocks": 8,
+      "python_cases": 81,
+      "reported_skips": false,
+      "transport_cases": 30,
+      "local_state_cases": 86,
+      "core_package_cases": 15
+    },
+    "fresh_focused": {
+      "graph_cases": 15,
+      "share_cli_cases": 8,
+      "integration_cli_cases": 14,
+      "recovery_cli_cases": 5,
+      "note": "These overlap CI; counts are not an additional unique-case total."
+    },
+    "cache": "Default Dune cache reused matching results for unaffected tests. The 25 suite/81 Python counts describe freshly reported final-CI blocks, not a whole-repository unique total.",
+    "earlier_focused": {
+      "revision": "c1f8032523069d4007f940e96e2cbe4bd90d68aa",
+      "receipt": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-final-source-checks.json",
+        "sha256": "8c5e6d09785883a35fcdae40caedd6d04c09205f9e98f9cd2adf12cfe3379d5f"
+      },
+      "checks": 26,
+      "all_passed": true,
+      "note": "Includes Core model/record/trust, composition/transfer/workspace/journal/proof/safe apply, local state/package, CLI, targeted TLS and independent vectors. The TLS selector intentionally omitted other cases; final CI ran the full 30-case suite."
+    },
+    "handoff_docs": {
+      "command": [
+        "make",
+        "docs-check"
+      ],
+      "exit": 0,
+      "local_file_references": 273,
+      "log": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-handoff-docs.log",
+      "sha256": "2f31e72b6fe3c65c35f641c3b3f796f3a6ad1925b8ca21e78498aef3d93c7d91",
+      "source": "documentation/report/evidence only after implementation 2fe8b32; no production/test source changed"
+    },
+    "handoff_evidence_audit": {
+      "command": [
+        "python3",
+        "-B",
+        "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-evidence-audit.py"
+      ],
+      "exit": 0,
+      "result": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-closeout-evidence-audit.json",
+      "sha256": "513b06a6acf0feae919428603a3b3aa7e1f44ee83fc8d8c1fcec2405afa792ae"
+    }
+  },
+  "failures_resolved": [
+    {
+      "log": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-reconciled-update-before.log",
+        "sha256": "7283c17b261088253cccaf1a00955b73b3b68a215d1bb715dd27565c4ab30826"
+      },
+      "outcome": "New regression reproduced the missing accepted-reconciliation update; final graph and TLS successor tests pass."
+    },
+    {
+      "log": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-reconciled-update-tls-01.log",
+        "sha256": "cd9401351a76dcb97d0d0dcb925b82aceeb1863eac49a57b3eab40c9ac02d79a"
+      },
+      "outcome": "First TLS extension exposed a separate receipt guard; shared reconciled-base predicate now verifies receipt and composition. Final TLS/CI pass."
+    },
+    {
+      "log": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-reconciled-update-build-02.log",
+        "sha256": "ee3e3ed4cac0487377424646d916864382447b92b72d6e997fcd942582576860"
+      },
+      "outcome": "Strict fragile-match warning corrected with explicit constructors; no warning or test suppression."
+    },
+    {
+      "log": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-recorded-resolution-format-01.log",
+        "sha256": "fb5654fd8702c0056cfa8fb4ef1e1b1a7ec9eff076004a1e2e52a9365ed8b404"
+      },
+      "outcome": "Formatter promotion exit 2 followed by clean lint."
+    },
+    {
+      "log": {
+        "path": "/home/gongahkia/.cache/yeokcham-p3-20261115/p3-reconciled-update-format-02.log",
+        "sha256": "49a83c382cd59bb308e0c5feeda9c80b3382936243cb110d0f00eea9276ea57d"
+      },
+      "outcome": "Formatter promotion exit 2 followed by clean lint and CI."
+    },
+    {
+      "check": "handoff evidence-path audit",
+      "outcome": "Caught a stale private-preservation source path in the draft receipt; corrected it to lib/yeokcham_v1_integration/preservation.ml before final audit."
+    }
+  ],
+  "unavailable_or_excluded": [
+    {
+      "check": "Optional container targets",
+      "result": "Not executed: Docker socket exists but is unreadable to this user. Controlled native local TLS relay tests executed instead."
+    },
+    {
+      "check": "Native custody onboarding and representative human journey",
+      "result": "Not claimed; explicit disposable test signers used. P4/native qualification owner."
+    },
+    {
+      "check": "Native macOS/Windows, power-loss/filesystem matrix and broad performance qualification",
+      "result": "Not claimed; P4/original G18-G20 and platform owners."
+    },
+    {
+      "check": "Accepted G01 measurement rerun",
+      "result": "Not run; accepted measurements and preserved files unchanged. CI uses its own small synthetic harness fixture, not the accepted baseline run."
+    }
+  ],
+  "original_phase_coverage": [
+    {
+      "criteria": "G02 C1-C5",
+      "delivered": "Core revision/accepted/branch/resolution records, scope/page/plan contracts and vectors; durable pilot identities/consumers.",
+      "remaining": "Request/principal/member/policy/review/account/settings/archive families, principal proof and remaining consumer contracts/vectors; original phase stays partial."
+    },
+    {
+      "criteria": "G03 C1",
+      "delivered": "Existing enrolled-device trust and current authority reused.",
+      "remaining": "Principal-key proof and stable independent-reviewer binding."
+    },
+    {
+      "criteria": "G03 C2",
+      "delivered": "Causal branch/accepted heads, explicit all-head reconciliation, equal-content histories and current admission.",
+      "remaining": "Full policy-fork evaluation, authority reconciliation/adoption workflows."
+    },
+    {
+      "criteria": "G03 C3-C5",
+      "delivered": "Unsupported required policy/evidence/adoption refuses; unknown/revoked authority and receipt permutations tested.",
+      "remaining": "Independent approval defaults, exact coverage/preferences, reviewer supersession/withdrawals/blocks/dismissals and full matrix."
+    },
+    {
+      "criteria": "G04 C1-C5",
+      "delivered": "TC06 profile, actual graph/base/scope/dependency proof, exact plans, separate D/E, ambiguity decisions, golden/property/side-effect/stale tests.",
+      "remaining": "Full G03 policy/review evidence evaluator and original predecessor/phase acceptance."
+    },
+    {
+      "criteria": "G08 C1",
+      "delivered": "Core revisions/branches/accepted/resolutions and verified closure through real bounded HTTPS ranges.",
+      "remaining": "Full policy/review record families and original-phase dependencies."
+    },
+    {
+      "criteria": "G08 C2-C3",
+      "delivered": "Durable frozen outgoing/ack and exact retries; requested version prioritized before all other advertised shared branches/history.",
+      "remaining": "Configured narrower scopes and full-scale qualification."
+    },
+    {
+      "criteria": "G08 C4-C5",
+      "delivered": "Current trust, preserved incomparable heads/private cursor/files, actual received-branch offline selection and availability/fault/receipt tests.",
+      "remaining": "Full adoption/policy behavior, repair of already incomplete local state and wider qualification."
+    },
+    {
+      "criteria": "G13 C1-C6",
+      "delivered": "Native no-review pilot acceptance/private preservation, actual safe journal phases and root publication, offline/idempotent recovery and native conflict/operation CLI; no mandatory deliver.",
+      "remaining": "Full G12 required/advisory review integration, broader platform/fault qualification and original prerequisite/phase acceptance."
+    },
+    {
+      "criteria": "G14 C1-C6",
+      "delivered": "P2 local journeys plus native shared clone/share/update/exchange/integrate/conflicts/recovery; domain JSON/plain/confirmation/actions/exits; honest service/backup state.",
+      "remaining": "Archive/preferences/full-review vocabulary, managed services and native custody/human qualification; original phase remains pending."
+    }
+  ],
+  "commits": [
+    {
+      "revision": "5bb7dc3571600c164a69e908e9e842d7f5dd4118",
+      "subject": "docs: start scoped P3 shared-workflow pilot",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: start scoped P3 shared-workflow pilot"
+    },
+    {
+      "revision": "2cb53993ec25951f959ff03021e01435e0a67879",
+      "subject": "feat(core): compose exact byte changes and verify paged edit scopes",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(core): compose exact byte changes and verify paged edit scopes"
+    },
+    {
+      "revision": "869a328ef9c8bd3020c56cd84892814ad6294bab",
+      "subject": "reworked",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Accepted-result graph verification, signed local boundary and shared retention roots."
+    },
+    {
+      "revision": "5435659187e840adb04f1cf73d3430030350492c",
+      "subject": "docs: record accepted-result verification and writer-busy status checks",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record accepted-result verification and writer-busy status checks"
+    },
+    {
+      "revision": "b4080389e539a347e827a5552f1c9d97fbe237b8",
+      "subject": "makingsomeinitialcommits",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Paged metadata and private publication-receipt foundation with registry allocation."
+    },
+    {
+      "revision": "39db20671da7ea3ae3417d49b07568f7539f6552",
+      "subject": "addedideas",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Private publication receipt fixtures."
+    },
+    {
+      "revision": "6c58589ce79acb2d7814280f336932f166addcb0",
+      "subject": "fix(store): verify scoped publication witnesses after private content GC",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "fix(store): verify scoped publication witnesses after private content GC"
+    },
+    {
+      "revision": "f0552a2ca66fd3fe8c23abad4cac1e77faf0763a",
+      "subject": "docs: record scoped publication receipt verification",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record scoped publication receipt verification"
+    },
+    {
+      "revision": "9b119996ccb5f6445c324ecfc8b65dd664d38fca",
+      "subject": "snapshotted",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Selected native share service/CLI, captured exclusion rules and receipt witnesses."
+    },
+    {
+      "revision": "3f0ed1ab3641bd6194e572cfc0d511b7d9235f78",
+      "subject": "test(gc): tolerate existing object shards in corruption fixture",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "test(gc): tolerate existing object shards in corruption fixture"
+    },
+    {
+      "revision": "9cbf1dbdccefaa626d0f3cebbc390ca96151d881",
+      "subject": "docs: record native selected-publication checkpoint",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record native selected-publication checkpoint"
+    },
+    {
+      "revision": "14c6de8e63e9869de1d2f287aa7a93e99f48a1a4",
+      "subject": "addefixture",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Private-work correspondence and composition preservation foundation."
+    },
+    {
+      "revision": "57e0c2abd9d2f7058336ca0b4688db410c3826eb",
+      "subject": "feat(core): expose causal change heads and bounded metadata reads",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(core): expose causal change heads and bounded metadata reads"
+    },
+    {
+      "revision": "41538b820676653f81b5e0faa3670d21c2d6ab18",
+      "subject": "feat(integration): retain and revalidate exact private-preserving plans",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(integration): retain and revalidate exact private-preserving plans"
+    },
+    {
+      "revision": "53dcb94e52a02d219851528550c3995519bfe5d8",
+      "subject": "docs: record verified P3 integration-plan checkpoint",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record verified P3 integration-plan checkpoint"
+    },
+    {
+      "revision": "5f6039a8c4d85a86d8b5214910e67dd5579a6a36",
+      "subject": "feat(store): bound typed object reads before allocation",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(store): bound typed object reads before allocation"
+    },
+    {
+      "revision": "c9da48551a0fa7e30b5b55adf6add7998e703502",
+      "subject": "feat(integration): journal safe local acceptance through the state root",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(integration): journal safe local acceptance through the state root"
+    },
+    {
+      "revision": "f3cbf8925991e10c81874c24b638f4227bcb4ac8",
+      "subject": "docs: record durable integration execution evidence and remaining P3 scope",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record durable integration execution evidence and remaining P3 scope"
+    },
+    {
+      "revision": "7d32acd8a548e3c7d53dd69b39a7dc44a0e489d5",
+      "subject": "feat(cli): preview and confirm exact shared integration and resume",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(cli): preview and confirm exact shared integration and resume"
+    },
+    {
+      "revision": "3ac90f87c920b88dd9b3dfa965f499badf7f2ab4",
+      "subject": "docs: record ordinary integration CLI checkpoint and open P3 criteria",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record ordinary integration CLI checkpoint and open P3 criteria"
+    },
+    {
+      "revision": "e7b87673b218a3a39d486596959a3d8169e65070",
+      "subject": "fix(cli): distinguish conflicted plans and incomplete capture outcomes",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "fix(cli): distinguish conflicted plans and incomplete capture outcomes"
+    },
+    {
+      "revision": "480ff7adc5e1518f76456927639355de11d53f18",
+      "subject": "docs: record conflict outcomes and transient CI timeout evidence",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record conflict outcomes and transient CI timeout evidence"
+    },
+    {
+      "revision": "8b37259e1089aaad48830fcb6feec461dfe22f48",
+      "subject": "feat(integration): recover uncommitted plans with retained private alternatives",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(integration): recover uncommitted plans with retained private alternatives"
+    },
+    {
+      "revision": "2a0cc3650319c62ed0730447ffbd6ccd050a4989",
+      "subject": "feat(cli): inspect and confirm private integration recovery choices",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(cli): inspect and confirm private integration recovery choices"
+    },
+    {
+      "revision": "435583588fcd4767f6c31a9c39caa68d1031c2fe",
+      "subject": "docs: record verified private recovery checkpoint and remaining P3 scope",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record verified private recovery checkpoint and remaining P3 scope"
+    },
+    {
+      "revision": "fa6a89f90526def2ec7a2ed8be6f8db70b42e0a5",
+      "subject": "fix(share): release signing locks and reserve recovery identities",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "fix(share): release signing locks and reserve recovery identities"
+    },
+    {
+      "revision": "8ecfee37bfc9745bb81fb352afe1761a2f29899a",
+      "subject": "docs: record unlocked sharing verification and CI timeout evidence",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record unlocked sharing verification and CI timeout evidence"
+    },
+    {
+      "revision": "b0fe7049f8104789676b23f41f24af36c97733b9",
+      "subject": "feat(pages): verify bounded scoped references for shared transfer",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(pages): verify bounded scoped references for shared transfer"
+    },
+    {
+      "revision": "30e01afcddc411ef2d7f4fc0aaaf1d09d4602744",
+      "subject": "docs: record native metadata traversal evidence and exchange remainder",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record native metadata traversal evidence and exchange remainder"
+    },
+    {
+      "revision": "1c5e66e9e6fc5a2fbc6e9fdfb54eca7402465094",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Public Core package/export foundation."
+    },
+    {
+      "revision": "a65db94492923b5e6eaa2300e1d40a7e4c3a8222",
+      "subject": "feat(package): verify public Core export and native hash vectors",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(package): verify public Core export and native hash vectors"
+    },
+    {
+      "revision": "c437195305ed63f92de97504ce5063f19129b215",
+      "subject": "docs: record public Core export proof and native exchange remainder",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record public Core export proof and native exchange remainder"
+    },
+    {
+      "revision": "9f79f9dd6d0043eea3b696f429998117fe9444e4",
+      "subject": "feat(receipt): atomically admit Core records without moving private work",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(receipt): atomically admit Core records without moving private work"
+    },
+    {
+      "revision": "306ca3b3c994d81fb348eb8e279b3a8544390e6f",
+      "subject": "docs: record atomic Core receipt evidence and remaining P3 consumers",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record atomic Core receipt evidence and remaining P3 consumers"
+    },
+    {
+      "revision": "639553a236ab5c862a29a98bc9a63a430728b911",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Frozen Core outbound controls and acknowledgement foundation."
+    },
+    {
+      "revision": "5a237ccd830161a9914a5251a80c0eb1937b55c1",
+      "subject": "docs: record frozen Core outbound evidence and native relay remainder",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record frozen Core outbound evidence and native relay remainder"
+    },
+    {
+      "revision": "f6dd1e4a882fb4f9c38688e28ccf92870f7e360c",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Atomic receipt/outbound adapters and bounded native HTTP transfer support."
+    },
+    {
+      "revision": "b78afa53278eef9b206c5b5133450c61039ea62c",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Native Core exchange service/CLI and enrolled-replica fixtures."
+    },
+    {
+      "revision": "10210f528ea424dd0393f3b1d6755df4817de979",
+      "subject": "feat(sync): verify native Core exchange and protect private cached contents",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(sync): verify native Core exchange and protect private cached contents"
+    },
+    {
+      "revision": "6e2724f92f01470ca7e1a29576fd3ff4478b6df2",
+      "subject": "docs: record native Core TLS exchange evidence and remaining P3 scope",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record native Core TLS exchange evidence and remaining P3 scope"
+    },
+    {
+      "revision": "94e08c0d3ad990dd52a642ca55390bcdb397d9d0",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Clone guards, credential realm and local activation prerequisites."
+    },
+    {
+      "revision": "766bc88a32bf703553746964b7abf5057d30d640",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Native package selected-content priority and exchange plumbing."
+    },
+    {
+      "revision": "01a54f728fa4484fede320dca7cdb914cfda7ec3",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Verified safe-application support needed by clone."
+    },
+    {
+      "revision": "37311de153d7e9fb91321c99f44ec3f5c300ec73",
+      "subject": "newthings",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Native clone implementation and public sync APIs."
+    },
+    {
+      "revision": "1105c60c8e724b9e49abf9f021b890207f4844e5",
+      "subject": "feat(sync): materialize verified native clones with durable resume",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(sync): materialize verified native clones with durable resume"
+    },
+    {
+      "revision": "a27ded4e47ea438c5bf54a419bc129c23818d839",
+      "subject": "docs: record verified native clone checkpoint and remaining P3 scope",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record verified native clone checkpoint and remaining P3 scope"
+    },
+    {
+      "revision": "bc75d492af15bb8e83bd863d7aceaef370a54c35",
+      "subject": "feat(branch): select received work and preserve private branch bases",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(branch): select received work and preserve private branch bases"
+    },
+    {
+      "revision": "0c50f95f959d1e7ac260a75472a9df5578949f96",
+      "subject": "docs: record received-branch verification and remaining P3 work",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record received-branch verification and remaining P3 work"
+    },
+    {
+      "revision": "07ead3a737996ee726d160590adf02766538b3c2",
+      "subject": "feat(inspect): retain saved metadata visibility when public contents fail verification",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(inspect): retain saved metadata visibility when public contents fail verification"
+    },
+    {
+      "revision": "e8343cb2f15e3754a3cb5e738f9257c5ccc06da5",
+      "subject": "docs: record saved-metadata verification and remaining P3 work",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record saved-metadata verification and remaining P3 work"
+    },
+    {
+      "revision": "36759aa6150abb2d4b84c75a997a3c9a323e3609",
+      "subject": "feat(core): verify exact public resolutions through native accepted application",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(core): verify exact public resolutions through native accepted application"
+    },
+    {
+      "revision": "548df679a9579fc1d513c9d3826ee14d90a6a8d3",
+      "subject": "docs: record exact public resolution verification and P3 continuation",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record exact public resolution verification and P3 continuation"
+    },
+    {
+      "revision": "51a63028250fa987ff870d959294347e0e3ee593",
+      "subject": "feat(cli): prepare exact shared and private conflict choices",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "feat(cli): prepare exact shared and private conflict choices"
+    },
+    {
+      "revision": "882628625ab85217ad245d50664d8389fd13e5d0",
+      "subject": "docs: record native conflict verification and P3 continuation",
+      "kind": "documentation",
+      "external_snapshot": false,
+      "purpose": "docs: record native conflict verification and P3 continuation"
+    },
+    {
+      "revision": "c1f8032523069d4007f940e96e2cbe4bd90d68aa",
+      "subject": "work~",
+      "kind": "implementation",
+      "external_snapshot": true,
+      "purpose": "Two-person TLS resolution, requested-branch priority, precise HTTP/integrity/paused outcomes and private-decision GC tests."
+    },
+    {
+      "revision": "971bc2dd531549094811adcac8f3b4dbb0aca369",
+      "subject": "fix(cli): recover recorded resolution choices without source files",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "fix(cli): recover recorded resolution choices without source files"
+    },
+    {
+      "revision": "2fe8b32e2014ee8f29d36ee2baafbc93d7176553",
+      "subject": "fix(share): update changes after accepted revision reconciliation",
+      "kind": "implementation",
+      "external_snapshot": false,
+      "purpose": "fix(share): update changes after accepted revision reconciliation"
+    }
+  ],
+  "rollback_order": [
+    "2fe8b32e2014ee8f29d36ee2baafbc93d7176553",
+    "971bc2dd531549094811adcac8f3b4dbb0aca369",
+    "c1f8032523069d4007f940e96e2cbe4bd90d68aa",
+    "51a63028250fa987ff870d959294347e0e3ee593",
+    "36759aa6150abb2d4b84c75a997a3c9a323e3609",
+    "07ead3a737996ee726d160590adf02766538b3c2",
+    "bc75d492af15bb8e83bd863d7aceaef370a54c35",
+    "1105c60c8e724b9e49abf9f021b890207f4844e5",
+    "37311de153d7e9fb91321c99f44ec3f5c300ec73",
+    "01a54f728fa4484fede320dca7cdb914cfda7ec3",
+    "766bc88a32bf703553746964b7abf5057d30d640",
+    "94e08c0d3ad990dd52a642ca55390bcdb397d9d0",
+    "10210f528ea424dd0393f3b1d6755df4817de979",
+    "b78afa53278eef9b206c5b5133450c61039ea62c",
+    "f6dd1e4a882fb4f9c38688e28ccf92870f7e360c",
+    "639553a236ab5c862a29a98bc9a63a430728b911",
+    "9f79f9dd6d0043eea3b696f429998117fe9444e4",
+    "a65db94492923b5e6eaa2300e1d40a7e4c3a8222",
+    "1c5e66e9e6fc5a2fbc6e9fdfb54eca7402465094",
+    "b0fe7049f8104789676b23f41f24af36c97733b9",
+    "fa6a89f90526def2ec7a2ed8be6f8db70b42e0a5",
+    "2a0cc3650319c62ed0730447ffbd6ccd050a4989",
+    "8b37259e1089aaad48830fcb6feec461dfe22f48",
+    "e7b87673b218a3a39d486596959a3d8169e65070",
+    "7d32acd8a548e3c7d53dd69b39a7dc44a0e489d5",
+    "c9da48551a0fa7e30b5b55adf6add7998e703502",
+    "5f6039a8c4d85a86d8b5214910e67dd5579a6a36",
+    "41538b820676653f81b5e0faa3670d21c2d6ab18",
+    "57e0c2abd9d2f7058336ca0b4688db410c3826eb",
+    "14c6de8e63e9869de1d2f287aa7a93e99f48a1a4",
+    "3f0ed1ab3641bd6194e572cfc0d511b7d9235f78",
+    "9b119996ccb5f6445c324ecfc8b65dd664d38fca",
+    "6c58589ce79acb2d7814280f336932f166addcb0",
+    "39db20671da7ea3ae3417d49b07568f7539f6552",
+    "b4080389e539a347e827a5552f1c9d97fbe237b8",
+    "869a328ef9c8bd3020c56cd84892814ad6294bab",
+    "2cb53993ec25951f959ff03021e01435e0a67879"
+  ],
+  "rollback_note": "Review dependent code and external snapshots/hunks first. This is newest-first review order, not a conflict-free revert claim. Do not discard current stores/history/operation roots/proofs or attempt to undo remote publication by reverting source.",
+  "changed_paths": [
+    "bin/yeokcham_v1.ml",
+    "docs/COLLABORATION.md",
+    "docs/IMPLEMENTATION_PROGRESS.md",
+    "docs/IMPLEMENTATION_WORKFLOW.md",
+    "docs/LOCAL_UNDO.md",
+    "docs/PILOT_PLAN.md",
+    "docs/TECHNICAL_CONTRACTS.md",
+    "docs/implementation/INTERFACES.md",
+    "docs/implementation/goals/P03-shared-workflow.md",
+    "docs/implementation/reports/P03-attempt-01.md",
+    "docs/implementation/results/P03-acceptance.json",
+    "lib/yeokcham_envelope/yeokcham_envelope.ml",
+    "lib/yeokcham_envelope/yeokcham_envelope.mli",
+    "lib/yeokcham_hash/dune",
+    "lib/yeokcham_snapshot/yeokcham_snapshot.ml",
+    "lib/yeokcham_snapshot/yeokcham_snapshot.mli",
+    "lib/yeokcham_store/yeokcham_store.ml",
+    "lib/yeokcham_store/yeokcham_store.mli",
+    "lib/yeokcham_v1_cli_spec/yeokcham_v1_cli_spec.ml",
+    "lib/yeokcham_v1_composition/dune",
+    "lib/yeokcham_v1_composition/line_hunks.ml",
+    "lib/yeokcham_v1_composition/line_hunks.mli",
+    "lib/yeokcham_v1_composition/yeokcham_v1_composition.ml",
+    "lib/yeokcham_v1_composition/yeokcham_v1_composition.mli",
+    "lib/yeokcham_v1_gc/dune",
+    "lib/yeokcham_v1_gc/yeokcham_v1_gc.ml",
+    "lib/yeokcham_v1_gc/yeokcham_v1_gc.mli",
+    "lib/yeokcham_v1_health/yeokcham_v1_health.ml",
+    "lib/yeokcham_v1_health/yeokcham_v1_health.mli",
+    "lib/yeokcham_v1_health_repository/yeokcham_v1_health_repository.ml",
+    "lib/yeokcham_v1_integration/dune",
+    "lib/yeokcham_v1_integration/preservation.ml",
+    "lib/yeokcham_v1_integration/preservation.mli",
+    "lib/yeokcham_v1_integration/yeokcham_v1_integration.ml",
+    "lib/yeokcham_v1_integration/yeokcham_v1_integration.mli",
+    "lib/yeokcham_v1_local_service/clone_guard.ml",
+    "lib/yeokcham_v1_local_service/clone_guard.mli",
+    "lib/yeokcham_v1_local_service/dune",
+    "lib/yeokcham_v1_local_service/native_integration.ml",
+    "lib/yeokcham_v1_local_service/native_integration.mli",
+    "lib/yeokcham_v1_local_service/native_outbound.ml",
+    "lib/yeokcham_v1_local_service/native_outbound.mli",
+    "lib/yeokcham_v1_local_service/native_receipt.ml",
+    "lib/yeokcham_v1_local_service/native_receipt.mli",
+    "lib/yeokcham_v1_local_service/native_resolution.ml",
+    "lib/yeokcham_v1_local_service/native_resolution.mli",
+    "lib/yeokcham_v1_local_service/native_share.ml",
+    "lib/yeokcham_v1_local_service/native_share.mli",
+    "lib/yeokcham_v1_local_service/safe_apply.ml",
+    "lib/yeokcham_v1_local_service/safe_apply.mli",
+    "lib/yeokcham_v1_local_service/text_diff.ml",
+    "lib/yeokcham_v1_local_service/yeokcham_v1_local_service.ml",
+    "lib/yeokcham_v1_local_service/yeokcham_v1_local_service.mli",
+    "lib/yeokcham_v1_model/core.ml",
+    "lib/yeokcham_v1_model/core.mli",
+    "lib/yeokcham_v1_package/dune",
+    "lib/yeokcham_v1_package/yeokcham_v1_package.ml",
+    "lib/yeokcham_v1_package/yeokcham_v1_package.mli",
+    "lib/yeokcham_v1_pages/dune",
+    "lib/yeokcham_v1_pages/yeokcham_v1_pages.ml",
+    "lib/yeokcham_v1_pages/yeokcham_v1_pages.mli",
+    "lib/yeokcham_v1_record/core_record.ml",
+    "lib/yeokcham_v1_store/dune",
+    "lib/yeokcham_v1_store/integration_operation.ml",
+    "lib/yeokcham_v1_store/integration_operation.mli",
+    "lib/yeokcham_v1_store/local_core.ml",
+    "lib/yeokcham_v1_store/local_core.mli",
+    "lib/yeokcham_v1_store/publication_receipt.ml",
+    "lib/yeokcham_v1_store/publication_receipt.mli",
+    "lib/yeokcham_v1_store/yeokcham_v1_store.ml",
+    "lib/yeokcham_v1_store/yeokcham_v1_store.mli",
+    "lib/yeokcham_v1_sync/dune",
+    "lib/yeokcham_v1_sync/native_clone.ml",
+    "lib/yeokcham_v1_sync/native_clone.mli",
+    "lib/yeokcham_v1_sync/native_sync.ml",
+    "lib/yeokcham_v1_sync/native_sync.mli",
+    "lib/yeokcham_v1_sync/yeokcham_v1_sync.ml",
+    "lib/yeokcham_v1_sync/yeokcham_v1_sync.mli",
+    "lib/yeokcham_v1_transport/yeokcham_v1_transport.ml",
+    "lib/yeokcham_v1_transport/yeokcham_v1_transport.mli",
+    "lib/yeokcham_v1_transport_credential/dune",
+    "lib/yeokcham_v1_transport_credential/yeokcham_v1_transport_credential.ml",
+    "lib/yeokcham_v1_transport_credential/yeokcham_v1_transport_credential.mli",
+    "lib/yeokcham_v1_transport_http/yeokcham_v1_transport_http.ml",
+    "lib/yeokcham_v1_transport_http/yeokcham_v1_transport_http.mli",
+    "lib/yeokcham_v1_undo/yeokcham_v1_undo.ml",
+    "lib/yeokcham_v1_undo/yeokcham_v1_undo.mli",
+    "test/dune",
+    "test/generate_core_vectors.py",
+    "test/golden/composition/edit-scope-envelope.hex",
+    "test/golden/composition/edit-scope-id.hex",
+    "test/golden/composition/metadata-page-envelope.hex",
+    "test/golden/composition/metadata-page-id.hex",
+    "test/golden/core-package/clone-request-id.hex",
+    "test/golden/core-package/clone-state.hex",
+    "test/golden/core-package/courier-manifest-id.hex",
+    "test/golden/core-package/courier-state.hex",
+    "test/golden/core-package/hash-stream-id.hex",
+    "test/golden/core-package/manifest.hex",
+    "test/golden/core-package/outbound-state.hex",
+    "test/golden/core/resolution-revision-body.hex",
+    "test/golden/core/resolution-revision-envelope.hex",
+    "test/golden/core/resolution-revision-id.hex",
+    "test/golden/core/resolution-revision-signing-input.hex",
+    "test/golden/integration/plan-v1-id.hex",
+    "test/golden/integration/plan-v1.hex",
+    "test/golden/integration/plan-v2-id.hex",
+    "test/golden/integration/plan-v2.hex",
+    "test/native_recovery_fixture.ml",
+    "test/test_composition.ml",
+    "test/test_composition_graph.ml",
+    "test/test_core_model.ml",
+    "test/test_core_package.ml",
+    "test/test_core_record.ml",
+    "test/test_core_trust.ml",
+    "test/test_integration_control.ml",
+    "test/test_local_core.ml",
+    "test/test_local_inspection.ml",
+    "test/test_metadata_pages.ml",
+    "test/test_native_integration_cli.py",
+    "test/test_native_recovery_cli.py",
+    "test/test_native_share_cli.py",
+    "test/test_store_safety.ml",
+    "test/test_v1_gc.ml",
+    "test/test_v1_transport.ml",
+    "tools/generate_composition_vectors.py",
+    "tools/generate_core_package_vectors.py",
+    "tools/generate_integration_vectors.py"
+  ],
+  "preserved_sha256": {
+    "README.md": "30b991bb5a0232a47ba79c4ea4f7a29f0c1175464ad4c7f1ea9d4feb0068af0d",
+    "docs/implementation/results/P02-acceptance.json": "2d90e4eb923010aa10e659c663f1fd3b7bf00e21301e90bba4ceaaa20a2aba6a",
+    "docs/implementation/reports/P02-attempt-01.md": "b44eedb856ce8b1c0a88d84a5332d1efd51a1303420912bc38feb76615563641",
+    "docs/implementation/results/G01-acceptance.json": "a83992829ec0900fbf8ee695f49a0ee4f65ce25b71a371590543779a66a55f72",
+    "docs/implementation/results/G01-baseline.json": "03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b",
+    "docs/implementation/results/G01-baseline.md": "402ce4e7941e2883a9f8d4874ff19b6d411abf660334ed112f8bbfaa2831a805",
+    "docs/implementation/results/G01-environment.json": "9d8807a24f8f9e8d85d31ca6dccfbdf09704f059ca51805632989638e841d648",
+    "docs/implementation/results/G01-export-smoke-v2.json": "25ec7c07b4f56178a66b7c27b8d02fd475643094afd6c6bc319415b6a110b3c0",
+    "docs/implementation/results/G01-export-smoke.json": "16ff643c6e1fbb4acbc0a55ddea433ca22dad5baf31ba8872b731fb99281e8a1",
+    "docs/implementation/results/G01-harness-v2.json": "f619fbcba8c0c5ea41c5ffacaaab59fa62b2489e5f38989ac80841c88130fb96",
+    "docs/implementation/results/G01-measurement-checkpoint.json": "3a728403a717dd5afd902559db06ebf211d8e963f2cea30d83557593583dc9b6",
+    "docs/implementation/results/G01-resumption.json": "98d9afc0ff39935934d7597259440d8168093b034c6bd37a0b8bd051fc60d36d"
+  },
+  "preserved_matches": {
+    "README.md": true,
+    "docs/implementation/results/P02-acceptance.json": true,
+    "docs/implementation/reports/P02-attempt-01.md": true,
+    "docs/implementation/results/G01-acceptance.json": true,
+    "docs/implementation/results/G01-baseline.json": true,
+    "docs/implementation/results/G01-baseline.md": true,
+    "docs/implementation/results/G01-environment.json": true,
+    "docs/implementation/results/G01-export-smoke-v2.json": true,
+    "docs/implementation/results/G01-export-smoke.json": true,
+    "docs/implementation/results/G01-harness-v2.json": true,
+    "docs/implementation/results/G01-measurement-checkpoint.json": true,
+    "docs/implementation/results/G01-resumption.json": true
+  },
+  "remaining_p3": [],
+  "next_eligible": "P4; separately invoked, unstarted",
+  "completed_original_full_phases": [
+    "G01"
+  ],
+  "scope_notes": [
+    "One main writer; no agents/branches/worktrees/push/release/deploy commands were issued by this agent. External snapshot commits were inspected and preserved.",
+    "README, predecessor reports/receipts and accepted G01 files match their starting hashes.",
+    "Only authenticated public closure is exported; private records, signers, recovery contents and full logs remain outside Git.",
+    "Automatic repair of already missing/corrupt admitted local contents is unsupported. Read-only metadata diagnoses it; strict writes require complete validation.",
+    "Private-control loaders without typed unavailable distinctions conservatively report unverified/integrity.",
+    "No full G02-G20 phase beyond G01 is closed, and P4 was not executed."
+  ]
+}
