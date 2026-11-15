@@ -462,8 +462,14 @@ let corrupted_object_blocks_planning_without_quarantine_mutation () =
       let store = V1_store.underlying_store repository in
       let corrupt = id 'e' in
       let directory = Filename.dirname (Store.object_path store corrupt) in
-      Unix.mkdir (Filename.dirname directory) 0o700;
-      Unix.mkdir directory 0o700;
+      List.iter
+        (fun path ->
+          if Sys.file_exists path then
+            Alcotest.(check bool)
+              "object shard is a directory" true
+              ((Unix.lstat path).Unix.st_kind = Unix.S_DIR)
+          else Unix.mkdir path 0o700)
+        [ Filename.dirname directory; directory ];
       Out_channel.with_open_bin (Store.object_path store corrupt)
         (fun channel -> Out_channel.output_string channel "not an object");
       (match Gc.plan ~root with
