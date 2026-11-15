@@ -347,6 +347,9 @@ let action ?(confirmation_required = false) ~root arguments explanation =
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.History_error message
+    when String.starts_with ~prefix:"clone is incomplete" message ->
+      fail_with_status 8 "clone-incomplete" message
   | Service.Share_error (Service.Share.Invalid message) ->
       fail_with_status 2 "invalid-share" message
   | Service.Share_error (Service.Share.Choice message) ->
@@ -7139,12 +7142,16 @@ let read_bearer_token () =
 
 let run_remote_login arguments =
   let root, name = parse_remote_name arguments in
-  let _ =
+  let remote =
     Transport_config.find ~root ~name
     |> require_ok Transport_config.error_to_string
   in
   let token = read_bearer_token () in
   Transport_credential.save ~remote:name ~token
+  |> require_ok Transport_credential.error_to_string;
+  let identity = Service.identity ~root |> require_ok Service.error_to_string in
+  Transport_credential.save_for_repository ~url:remote.Transport_config.url
+    ~repository:(Trust.Repository_id.to_string identity.Service.repository) ~token
   |> require_ok Transport_credential.error_to_string;
   Printf.printf "credential saved for remote %s\n" name
 

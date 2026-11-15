@@ -987,8 +987,14 @@ let save_collaborative_at_boundaries ~before_publish ~after_publish ?history
             (transport collaboration)
           |> Result.map_error (fun error -> Transport_error error)
         in
-        Transport.Core_inbox.validate_update ~previous:(transport previous)
+        let* () = Transport.Core_inbox.validate_update ~previous:(transport previous)
           (transport collaboration)
+        |> Result.map_error (fun error -> Transport_error error)
+        in
+        Transport.Core_clone.validate_update
+          ~plan_started:(fun plan -> List.exists (fun local -> Option.is_some (Local.find_operation local ~plan))
+            (Option.to_list existing_local @ Option.to_list local))
+          ~previous:(transport previous) (transport collaboration)
         |> Result.map_error (fun error -> Transport_error error)
   in
   let* history = observed_history ?history existing_history project in

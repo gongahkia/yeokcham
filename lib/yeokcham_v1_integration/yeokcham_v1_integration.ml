@@ -1227,6 +1227,15 @@ let forget ~store identity =
         |> Result.map_error (fun e -> Metadata (Store.error_to_string e))
       in
       let* () =
+        let module Clone = Yeokcham_v1_transport.Core_clone in
+        match Option.bind loaded.Store.collaboration (fun collaboration -> Clone.find (Store.transport collaboration)) with
+        | Some clone when not (Clone.complete clone) && Clone.plan clone = Some identity ->
+            let closed = Option.exists (fun local -> Option.exists Local.Operation.recovered
+                (Local.find_operation local ~plan:identity)) loaded.Store.local in
+            if closed then Ok () else Error (Invalid "an incomplete clone still owns this plan")
+        | None | Some _ -> Ok ()
+      in
+      let* () =
         match loaded.Store.local with
         | Some local
           when List.exists

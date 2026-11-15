@@ -2,6 +2,7 @@ module Safe_apply = Safe_apply
 module Integrate = Native_integration
 module Core_receive = Native_receipt
 module Core_outbound = Native_outbound
+module Clone_state = Clone_guard
 module Text_diff = Text_diff
 module Share = Native_share
 module Integration = Yeokcham_v1_integration
@@ -654,6 +655,7 @@ let with_worktree_lock ~root action =
          ("workspace operation unavailable: " ^ Unix.error_message error))
 
 let require_no_native_integration loaded =
+  let* () = Clone_guard.require_normal loaded |> Result.map_error (fun message -> History_error message) in
   match Option.bind loaded.Store.local Store.Local.pending_operation with
   | None -> Ok ()
   | Some operation ->

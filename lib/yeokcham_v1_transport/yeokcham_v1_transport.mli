@@ -161,6 +161,33 @@ module Core_inbox : sig
     previous:local_state -> local_state -> (unit, error) result
 end
 
+module Core_clone : sig
+  type intent
+
+  val create :
+    url:string -> repository:Model.Core.Repository_id.t -> root:Model.Core.Digest.t ->
+    device:Model.Device_id.t -> branch:Model.Core.Branch_id.t -> accepted:Model.Core.Record_id.t ->
+    events:Model.Core.Record_id.t list -> (intent, error) result
+  val find : local_state -> intent option
+  val id : intent -> (string, error) result
+  val url : intent -> string
+  val repository : intent -> Model.Core.Repository_id.t
+  val root : intent -> Model.Core.Digest.t
+  val device : intent -> Model.Device_id.t
+  val branch : intent -> Model.Core.Branch_id.t
+  val accepted : intent -> Model.Core.Record_id.t
+  val events : intent -> Model.Core.Record_id.t list
+  val plan : intent -> Model.Core.Plan_id.t option
+  val complete : intent -> bool
+  val initialize : local_state -> intent -> (local_state, error) result
+  val bind_plan : local_state -> plan:Model.Core.Plan_id.t -> (local_state, error) result
+  val finish : local_state -> (local_state, error) result
+  val validate_update :
+    plan_started:(Model.Core.Plan_id.t -> bool) -> previous:local_state -> local_state -> (unit, error) result
+  (** Immutable clone request and exact plan under the owning root. Only an
+      unstarted plan may be replaced; existing operations are never retargeted. *)
+end
+
 module V2 : sig
   (** Pure V2 relay-transfer planning. These values describe only raw immutable
       bytes and relay-local sessions; they are not V1 history or state. *)

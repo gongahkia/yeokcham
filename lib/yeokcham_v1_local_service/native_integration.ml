@@ -154,10 +154,13 @@ let observe_tree root store =
   in
   Ok (identity, observed, observation)
 
-let prepare ~root ~selected_revisions ~reconcile_heads =
+let prepare_with ~clone ~root ~selected_revisions ~reconcile_heads =
   with_writer ~root (fun repository ->
       let* () = no_restore root in
       let* loaded = Store.load repository |> store_error in
+      let* () = (match clone with
+        | None -> Clone_guard.require_normal loaded
+        | Some request -> Clone_guard.check_preparation loaded request) |> metadata in
       let* local, _, _ = context loaded in
       let* () =
         match Local.pending_operation local with
@@ -185,6 +188,9 @@ let prepare ~root ~selected_revisions ~reconcile_heads =
       in
       let* () = Plan.retain ~store plan |> plan_error in
       Ok plan)
+
+let prepare = prepare_with ~clone:None
+let prepare_clone ~root ~request = prepare_with ~clone:(Some request) ~root ~selected_revisions:[] ~reconcile_heads:None
 
 let save ~observe repository loaded ~local ~project ~history =
   let* _, collaboration, _ = context loaded in
@@ -937,6 +943,7 @@ let apply_with ~random_bytes ~observe ~root ~plan:identity ~signing_capability =
     with_writer ~root (fun repository ->
         let* () = no_restore root in
         let* loaded = Store.load repository |> store_error in
+        let* () = Clone_guard.check_plan loaded identity |> metadata in
         let* local, _, _ = context loaded in
         match Local.find_operation local ~plan:identity with
         | Some operation -> Ok (`Existing operation.Operation.token)

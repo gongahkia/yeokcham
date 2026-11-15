@@ -547,7 +547,8 @@ let run_with ~observe ~root ~remote ~load_signing_capability =
     Outbox.find (Store.transport collaboration) ~remote ~endpoint |> transport
   in
   let* token =
-    Credential.load ~remote
+    Credential.load_for_repository ~url:config.Config.url
+      ~repository:(Core.Repository_id.to_hex (Core.pool_repository (Store.Local.pool (Option.get loaded.Store.local))))
     |> Result.map_error Credential.error_to_string
     |> invalid
   in

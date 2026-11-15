@@ -60,6 +60,11 @@ val apply :
     acceptance requires the enrolled signer; an existing operation resumes its
     staged records without generating another signature/identity. *)
 
+val prepare_clone :
+  root:string -> request:Core.Digest.t -> (Plan.t, error) result
+(** Exact first materialization of an already verified clone target. The durable
+    clone intent permits this preparation while ordinary capture stays blocked. *)
+
 val resume :
   root:string -> operation:Core.Operation_id.t -> (outcome, error) result
 
