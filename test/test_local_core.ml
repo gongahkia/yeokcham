@@ -2050,11 +2050,907 @@ let native_share_uses_observed_rules_for_missing_public_paths () =
         "previous public ignored path preserved" true
         (List.mem_assoc [ "note.txt" ] (Composition.entries public)))
 
+let shared_plan_inputs root repository revisions =
+  let loaded = load repository in
+  let store = S.underlying_store repository in
+  let parents = (List.hd (L.branches (local loaded))).C.accepted_heads in
+  let accepted =
+    Composition.Graph.compose store (L.pool (local loaded)) ~parents ~revisions
+    |> ok Composition.Graph.error_to_string
+  in
+  let inherited =
+    Composition.Graph.represented (L.pool (local loaded)) parents
+    |> ok Composition.Graph.error_to_string
+  in
+  let selected =
+    Composition.Graph.represented_revisions (L.pool (local loaded)) revisions
+    |> ok Composition.Graph.error_to_string
+  in
+  let identity, _ = Snapshot.scan ~root ~store |> ok Snapshot.error_to_string in
+  let observed =
+    C.Object_id.of_hex
+      (Raw.Stored_object_id.to_hex
+         (Snapshot.Snapshot.stored_object_id identity))
+    |> model
+  in
+  ( store,
+    loaded,
+    accepted,
+    List.sort_uniq C.Record_id.compare (inherited @ selected),
+    observed )
+
+let preserved_entry store snapshot path =
+  let tree =
+    Composition.load store snapshot |> ok Composition.error_to_string
+  in
+  match List.assoc path (Composition.entries tree) with
+  | Composition.File file ->
+      Snapshot.Content.load store file.content |> ok Snapshot.error_to_string
+  | Composition.Directory -> Alcotest.fail "expected file"
+
+let preservation_accepts_D_and_keeps_private_E_and_X () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\nprivate E\n");
+      write_private root "unselected private X\000";
+      let store, loaded, accepted, represented, observed =
+        shared_plan_inputs root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let prepared =
+        Service.Preservation.prepare ~store ~loaded ~represented ~accepted
+          ~observed
+        |> ok Service.Preservation.error_to_string
+      in
+      Alcotest.(check string)
+        "known shared D exactly once" "shared D\n"
+        (preserved_entry store prepared.Service.Preservation.known_present
+           [ "note.txt" ]);
+      let known =
+        Composition.load store prepared.Service.Preservation.known_present
+        |> ok Composition.error_to_string
+      in
+      Alcotest.(check bool)
+        "private X is not a shared preservation base" false
+        (List.mem_assoc [ "private.bin" ] (Composition.entries known));
+      Alcotest.(check string)
+        "workspace retains private continuation E" "shared D\nprivate E\n"
+        (preserved_entry store prepared.Service.Preservation.workspace_result
+           [ "note.txt" ]);
+      Alcotest.(check string)
+        "unselected X remains in workspace" "unselected private X\000"
+        (preserved_entry store prepared.Service.Preservation.workspace_result
+           [ "private.bin" ]);
+      Alcotest.(check bool)
+        "accepted result excludes private X" false
+        (List.mem_assoc [ "private.bin" ] (Composition.entries accepted));
+      Alcotest.(check bool)
+        "planning does not publish history/root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "planning never materializes files" "shared D\nprivate E\n"
+        (In_channel.with_open_bin (root ^ "/note.txt") In_channel.input_all))
+
+let[@warning "-4"] preservation_rejects_missing_lineage_and_overlap () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Service.navigate_history ~root ~direction:(Service.Go_to 0L)
+        ~dry_run:false
+      |> service |> ignore;
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\nprivate E\n");
+      let store, loaded, accepted, represented, observed =
+        shared_plan_inputs root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      (match
+         Service.Preservation.prepare ~store ~loaded ~represented ~accepted
+           ~observed
+       with
+      | Error (Service.Preservation.Content (Composition.Conflicts paths)) ->
+          Alcotest.(check bool)
+            "nonancestor source requires a workspace decision" true
+            (List.mem [ "note.txt" ] paths)
+      | Error error ->
+          Alcotest.fail (Service.Preservation.error_to_string error)
+      | Ok _ ->
+          Alcotest.fail
+            "inferred publication correspondence from equal-looking contents");
+      Alcotest.(check bool)
+        "conflict preserves root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "conflicting private bytes stay live" "shared D\nprivate E\n"
+        (In_channel.with_open_bin (root ^ "/note.txt") In_channel.input_all))
+
+let preservation_does_not_backdate_already_accepted_work () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "old shared D1\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let loaded = load repository in
+      let store = S.underlying_store repository in
+      let content =
+        Snapshot.Content.store store "accepted D2\n"
+        |> ok Snapshot.error_to_string
+      in
+      let result =
+        Composition.tree
+          [
+            ( [ "note.txt" ],
+              Composition.File { mode = Snapshot.Regular; content } );
+          ]
+        |> ok Composition.error_to_string
+        |> Composition.store store
+        |> ok Composition.error_to_string
+      in
+      let scope =
+        Composition.Scope.store store [ [ "note.txt" ] ]
+        |> ok Composition.error_to_string
+      in
+      let local, revision =
+        L.prepare_revision ~store ~authority ~certificate
+          ~signing_capability:capability ~change:shared.Service.Share.change
+          ~previous_revisions:[ Option.get shared.Service.Share.revision ]
+          ~base_snapshot:(L.empty_snapshot (local loaded))
+          ~result_snapshot:result ~edit_scope_root:scope ~dependencies:[]
+          (local loaded)
+        |> ok Fun.id
+      in
+      let local, _ =
+        L.prepare_acceptance ~store ~authority ~certificate
+          ~signing_capability:capability
+          ~parents:[ (L.selected local).L.basis ]
+          ~chosen_revisions:[ revision ] ~result_snapshot:result
+          ~cursor:(H.current loaded.S.history).H.id local
+        |> ok Fun.id
+      in
+      S.save_collaborative ~local repository ~expected:loaded.S.head
+        ~project:loaded.S.project
+        ~collaboration:(Option.get loaded.S.collaboration)
+      |> ok S.error_to_string |> ignore;
+      let store, loaded, accepted, represented, observed =
+        shared_plan_inputs root repository []
+      in
+      let prepared =
+        Service.Preservation.prepare ~store ~loaded ~represented ~accepted
+          ~observed
+        |> ok Service.Preservation.error_to_string
+      in
+      Alcotest.(check int)
+        "old already-accepted source is not overlaid" 0
+        (List.length prepared.Service.Preservation.contributions);
+      Alcotest.(check bool)
+        "known shared base stays D2" true
+        (C.Object_id.equal result prepared.Service.Preservation.known_present);
+      Alcotest.(check string)
+        "private return to D1 is preserved" "old shared D1\n"
+        (preserved_entry store prepared.Service.Preservation.workspace_result
+           [ "note.txt" ]))
+
+module I = Service.Integration
+
+let prepare_integration root repository revisions =
+  let loaded = load repository in
+  let store = S.underlying_store repository in
+  let identity, _, observation =
+    Snapshot.Observation.scan ~root ~store |> ok Snapshot.error_to_string
+  in
+  let observed =
+    Snapshot.Snapshot.stored_object_id identity
+    |> Raw.Stored_object_id.to_hex |> snapshot
+  in
+  I.prepare ~store ~loaded ~observed ~observation ~selected_revisions:revisions
+    ~reconcile_heads:None
+  |> ok I.error_to_string
+
+let integration_plan_binds_two_outputs_without_publication () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\nprivate E\n");
+      let before = load repository in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let outputs =
+        match I.readiness plan with
+        | I.Ready outputs -> outputs
+        | I.Conflicted _ | I.Decision _ ->
+            Alcotest.fail "expected a ready D/E plan"
+      in
+      let store = S.underlying_store repository in
+      Alcotest.(check bool)
+        "accepted result is exact public D" true
+        (C.Object_id.equal outputs.C.accepted_snapshot
+           shared.Service.Share.public_snapshot);
+      Alcotest.(check string)
+        "planned workspace retains E" "shared D\nprivate E\n"
+        (preserved_entry store outputs.C.workspace_snapshot [ "note.txt" ]);
+      Alcotest.(check bool)
+        "two outputs remain distinct" false
+        (C.Object_id.equal outputs.C.accepted_snapshot
+           outputs.C.workspace_snapshot);
+      Alcotest.(check bool)
+        "unaccepted selection needs a commit" false (I.no_op plan);
+      let again =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      Alcotest.(check bool)
+        "same exact observed inputs have stable plan identity" true
+        (C.Plan_id.equal (I.id plan) (I.id again));
+      Alcotest.(check bool)
+        "no accepted/history/outbound root publication" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let envelope =
+        Raw.get store (I.stored_id plan) |> ok Raw.error_to_string
+      in
+      Alcotest.(check bool)
+        "one registered private plan envelope" true
+        (Yeokcham_envelope.object_type envelope
+        = Yeokcham_envelope.Core_integration_plan);
+      Alcotest.(check string)
+        "stored canonical plan is the prepared control" (I.encode plan)
+        (Yeokcham_envelope.encode envelope))
+
+let integration_plan_ignores_unrelated_receipt_and_binds_selected_heads () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let chosen = [ Option.get shared.Service.Share.revision ] in
+      let initial = prepare_integration root repository chosen in
+      let add_record ~change ~previous name bytes =
+        let loaded = load repository in
+        let store = S.underlying_store repository in
+        let content =
+          Snapshot.Content.store store bytes |> ok Snapshot.error_to_string
+        in
+        let result =
+          Composition.tree
+            [
+              ([ name ], Composition.File { mode = Snapshot.Regular; content });
+            ]
+          |> ok Composition.error_to_string
+          |> Composition.store store
+          |> ok Composition.error_to_string
+        in
+        let scope =
+          Composition.Scope.store store [ [ name ] ]
+          |> ok Composition.error_to_string
+        in
+        let next, _ =
+          L.prepare_revision ~store ~authority ~certificate
+            ~signing_capability:capability ~change ~previous_revisions:previous
+            ~base_snapshot:(L.empty_snapshot (local loaded))
+            ~result_snapshot:result ~edit_scope_root:scope ~dependencies:[]
+            (local loaded)
+          |> ok Fun.id
+        in
+        S.save_collaborative ~local:next repository ~expected:loaded.S.head
+          ~project:loaded.S.project
+          ~collaboration:(Option.get loaded.S.collaboration)
+        |> ok S.error_to_string |> ignore
+      in
+      add_record ~change:None ~previous:[] "other.txt"
+        "independent received work\n";
+      let independent = prepare_integration root repository chosen in
+      Alcotest.(check bool)
+        "unrelated received record does not invalidate exact plan" true
+        (C.Plan_id.equal (I.id initial) (I.id independent));
+      add_record ~change:shared.Service.Share.change ~previous:chosen "note.txt"
+        "new selected change head\n";
+      let selected_update = prepare_integration root repository chosen in
+      Alcotest.(check bool)
+        "selected floating head update changes exact identity" false
+        (C.Plan_id.equal (I.id initial) (I.id selected_update)))
+
+let integration_plan_exposes_workspace_conflict_without_files_or_history () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "shared D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Service.navigate_history ~root ~direction:(Service.Go_to 0L)
+        ~dry_run:false
+      |> service |> ignore;
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "private incompatible version\n");
+      let before = load repository in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      (match I.readiness plan with
+      | I.Conflicted conflicts ->
+          Alcotest.(check bool)
+            "named private workspace conflict" true
+            (List.exists
+               (fun conflict ->
+                 conflict.C.private_workspace
+                 && conflict.C.path = [ "note.txt" ])
+               conflicts)
+      | I.Ready _ | I.Decision _ ->
+          Alcotest.fail "expected an explicit workspace conflict");
+      Alcotest.(check bool)
+        "accepted proposal remains separately available" true
+        (Option.is_some (I.accepted_snapshot plan));
+      Alcotest.(check bool)
+        "conflict planning leaves root unchanged" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "conflicting private bytes preserved" "private incompatible version\n"
+        (In_channel.with_open_bin (root ^ "/note.txt") In_channel.input_all))
+
+module PE = Yeokcham_encoding
+module Plan_envelope = Yeokcham_envelope
+
+let plan_observation root repository =
+  let store = S.underlying_store repository in
+  let identity, _, observation =
+    Snapshot.Observation.scan ~root ~store |> ok Snapshot.error_to_string
+  in
+  let observed =
+    Snapshot.Snapshot.stored_object_id identity
+    |> Raw.Stored_object_id.to_hex |> snapshot
+  in
+  (store, load repository, observed, observation)
+
+let plan_array values = PE.array values |> ok PE.construction_error_to_string
+
+let[@warning "-4"] plan_payload plan =
+  match
+    Plan_envelope.decode (I.encode plan)
+    |> ok Plan_envelope.decode_error_to_string
+    |> Plan_envelope.payload
+  with
+  | PE.Array fields -> fields
+  | _ -> Alcotest.fail "expected plan array"
+
+let alter_field index f values =
+  List.mapi (fun i value -> if i = index then f value else value) values
+
+let altered_plan ?(object_type = Plan_envelope.Core_integration_plan) plan f =
+  Plan_envelope.create ~object_type ~object_format_version:1
+    ~mandatory_features:0L
+    ~payload:(plan_array (f (plan_payload plan)))
+    ()
+  |> ok Plan_envelope.creation_error_to_string
+  |> Plan_envelope.encode
+
+let[@warning "-4"] alter_request f fields =
+  alter_field 1
+    (function
+      | PE.Array values -> plan_array (f values)
+      | _ -> Alcotest.fail "expected request array")
+    fields
+
+let[@warning "-4"] integration_plan_decode_and_current_revalidation () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, observed, observation =
+        plan_observation root repository
+      in
+      let before =
+        Raw.list_objects store |> ok Raw.error_to_string |> List.length
+      in
+      let decoded =
+        I.decode ~store ~loaded (I.encode plan) |> ok I.error_to_string
+      in
+      Alcotest.(check bool)
+        "typed canonical plan identity survives decoding" true
+        (C.Plan_id.equal (I.id plan) (I.id decoded));
+      Alcotest.(check int)
+        "decode writes no immutable objects" before
+        (Raw.list_objects store |> ok Raw.error_to_string |> List.length);
+      I.revalidate ~store ~loaded ~observed ~observation decoded
+      |> ok I.error_to_string |> ignore;
+      let before_save = I.id plan in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\nprivate E\n");
+      let changed =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, observed, observation =
+        plan_observation root repository
+      in
+      (match I.revalidate ~store ~loaded ~observed ~observation decoded with
+      | Error (I.Stale _) -> ()
+      | Error error -> Alcotest.fail (I.error_to_string error)
+      | Ok _ -> Alcotest.fail "changed disk observation accepted under old plan");
+      Alcotest.(check bool)
+        "changed observation changes plan identity" false
+        (C.Plan_id.equal before_save (I.id changed));
+      Service.save ~root |> service |> ignore;
+      let cursor_changed =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      Alcotest.(check bool)
+        "equal bytes at another cursor still change plan" false
+        (C.Plan_id.equal (I.id changed) (I.id cursor_changed)))
+
+let[@warning "-4"] integration_plan_rejects_malformed_control_and_scope () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, _, _ = plan_observation root repository in
+      let malformed =
+        [
+          altered_plan ~object_type:Plan_envelope.Core_metadata_page plan Fun.id;
+          altered_plan plan (alter_field 0 (fun _ -> PE.integer 2L));
+          altered_plan plan
+            (alter_request
+               (alter_field 0 (fun _ -> PE.bytes (String.make 32 'z'))));
+          altered_plan plan
+            (alter_request
+               (alter_field 4 (fun _ -> plan_array [ PE.bytes "short" ])));
+          altered_plan plan
+            (alter_request
+               (alter_field 4 (function
+                 | PE.Array (id :: _) -> plan_array [ id; id ]
+                 | _ -> assert false)));
+          altered_plan plan
+            (alter_request
+               (alter_field 9 (function
+                 | PE.Array values ->
+                     plan_array
+                       (alter_field 0
+                          (fun _ -> PE.bytes (String.make 16 'z'))
+                          values)
+                 | _ -> assert false)));
+          altered_plan plan
+            (alter_request
+               (alter_field 10 (fun _ ->
+                    PE.text "unknown-profile"
+                    |> ok PE.construction_error_to_string)));
+          String.make ((8 * 1024 * 1024) + 1) 'x';
+        ]
+      in
+      List.iter
+        (fun bytes ->
+          match I.decode ~store ~loaded bytes with
+          | Error (I.Integrity _) -> ()
+          | Error error -> Alcotest.fail (I.error_to_string error)
+          | Ok _ -> Alcotest.fail "malformed plan accepted")
+        malformed;
+      let required =
+        altered_plan plan
+          (alter_request
+             (alter_field 7 (fun _ ->
+                  plan_array [ PE.bytes (String.make 32 'p') ])))
+      in
+      (match I.decode ~store ~loaded required with
+      | Error (I.Policy _) -> ()
+      | Error error -> Alcotest.fail (I.error_to_string error)
+      | Ok _ -> Alcotest.fail "unsupported required policy silently accepted");
+      let unknown_authority =
+        altered_plan plan
+          (alter_request
+             (alter_field 6 (fun _ ->
+                  plan_array [ PE.bytes (String.make 32 'u') ])))
+      in
+      (match I.decode ~store ~loaded unknown_authority with
+      | Error (I.Policy _) -> ()
+      | Error error -> Alcotest.fail (I.error_to_string error)
+      | Ok _ -> Alcotest.fail "unknown authority silently accepted");
+      let unsupported offset byte =
+        let data = Bytes.of_string (I.encode plan) in
+        Bytes.set data offset byte;
+        let prefix = Bytes.sub_string data 0 25 in
+        let payload =
+          Bytes.sub_string data Plan_envelope.header_size
+            (Bytes.length data - Plan_envelope.header_size)
+        in
+        let digest =
+          Yeokcham_hash.Sha256.digest_string (prefix ^ payload)
+          |> Yeokcham_hash.Sha256.to_raw_string
+        in
+        Bytes.blit_string digest 0 data 25 32;
+        Bytes.to_string data
+      in
+      List.iter
+        (fun bytes ->
+          match I.decode ~store ~loaded bytes with
+          | Error (I.Integrity _) -> ()
+          | Error error -> Alcotest.fail (I.error_to_string error)
+          | Ok _ -> Alcotest.fail "unsupported version/features accepted")
+        [ unsupported 7 '\002'; unsupported 15 '\001' ])
+
+let[@warning "-4"] integration_plan_rejects_false_outputs_after_reference_decode
+    () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, observed, observation =
+        plan_observation root repository
+      in
+      let private_snapshot =
+        PE.bytes
+          (C.Object_id.of_hex (M.Snapshot_id.to_string observed)
+          |> model |> C.Object_id.to_raw)
+      in
+      let false_plan =
+        altered_plan plan (fun fields ->
+            fields
+            |> alter_field 5 (fun _ -> private_snapshot)
+            |> alter_field 6 (function
+              | PE.Array values ->
+                  plan_array (alter_field 1 (fun _ -> private_snapshot) values)
+              | _ -> Alcotest.fail "expected ready outputs"))
+      in
+      let decoded =
+        I.decode ~store ~loaded false_plan |> ok I.error_to_string
+      in
+      (match I.revalidate ~store ~loaded ~observed ~observation decoded with
+      | Error (I.Integrity _) -> ()
+      | Error error -> Alcotest.fail (I.error_to_string error)
+      | Ok _ ->
+          Alcotest.fail
+            "canonical referenced private snapshot became accepted output");
+      Alcotest.(check bool)
+        "refused plan leaves root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head))
+
+let integration_proposal_survives_restart_and_gc_until_release () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\nprivate unsaved E\n");
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, observed, observation =
+        plan_observation root repository
+      in
+      I.retain ~store plan |> ok I.error_to_string;
+      I.retain ~store plan |> ok I.error_to_string;
+      let reloaded =
+        I.load ~store ~loaded (I.id plan) |> ok I.error_to_string
+      in
+      I.revalidate ~store ~loaded ~observed ~observation reloaded
+      |> ok I.error_to_string |> ignore;
+      Alcotest.(check int)
+        "one immutable retained proposal" 1
+        (I.scan ~store ~loaded |> ok I.error_to_string |> List.length);
+      Alcotest.(check bool)
+        "retaining proposal does not commit history/head" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      let child = Unix.fork () in
+      (if child = 0 then
+         let repository = S.open_repository ~root |> ok S.error_to_string in
+         let loaded = load repository in
+         let fresh =
+           I.load ~store:(S.underlying_store repository) ~loaded (I.id plan)
+           |> ok I.error_to_string
+         in
+         Unix._exit (if C.Plan_id.equal (I.id plan) (I.id fresh) then 0 else 72));
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "exact plan survives a fresh process" true (status = Unix.WEXITED 0);
+      Snapshot.Content.store store "unrooted collection fixture"
+      |> ok Snapshot.error_to_string
+      |> ignore;
+      let gc = Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string in
+      let observed_id =
+        Raw.Stored_object_id.of_hex (M.Snapshot_id.to_string observed)
+        |> ok Raw.Stored_object_id.parse_error_to_string
+      in
+      let entry =
+        List.find
+          (fun entry ->
+            Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id
+              observed_id)
+          gc.Yeokcham_v1_gc.objects
+      in
+      (match entry.Yeokcham_v1_gc.disposition with
+      | Yeokcham_v1_gc.Retain reasons ->
+          Alcotest.(check bool)
+            "proposal is an explicit private recovery root" true
+            (List.exists
+               (fun reason ->
+                 String.starts_with ~prefix:"integration-proposal "
+                   (Yeokcham_v1_gc.root_reason_to_string reason))
+               reasons)
+      | Yeokcham_v1_gc.Collect ->
+          Alcotest.fail "GC would lose the exact proposed workspace");
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      let fresh =
+        I.load ~store ~loaded:(load repository) (I.id plan)
+        |> ok I.error_to_string
+      in
+      let outputs =
+        match I.readiness fresh with
+        | I.Ready value -> value
+        | I.Conflicted _ | I.Decision _ -> Alcotest.fail "ready expected"
+      in
+      Alcotest.(check string)
+        "private proposed E survives actual collection" "D\nprivate unsaved E\n"
+        (preserved_entry store outputs.C.workspace_snapshot [ "note.txt" ]);
+      I.forget ~store (I.id plan) |> ok I.error_to_string;
+      I.forget ~store (I.id plan) |> ok I.error_to_string;
+      let gc = Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string in
+      let entry =
+        List.find
+          (fun entry ->
+            Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id
+              observed_id)
+          gc.Yeokcham_v1_gc.objects
+      in
+      Alcotest.(check bool)
+        "releasing proposal removes its extra retention root" true
+        (entry.Yeokcham_v1_gc.disposition = Yeokcham_v1_gc.Collect);
+      Alcotest.(check string)
+        "release never changes private live bytes" "D\nprivate unsaved E\n"
+        (In_channel.with_open_bin (root ^ "/note.txt") In_channel.input_all))
+
+let integration_proposal_rejects_missing_contents_before_retention () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "private unsaved target\n");
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store, loaded, observed, _ = plan_observation root repository in
+      let source =
+        C.Object_id.of_hex (M.Snapshot_id.to_string observed) |> model
+      in
+      let tree =
+        Composition.load store source |> ok Composition.error_to_string
+      in
+      let content =
+        match List.assoc [ "note.txt" ] (Composition.entries tree) with
+        | Composition.File file ->
+            Snapshot.Content.stored_object_id file.content
+        | Composition.Directory -> Alcotest.fail "file expected"
+      in
+      Unix.unlink (Raw.object_path store content);
+      reject "retained plan with missing complete target" (I.retain ~store plan);
+      Alcotest.(check bool)
+        "failed preflight creates no proposal alias" false
+        (Sys.file_exists (root ^ "/.yeokcham/integration-plans"));
+      Alcotest.(check bool)
+        "failed preflight preserves root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "missing immutable object never rewrites live file"
+        "private unsaved target\n"
+        (In_channel.with_open_bin (root ^ "/note.txt") In_channel.input_all))
+
+let integration_proposal_corruption_blocks_gc_without_replacement () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "D\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let plan =
+        prepare_integration root repository
+          [ Option.get shared.Service.Share.revision ]
+      in
+      let store = S.underlying_store repository in
+      I.retain ~store plan |> ok I.error_to_string;
+      let path =
+        root ^ "/.yeokcham/integration-plans/"
+        ^ C.Plan_id.to_hex (I.id plan)
+        ^ ".plan"
+      in
+      Out_channel.with_open_bin path (fun out ->
+          output_string out "corrupt proposal");
+      reject "overwrote corrupt conflicting retained plan"
+        (I.retain ~store plan);
+      Alcotest.(check string)
+        "collision preserves existing control bytes" "corrupt proposal"
+        (In_channel.with_open_bin path In_channel.input_all);
+      reject "GC accepted unreadable retained proposal"
+        (Yeokcham_v1_gc.plan ~root);
+      let report = Yeokcham_v1_health_repository.verify ~root in
+      Alcotest.(check bool)
+        "health identifies proposal damage separately from state head" true
+        (Yeokcham_v1_health.report_damages report
+        |> List.exists (fun damage ->
+            Yeokcham_v1_health.damage_affected damage
+            = Yeokcham_v1_health.Durable_record
+                (Yeokcham_v1_health.Integration_plan_record, "integration-plans"))
+        );
+      Alcotest.(check bool)
+        "failed planning creates no quarantine" false
+        (Sys.file_exists (root ^ "/.yeokcham/gc")))
+
+let[@warning "-4"] equal_content_causal_heads_require_explicit_full_reconciliation
+    () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "equal public bytes\n");
+      let first =
+        Service.share_selected ~root ~paths:[ [ "note.txt" ] ] ~update:None
+          ~title:(Some "first change") ~dry_run:false
+          ~signing_capability:(Some capability)
+        |> service
+      in
+      let second =
+        Service.share_selected ~root ~paths:[ [ "note.txt" ] ] ~update:None
+          ~title:(Some "independent equal change") ~dry_run:false
+          ~signing_capability:(Some capability)
+        |> service
+      in
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let original = local before in
+      let accept revision =
+        L.prepare_acceptance ~store ~authority ~certificate
+          ~signing_capability:capability
+          ~parents:[ (L.selected original).L.basis ]
+          ~chosen_revisions:[ revision ]
+          ~result_snapshot:first.Service.Share.public_snapshot
+          ~cursor:(H.current before.S.history).H.id original
+        |> ok Fun.id |> fst
+      in
+      let a = accept (Option.get first.Service.Share.revision) in
+      let b = accept (Option.get second.Service.Share.revision) in
+      let fields local =
+        match
+          L.encode local |> ok Fun.id |> PE.decode
+          |> ok PE.decode_error_to_string
+        with
+        | PE.Array fields -> fields
+        | _ -> Alcotest.fail "expected local metadata array"
+      in
+      let references local =
+        match List.nth (fields local) 3 with
+        | PE.Array references -> references
+        | _ -> Alcotest.fail "expected core references"
+      in
+      let references =
+        references a @ references b
+        |> List.sort_uniq (fun a b ->
+            String.compare (PE.encode a) (PE.encode b))
+      in
+      let combined =
+        fields original
+        |> alter_field 3 (fun _ -> plan_array references)
+        |> plan_array |> PE.encode |> L.decode ~store ~authority |> ok Fun.id
+      in
+      let loaded =
+        S.save_collaborative ~local:combined repository ~expected:before.S.head
+          ~project:before.S.project
+          ~collaboration:(Option.get before.S.collaboration)
+        |> ok S.error_to_string
+      in
+      let branch = List.hd (L.branches (local loaded)) in
+      Alcotest.(check int)
+        "two accepted identities survive equal bytes" 2
+        (List.length branch.C.accepted_heads);
+      Alcotest.(check int)
+        "two causal event heads survive" 2
+        (List.length branch.C.event_heads);
+      let store, loaded, observed, observation =
+        plan_observation root repository
+      in
+      let prepare reconcile_heads =
+        I.prepare ~store ~loaded ~observed ~observation ~selected_revisions:[]
+          ~reconcile_heads
+      in
+      let choice = function
+        | Error (I.Choice _) -> ()
+        | Error error -> Alcotest.fail (I.error_to_string error)
+        | Ok _ -> Alcotest.fail "implicitly reconciled a causal fork"
+      in
+      choice (prepare None);
+      choice (prepare (Some branch.C.accepted_heads));
+      let every_head =
+        List.sort C.Record_id.compare
+          (branch.C.accepted_heads @ branch.C.event_heads)
+      in
+      choice (prepare (Some (List.hd every_head :: every_head)));
+      let plan = prepare (Some every_head) |> ok I.error_to_string in
+      (match I.readiness plan with
+      | I.Ready _ -> ()
+      | I.Conflicted _ | I.Decision _ ->
+          Alcotest.fail
+            "equal complete variants should compose after explicit \
+             reconciliation");
+      Alcotest.(check bool)
+        "equal bytes still need recorded reconciliation" false (I.no_op plan);
+      let decoded =
+        I.decode ~store ~loaded (I.encode plan) |> ok I.error_to_string
+      in
+      I.revalidate ~store ~loaded ~observed ~observation decoded
+      |> ok I.error_to_string |> ignore;
+      Alcotest.(check bool)
+        "preparation does not merge or erase either head" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "equal-content causal heads require explicit full reconciliation"
+            `Quick
+            equal_content_causal_heads_require_explicit_full_reconciliation;
+          Alcotest.test_case
+            "retained integration proposal survives restart/GC then releases \
+             roots"
+            `Quick integration_proposal_survives_restart_and_gc_until_release;
+          Alcotest.test_case
+            "proposal preflights complete contents before retention" `Quick
+            integration_proposal_rejects_missing_contents_before_retention;
+          Alcotest.test_case "corrupt proposal refuses replacement and GC"
+            `Quick integration_proposal_corruption_blocks_gc_without_replacement;
+          Alcotest.test_case
+            "integration plan decodes and revalidates exact observation/cursor"
+            `Quick integration_plan_decode_and_current_revalidation;
+          Alcotest.test_case
+            "integration plan refuses malformed scope/features/policy" `Quick
+            integration_plan_rejects_malformed_control_and_scope;
+          Alcotest.test_case
+            "integration plan revalidation rejects false private acceptance"
+            `Quick integration_plan_rejects_false_outputs_after_reference_decode;
+          Alcotest.test_case
+            "integration plan binds separate accepted/private outputs" `Quick
+            integration_plan_binds_two_outputs_without_publication;
+          Alcotest.test_case
+            "integration plan binds selected heads and tolerates unrelated \
+             receipt"
+            `Quick
+            integration_plan_ignores_unrelated_receipt_and_binds_selected_heads;
+          Alcotest.test_case
+            "integration plan exposes private conflicts without mutation" `Quick
+            integration_plan_exposes_workspace_conflict_without_files_or_history;
+          Alcotest.test_case
+            "preservation accepts D and retains private E and X" `Quick
+            preservation_accepts_D_and_keeps_private_E_and_X;
+          Alcotest.test_case
+            "preservation refuses nonancestor publication inference" `Quick
+            preservation_rejects_missing_lineage_and_overlap;
+          Alcotest.test_case
+            "preservation does not overlay already accepted older work" `Quick
+            preservation_does_not_backdate_already_accepted_work;
           Alcotest.test_case
             "native share captures only selected public work and retries" `Quick
             native_share_captures_only_selected_public_work;

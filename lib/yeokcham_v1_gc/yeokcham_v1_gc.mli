@@ -9,6 +9,7 @@ type root_reason =
   | State_head
   | Shared_history of Yeokcham_v1_model.Snapshot_id.t
   | Publication_witness of Yeokcham_v1_model.Core.Operation_id.t
+  | Integration_proposal of Yeokcham_v1_model.Core.Plan_id.t
   | Checkpoint of {
       snapshot : Yeokcham_v1_model.Snapshot_id.t;
       reasons : Yeokcham_v1_model.protection_reason list;
@@ -48,6 +49,7 @@ type transaction_progress = {
 type error =
   | Store_error of Yeokcham_store.error
   | V1_store_error of Yeokcham_v1_store.error
+  | Integration_error of Yeokcham_v1_integration.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Model_error of Yeokcham_v1_model.error
   | Journal_error of Yeokcham_v1_restore_journal.error

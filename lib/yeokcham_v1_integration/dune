@@ -1,0 +1,15 @@
+(library
+ (name yeokcham_v1_integration)
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_composition
+  yeokcham_v1_pages
+  yeokcham_v1_store
+  yeokcham_v1_trust
+  yeokcham_v1_undo))

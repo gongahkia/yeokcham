@@ -7,11 +7,13 @@ module Proof = Yeokcham_v1_restore_proof
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
 module V1_store = Yeokcham_v1_store
+module Integration = Yeokcham_v1_integration
 
 type root_reason =
   | State_head
   | Shared_history of Yeokcham_v1_model.Snapshot_id.t
   | Publication_witness of Model.Core.Operation_id.t
+  | Integration_proposal of Model.Core.Plan_id.t
   | Checkpoint of {
       snapshot : Model.Snapshot_id.t;
       reasons : Model.protection_reason list;
@@ -51,6 +53,7 @@ type transaction_progress = {
 type error =
   | Store_error of Store.error
   | V1_store_error of V1_store.error
+  | Integration_error of Integration.error
   | Snapshot_error of Snapshot.error
   | Model_error of Model.error
   | Journal_error of Journal.error
@@ -80,6 +83,8 @@ let root_reason_to_string = function
       "shared-history " ^ Model.Snapshot_id.to_string snapshot
   | Publication_witness operation ->
       "publication-witness " ^ Model.Core.Operation_id.to_hex operation
+  | Integration_proposal plan ->
+      "integration-proposal " ^ Model.Core.Plan_id.to_hex plan
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
@@ -95,6 +100,7 @@ let root_reason_to_string = function
 let error_to_string = function
   | Store_error error -> Store.error_to_string error
   | V1_store_error error -> V1_store.error_to_string error
+  | Integration_error error -> Integration.error_to_string error
   | Snapshot_error error -> Snapshot.error_to_string error
   | Model_error error -> Model.error_to_string error
   | Journal_error error -> Journal.error_to_string error
@@ -186,7 +192,7 @@ let is_collectible_type = function
   | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
   | Envelope.Core_shared_revision | Envelope.Core_accepted_version
   | Envelope.Core_branch_event | Envelope.Core_edit_scope
-  | Envelope.Core_metadata_page ->
+  | Envelope.Core_metadata_page | Envelope.Core_integration_plan ->
       false
 
 let classify ~state_head ~objects ~reachable =
@@ -559,7 +565,8 @@ let traverse_content store reasons content_id reachable =
     | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
     | Envelope.V1_project_state | Envelope.Core_shared_revision
     | Envelope.Core_accepted_version | Envelope.Core_branch_event
-    | Envelope.Core_edit_scope | Envelope.Core_metadata_page ) as object_type ->
+    | Envelope.Core_edit_scope | Envelope.Core_metadata_page
+    | Envelope.Core_integration_plan ) as object_type ->
       Error
         (Invalid_schema
            (Printf.sprintf "tree file refers to object type %d"
@@ -619,6 +626,32 @@ let plan_from_loaded ~root store loaded =
         let snapshot_id = Snapshot.Snapshot.of_stored_object_id object_id in
         traverse_snapshot store reasons snapshot_id reachable)
       (Ok Object_map.empty) roots
+  in
+  let* proposals =
+    Integration.scan ~store ~loaded
+    |> Result.map_error (fun e -> Integration_error e)
+  in
+  let* reachable =
+    List.fold_left
+      (fun acc proposal ->
+        let* reachable = acc in
+        List.fold_left
+          (fun acc identity ->
+            let* reachable = acc in
+            let* id =
+              Store.Stored_object_id.of_raw_bytes
+                (Model.Core.Object_id.to_raw identity)
+              |> Option.to_result
+                   ~none:
+                     (Invalid_schema "invalid integration proposal snapshot")
+            in
+            traverse_snapshot store
+              [ Integration_proposal (Integration.id proposal) ]
+              (Snapshot.Snapshot.of_stored_object_id id)
+              reachable)
+          (Ok reachable)
+          (Integration.retention_roots proposal))
+      (Ok reachable) proposals
   in
   let reachable =
     List.fold_left

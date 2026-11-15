@@ -1413,6 +1413,7 @@ let json_of_affected = function
         | Health.Workspace_receipt -> "workspace-receipt"
         | Health.Gc_transaction -> "gc-transaction"
         | Health.Repair_plan_record -> "repair-plan"
+        | Health.Integration_plan_record -> "integration-plan"
       in
       `Assoc [ ("kind", `String kind); ("id", `String id) ]
   | Health.Temporary_state (kind, id) ->

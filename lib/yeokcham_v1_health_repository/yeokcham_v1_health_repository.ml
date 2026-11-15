@@ -64,6 +64,14 @@ let observation_of_store_error = function
       state_head_unreadable
 
 let[@warning "-4"] observation_of_gc_error = function
+  | Gc.Integration_error _ ->
+      Health.Durable_observation
+        {
+          durable_kind = Health.Integration_plan_record;
+          durable_id = "integration-plans";
+          readable = false;
+          restore_mismatch = false;
+        }
   | Gc.Missing_reachable_object id ->
       Health.Object_observation
         {

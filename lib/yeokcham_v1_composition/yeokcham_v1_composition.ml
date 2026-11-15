@@ -92,6 +92,8 @@ let valid_path path =
     Error (Invalid_input "mandatory metadata path is outside public contents")
   else Ok ()
 
+let validate_path = valid_path
+
 let tree values =
   let* result =
     List.fold_left
@@ -144,13 +146,25 @@ let[@warning "-4"] load store id =
   tree values |> decoded
 
 let overlay ~base changes =
-  let* values = List.fold_left (fun acc (path, entry) ->
-    let* values = acc in
-    let* () = valid_path path in
-    let values = match entry with
-      | Some Directory -> values
-      | None | Some (File _) -> Paths.filter (fun candidate _ -> not (prefix path candidate)) values in
-    Ok (match entry with None -> Paths.remove path values | Some entry -> Paths.add path entry values)) (Ok base) changes in
+  let* values =
+    List.fold_left
+      (fun acc (path, entry) ->
+        let* values = acc in
+        let* () = valid_path path in
+        let values =
+          match entry with
+          | Some Directory -> values
+          | None | Some (File _) ->
+              Paths.filter
+                (fun candidate _ -> not (prefix path candidate))
+                values
+        in
+        Ok
+          (match entry with
+          | None -> Paths.remove path values
+          | Some entry -> Paths.add path entry values))
+      (Ok base) changes
+  in
   tree (Paths.bindings values)
 
 type trie = Dir of trie Names.t | Leaf of S.file_mode * S.Content.id

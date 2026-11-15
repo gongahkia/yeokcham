@@ -25,6 +25,7 @@ type durable_record_kind =
   | Workspace_receipt
   | Gc_transaction
   | Repair_plan_record
+  | Integration_plan_record
 
 type temporary_state_kind =
   | Restore_temporary
@@ -214,6 +215,7 @@ let durable_rank = function
   | Workspace_receipt -> 2
   | Gc_transaction -> 3
   | Repair_plan_record -> 4
+  | Integration_plan_record -> 5
 
 let temporary_rank = function
   | Restore_temporary -> 0
@@ -519,6 +521,7 @@ let durable_code = function
   | Workspace_receipt -> 2L
   | Gc_transaction -> 3L
   | Repair_plan_record -> 4L
+  | Integration_plan_record -> 5L
 
 let durable_of_code = function
   | 0L -> Ok State_head
@@ -526,6 +529,7 @@ let durable_of_code = function
   | 2L -> Ok Workspace_receipt
   | 3L -> Ok Gc_transaction
   | 4L -> Ok Repair_plan_record
+  | 5L -> Ok Integration_plan_record
   | _ -> Error (Invalid_locator "unknown durable record kind")
 
 let temporary_code = function

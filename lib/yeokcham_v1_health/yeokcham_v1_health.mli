@@ -28,6 +28,7 @@ type durable_record_kind =
   | Workspace_receipt
   | Gc_transaction
   | Repair_plan_record
+  | Integration_plan_record
 
 type temporary_state_kind =
   | Restore_temporary

@@ -19,6 +19,7 @@ type error =
   | Conflicts of path list
 
 val error_to_string : error -> string
+val validate_path : path -> (unit, error) result
 val entries : tree -> (path * entry) list
 val tree : (path * entry) list -> (tree, error) result
 val load : Yeokcham_store.repository -> Core.Object_id.t -> (tree, error) result
@@ -96,7 +97,9 @@ module Graph : sig
     (Core.Record_id.t list, failure) result
 
   val represented_revisions :
-    Core.pool -> Core.Record_id.t list -> (Core.Record_id.t list, failure) result
+    Core.pool ->
+    Core.Record_id.t list ->
+    (Core.Record_id.t list, failure) result
   (** Exact revision ancestry through both previous versions and dependencies.
       Unlike pending composition, this includes superseded version witnesses. *)
 

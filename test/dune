@@ -114,6 +114,8 @@
   yeokcham_v1_local_service
   yeokcham_v1_composition
   yeokcham_v1_gc
+  yeokcham_v1_health
+  yeokcham_v1_health_repository
   yeokcham_v1_model
   yeokcham_v1_record
   yeokcham_v1_store

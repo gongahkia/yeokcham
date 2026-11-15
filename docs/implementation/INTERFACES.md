@@ -95,7 +95,7 @@ generate : random_bytes:(int -> (string, string) result) -> unit -> (t, error) r
 
 The adapter supplies an OS CSPRNG; exactly 16 bytes are requested. Short/error/
 exceptional entropy is rejected. Hex parsing accepts exactly the lowercase
-representation. `Repository_id`, `Record_id`, `Object_id`, and `Digest` use
+representation. `Repository_id`, `Record_id`, `Object_id`, `Digest`, and `Plan_id` use
 the same strict conversion/comparison interface with 32-byte values, without
 a random-generation function. A raw ID alone does not prove a referenced object.
 
@@ -980,3 +980,90 @@ Actual root-boundary fault injection is available through trusted
 that history never commits separately from its revision/receipt and that a
 lost response adds no duplicate record, root update or history node. This does
 not yet complete public export, transfer acknowledgement, clone or integration.
+
+### P3 exact integration plans and private continuation (in progress)
+
+`Yeokcham_v1_integration` is exposed as `Local_service.Integration`; its
+`Preservation` module is also exposed as `Local_service.Preservation`.
+`prepare ~store ~loaded ~observed ~observation ~selected_revisions
+~reconcile_heads` computes actual accepted/private outputs or named conflicts/
+decisions. It stages immutable objects only. `Core.change_heads` supplies the
+shared causal head calculation also used by ordinary share; `Graph.represented_revisions`
+follows exact dependencies and previous versions separately from pending
+composition. Concurrent change heads require a decision. Divergent branch
+heads require every current event and accepted head explicitly named, including
+equal resulting contents. An active enrolled local author and one authority head are
+required. Required policy/review/resolution semantics still refuse explicitly.
+
+Private preservation begins with the recorded accepted basis. It overlays only
+newly represented publication scopes whose exact source lies on the current
+private ancestry, taking the most recent source per revision in ancestry order.
+Already represented basis revisions are excluded, so an old D1 publication
+cannot backdate an accepted D2 basis. Source witnesses prove only their scoped
+values/absence. The complete private source tree is never a shared base.
+`Composition.overlay` applies those proved structural changes and revalidates
+parent invariants. Three-way composition of the virtual known-present shared
+tree, proposed accepted tree and current observation produces the private result.
+Tests prove D accepted with private E/X retained, nonancestor correspondence
+refused, and a private return to D1 preserved over a D2 basis.
+
+Registry **46** is `Core_integration_plan`. Its typed `Core.Plan_id` is SHA-256 of
+the complete unsigned canonical envelope; its raw store identity remains in the
+existing object-store domain. The full control is bounded at 8 MiB. Ordered
+payload fields are:
+
+```text
+[1, request, selection_root, filesystem_digest, known_present_snapshot,
+ accepted_snapshot_or_null, readiness, no_op]
+
+request = [repository, branch, event_heads, accepted_heads, exact_revisions,
+           resolutions, authority_heads, policy_heads, review_evidence,
+           workspace, composition_profile]
+workspace = [workspace_id, cursor_sequence, working_basis, basis_snapshot,
+             observed_snapshot, correspondence_root]
+readiness = [0, accepted_snapshot, workspace_snapshot]
+          | [1, [[path_parts, exact_versions, private_workspace], ...]]
+          | [2, decision_text]
+```
+
+All identity sets are strict sorted/unique arrays. Identity sizes follow their
+Core types; path components and native fingerprints are bytes. The filesystem
+digest is SHA-256 over domain `yeokcham/integration-observation/v1\0` and canonical
+`[1, entries, rules, directories]`: entry rows contain path/fingerprint; rule rows
+contain path/fingerprint-or-null; directory rows contain path/fingerprint/names.
+These are the captured facts, not another live scan during encoding.
+
+Selection pages use namespace `integration-selection-v1\0` plus raw repository
+identity, change-ID keys and encoded causal-head arrays. Correspondence pages use
+`integration-correspondence-v1\0` plus repository/workspace identities; keys are
+operation IDs and values are `[1, revision, publication_branch, source_workspace,
+source_sequence, observed_snapshot, contributed_scope, witness_root]`. These
+private roots bind the exact scoped receipts rather than the mutable global head.
+`Pages.load_bounded` additionally bounds row count, individual values and aggregate
+reconstructed value bytes before allocation; existing unbounded collection format
+and golden bytes are unchanged.
+
+`decode ~store ~loaded bytes` validates bounded canonical shape, typed references,
+repository/workspace scope, source receipt membership, branch/reference kinds,
+known authority and supported policy. Decoded Ready data is a declared proposal.
+`revalidate` freezes the recorded exact selection, recomputes current preparation,
+and compares relevant inputs before accepting its deterministic outputs. Unrelated
+receipt preserves the plan; selected-head, cursor or disk changes return Stale.
+A canonical false private-as-accepted output fails integrity after recomputation.
+No decoded declaration alone authorizes application.
+
+`retain` verifies complete proposed contents, then publishes a private immutable
+`integration-plans/PLAN_ID.plan` alias through the existing create-only/fsynced
+primitive under the retention lock. `load` and `scan` are bounded and verify the
+filename identity. No accepted/history ref is added. `Gc.Integration_proposal`
+roots observed, basis, known-present, accepted and private output snapshots until
+the alias is released. Actual GC/reload and fresh-process tests verify retention;
+`forget` releases only the proposal alias, allowing uncommitted staging to be
+collected while leaving live files unchanged. Incomplete operation ownership must
+be checked by the future service before retirement. Health durable-record kind 5
+is `Integration_plan_record`, so corrupt proposals are diagnosed separately from
+an unreadable state head. Corruption refuses replacement and blocks GC planning.
+
+This supplies the actual library planner/retained proposal. Confirmed CLI
+execution, plan-to-operation identity, journal phases, accepted/history/outbound
+commit and resolution remain required; no integration success is claimed yet.
