@@ -44,6 +44,7 @@ module Repository_id : Id
 module Record_id : Id
 module Object_id : Id
 module Digest : Id
+module Plan_id : Id
 
 module History_id : sig
   type t
@@ -161,6 +162,10 @@ type pool
 val empty_pool : repository:Repository_id.t -> pool
 val pool_repository : pool -> Repository_id.t
 val records : pool -> (Record_id.t * body) list
+
+val change_heads : pool -> Change_id.t -> Record_id.t list
+(** All causal maximal revisions of a change, ordered only for presentation. *)
+
 val find : pool -> Record_id.t -> body option
 
 val retain : pool -> id:Record_id.t -> body -> (pool * insertion, error) result

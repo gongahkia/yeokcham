@@ -29,3 +29,15 @@ val closure :
 (** Both readers bound every page before decoding, verify identities and scope,
     and reconstruct the canonical root without writing objects. No mutable ref,
     history allocation, or working file is changed. *)
+
+val load_bounded :
+  Yeokcham_store.repository ->
+  namespace:string ->
+  max_rows:int ->
+  max_value_bytes:int ->
+  max_total_value_bytes:int ->
+  Yeokcham_store.Stored_object_id.t ->
+  ((string * string) list, error) result
+(** Reject excessive rows before loading their values and excessive values
+    before allocating their reconstruction buffer. Canonical format is
+    unchanged. *)

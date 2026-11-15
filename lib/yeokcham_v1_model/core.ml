@@ -148,6 +148,11 @@ module Digest = Make_id (struct
   let name = "digest"
 end)
 
+module Plan_id = Make_id (struct
+  let bytes = 32
+  let name = "integration plan"
+end)
+
 module History_id = struct
   type t = { workspace : Workspace_id.t; sequence : int64 }
 
@@ -359,6 +364,22 @@ type insertion = Added | Unchanged
 let empty_pool ~repository = { repository; records = Records.empty }
 let pool_repository (pool : pool) = pool.repository
 let records pool = Records.bindings pool.records
+
+let change_heads pool change =
+  let versions =
+    records pool
+    |> List.filter_map (fun (id, body) ->
+        match body.payload with
+        | Shared_revision version when Change_id.equal version.change change ->
+            Some (id, version)
+        | Shared_revision _ | Accepted_version _ | Branch_event _ -> None)
+  in
+  let previous =
+    List.concat_map (fun (_, version) -> version.previous_revisions) versions
+  in
+  List.map fst versions
+  |> List.filter (fun id -> not (List.exists (Record_id.equal id) previous))
+
 let find pool id = Records.find_opt id pool.records
 
 let require pool expected id =

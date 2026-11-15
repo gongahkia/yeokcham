@@ -149,8 +149,26 @@ let store repository ~namespace values =
     (fun envelope -> Raw.put repository envelope |> stored)
     ~namespace values
 
-let[@warning "-4"] read repository ~namespace root =
+let[@warning "-4"] read ?(row_limit = max_int) ?(value_limit = max_value_bytes)
+    ?(total_limit = max_int) repository ~namespace root =
   let* () = namespace_valid namespace in
+  let* () =
+    if
+      row_limit < 0 || value_limit < 0
+      || value_limit > max_value_bytes
+      || total_limit < 0
+    then Error (Invalid_input "invalid collection read limits")
+    else Ok ()
+  in
+  let rows_read = ref 0 in
+  let value_bytes_read = ref 0 in
+  let reserve_value length =
+    if length > total_limit - !value_bytes_read then
+      Error (Integrity "collection exceeds the caller's total value bound")
+    else (
+      value_bytes_read := !value_bytes_read + length;
+      Ok ())
+  in
   let visited = Hashtbl.create 32 in
   let tree_pages = Hashtbl.create 32 in
   let read_page id =
@@ -183,7 +201,9 @@ let[@warning "-4"] read repository ~namespace root =
   in
   let load_value = function
     | E.Array [ E.Integer 0L; E.Bytes bytes ]
-      when String.length bytes <= inline_bytes ->
+      when String.length bytes <= inline_bytes
+           && String.length bytes <= value_limit ->
+        let* () = reserve_value (String.length bytes) in
         Ok bytes
     | E.Array [ E.Integer 1L; E.Bytes raw ] -> (
         let* id = reference raw in
@@ -191,10 +211,11 @@ let[@warning "-4"] read repository ~namespace root =
         match (kind, fields) with
         | 3L, [ E.Integer length; E.Array chunks ]
           when length > Int64.of_int inline_bytes
-               && length <= Int64.of_int max_value_bytes
+               && length <= Int64.of_int value_limit
                && List.length chunks
                   = (Int64.to_int length + chunk_bytes - 1) / chunk_bytes ->
             let length = Int64.to_int length in
+            let* () = reserve_value length in
             let buffer = Buffer.create length in
             let* _ =
               List.fold_left
@@ -225,13 +246,18 @@ let[@warning "-4"] read repository ~namespace root =
       let* kind, fields = read_page id in
       match (kind, fields) with
       | 0L, [ E.Array rows ] when List.length rows <= fanout ->
-          traverse
-            (function
-              | E.Array [ E.Bytes key; value ] ->
-                  let* value = load_value value in
-                  Ok (key, value)
-              | _ -> Error (Integrity "invalid collection row"))
-            rows
+          let length = List.length rows in
+          if length > row_limit - !rows_read then
+            Error (Integrity "collection exceeds the caller's row bound")
+          else (
+            rows_read := !rows_read + length;
+            traverse
+              (function
+                | E.Array [ E.Bytes key; value ] ->
+                    let* value = load_value value in
+                    Ok (key, value)
+                | _ -> Error (Integrity "invalid collection row"))
+              rows)
       | 1L, [ E.Array children ]
         when children <> [] && List.length children <= fanout ->
           let* rows =
@@ -261,6 +287,12 @@ let[@warning "-4"] read repository ~namespace root =
 
 let load repository ~namespace root =
   read repository ~namespace root |> Result.map fst
+
+let load_bounded repository ~namespace ~max_rows ~max_value_bytes
+    ~max_total_value_bytes root =
+  read ~row_limit:max_rows ~value_limit:max_value_bytes
+    ~total_limit:max_total_value_bytes repository ~namespace root
+  |> Result.map fst
 
 let closure repository ~namespace root =
   read repository ~namespace root |> Result.map snd

@@ -189,6 +189,24 @@ let[@warning "-4"] wrong_schema_and_identity () =
       | Error e -> Alcotest.fail (P.error_to_string e)
       | Ok _ -> Alcotest.fail "page identity substitution accepted")
 
+let caller_control_bounds () =
+  fixture (fun store ->
+      let namespace = "bounded-control" in
+      let rows =
+        List.init 129 (fun i -> (string_of_int i, String.make 4097 'v'))
+      in
+      let root = P.store store ~namespace rows |> pages in
+      let load max_rows max_value_bytes max_total_value_bytes =
+        P.load_bounded store ~namespace ~max_rows ~max_value_bytes
+          ~max_total_value_bytes root
+      in
+      reject (load 128 4097 max_int);
+      reject (load 129 4096 max_int);
+      reject (load 129 4097 (128 * 4097));
+      Alcotest.(check int)
+        "exact caller limits preserve complete collection" 129
+        (load 129 4097 (129 * 4097) |> pages |> List.length))
+
 let independent_vector () =
   fixture (fun store ->
       let id =
@@ -235,5 +253,7 @@ let () =
             wrong_schema_and_identity;
           Alcotest.test_case "independent envelope and identity" `Quick
             independent_vector;
+          Alcotest.test_case "caller row/value/aggregate bounds" `Quick
+            caller_control_bounds;
         ] );
     ]

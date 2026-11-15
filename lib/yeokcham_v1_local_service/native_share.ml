@@ -60,23 +60,16 @@ type prepared = {
 }
 
 let change_heads pool change =
-  let versions =
-    Core.records pool
-    |> List.filter_map (fun (id, body) ->
-        match body.Core.payload with
-        | Core.Shared_revision value
-          when Core.Change_id.equal value.Core.change change ->
-            Some (id, value)
-        | Core.Shared_revision _ | Core.Accepted_version _ | Core.Branch_event _
-          ->
-            None)
-  in
-  let superseded =
-    List.concat_map (fun (_, v) -> v.Core.previous_revisions) versions
-  in
-  List.filter
-    (fun (id, _) -> not (List.exists (Core.Record_id.equal id) superseded))
-    versions
+  let heads = Core.change_heads pool change in
+  Core.records pool
+  |> List.filter_map (fun (id, body) ->
+      match body.Core.payload with
+      | Core.Shared_revision value
+        when List.exists (Core.Record_id.equal id) heads ->
+          Some (id, value)
+      | Core.Shared_revision _ | Core.Accepted_version _ | Core.Branch_event _
+        ->
+          None)
 
 let prepare ~store ~loaded ~observed ~observation ~paths ~update ~title =
   let* local =
