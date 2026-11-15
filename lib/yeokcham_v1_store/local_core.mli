@@ -172,8 +172,9 @@ val decode :
   (t, string) result
 (** Verifies canonical typed objects, historical signatures, reference closure
     and actual revision-scope/deterministic accepted-result semantics. Missing
-    required contents or unsupported review/resolution semantics refuse. Local
-    control bytes are bounded to 8 MiB before decoding and after encoding. *)
+    required contents, invalid resolutions or unsupported review semantics
+    refuse. Local control bytes are bounded to 8 MiB before decoding and after
+    encoding. *)
 
 module Metadata : sig
   type t
@@ -228,6 +229,7 @@ val prepare_revision :
   (t * Core.Record_id.t, string) result
 
 val prepare_acceptance :
+  ?resolutions:Core.Record_id.t list ->
   store:Yeokcham_store.repository ->
   authority:Yeokcham_v1_trust.authority ->
   certificate:string ->

@@ -50,6 +50,7 @@ let object_type = function
   | M.Shared_revision_kind -> Envelope.Core_shared_revision
   | M.Accepted_version_kind -> Envelope.Core_accepted_version
   | M.Branch_event_kind -> Envelope.Core_branch_event
+  | M.Resolution_revision_kind -> Envelope.Core_resolution_revision
 
 let signature_domain kind = "yeokcham/record/" ^ M.kind_name kind ^ "/v1"
 
@@ -100,6 +101,20 @@ let payload_value = function
           profile;
           policy;
           reviews;
+        ]
+  | M.Resolution_revision r ->
+      let* heads = records r.accepted_heads in
+      let* chosen = records r.chosen_revisions in
+      let* variants = records r.superseded_variants in
+      map
+        [
+          E.bytes (M.Branch_id.to_raw r.branch);
+          heads;
+          chosen;
+          variants;
+          E.bytes (M.Object_id.to_raw r.decision_scope_root);
+          E.bytes (M.Object_id.to_raw r.comparison_snapshot);
+          E.bytes (M.Object_id.to_raw r.replacement_snapshot);
         ]
   | M.Branch_event e ->
       let* previous = records e.previous_events in
@@ -229,6 +244,27 @@ let decode_payload kind value =
             |> model
           in
           Ok (M.Accepted_version v)
+      | _ -> assert false)
+  | "resolution-revision" -> (
+      let* values = fields 7 value in
+      match values with
+      | [ branch; heads; chosen; variants; scope; comparison; replacement ] ->
+          let* branch = decoded_id M.Branch_id.of_raw branch in
+          let* accepted_heads = record_ids heads in
+          let* chosen_revisions = record_ids chosen in
+          let* superseded_variants = record_ids variants in
+          let* decision_scope_root = decoded_id M.Object_id.of_raw scope in
+          let* comparison_snapshot = decoded_id M.Object_id.of_raw comparison in
+          let* replacement_snapshot =
+            decoded_id M.Object_id.of_raw replacement
+          in
+          let* r =
+            M.make_resolution_revision ~branch ~accepted_heads ~chosen_revisions
+              ~superseded_variants ~decision_scope_root ~comparison_snapshot
+              ~replacement_snapshot
+            |> model
+          in
+          Ok (M.Resolution_revision r)
       | _ -> assert false)
   | "branch-event" -> (
       let* values = fields 5 value in

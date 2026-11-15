@@ -56,6 +56,7 @@ type object_type =
   | Core_edit_scope
   | Core_metadata_page
   | Core_integration_plan
+  | Core_resolution_revision
 
 let object_type_code = function
   | Content -> 1
@@ -104,6 +105,7 @@ let object_type_code = function
   | Core_edit_scope -> 44
   | Core_metadata_page -> 45
   | Core_integration_plan -> 46
+  | Core_resolution_revision -> 47
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -152,6 +154,7 @@ let object_type_of_code = function
   | 44 -> Some Core_edit_scope
   | 45 -> Some Core_metadata_page
   | 46 -> Some Core_integration_plan
+  | 47 -> Some Core_resolution_revision
   | _ -> None
 
 type creation_error =

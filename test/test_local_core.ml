@@ -209,7 +209,7 @@ let private_initialization () =
                 "initial private work is not chosen" 0
                 (List.length accepted.C.chosen_revisions)
           | C.Branch_event _ -> ()
-          | C.Shared_revision _ ->
+          | C.Shared_revision _ | C.Resolution_revision _ ->
               Alcotest.fail "initialization published private work")
         records;
       let encoded = L.encode local |> ok Fun.id in
@@ -1363,7 +1363,7 @@ let verified_shared_records_and_nonempty_fork () =
       let change =
         match revision_body.C.payload with
         | C.Shared_revision value -> value.C.change
-        | C.Accepted_version _ | C.Branch_event _ ->
+        | C.Accepted_version _ | C.Branch_event _ | C.Resolution_revision _ ->
             Alcotest.fail "missing staged shared revision"
       in
       let calls = ref 0 in
@@ -1853,8 +1853,14 @@ let publication_witness_survives_private_content_collection () =
       let revision =
         match C.find (L.pool state) revision with
         | Some { C.payload = C.Shared_revision revision; _ } -> revision
-        | None | Some { C.payload = C.Accepted_version _ | C.Branch_event _; _ }
-          ->
+        | None
+        | Some
+            {
+              C.payload =
+                ( C.Accepted_version _ | C.Branch_event _
+                | C.Resolution_revision _ );
+              _;
+            } ->
             Alcotest.fail "expected shared revision"
       in
       Composition.load store revision.C.base_snapshot
@@ -1914,8 +1920,14 @@ let publication_update_witnesses_only_newly_selected_edits () =
       let change =
         match C.find (L.pool staged) previous with
         | Some { C.payload = C.Shared_revision value; _ } -> value.C.change
-        | None | Some { C.payload = C.Accepted_version _ | C.Branch_event _; _ }
-          ->
+        | None
+        | Some
+            {
+              C.payload =
+                ( C.Accepted_version _ | C.Branch_event _
+                | C.Resolution_revision _ );
+              _;
+            } ->
             Alcotest.fail "expected revision"
       in
       let updated =
@@ -2058,7 +2070,7 @@ let native_share_updates_are_explicit_and_immutable () =
             "exact predecessor" true
             (version.C.previous_revisions
             = [ Option.get first.Service.Share.revision ])
-      | C.Accepted_version _ | C.Branch_event _ ->
+      | C.Accepted_version _ | C.Branch_event _ | C.Resolution_revision _ ->
           Alcotest.fail "expected revision");
       Alcotest.(check int)
         "both publications durable" 2
@@ -3900,6 +3912,292 @@ let[@warning "-4"] interrupt_native root plan capability boundary =
   Alcotest.(check bool)
     "interrupted at actual requested boundary" true (status = Unix.WEXITED 73)
 
+let stage_resolution_proposal repository capability certificate authority
+    revisions bytes =
+  let before = load repository in
+  let store = S.underlying_store repository in
+  let local_before = local before in
+  let selected = L.selected local_before in
+  let heads =
+    List.find
+      (fun row -> C.Branch_id.equal row.C.branch_id selected.L.branch)
+      (L.branches local_before)
+  in
+  let common =
+    Composition.Graph.common_base (L.pool local_before) heads.C.accepted_heads
+    |> ok Composition.Graph.error_to_string
+  in
+  let comparison =
+    Composition.Graph.accepted (L.pool local_before) common
+    |> ok Composition.Graph.error_to_string
+    |> fun v -> v.C.result_snapshot
+  in
+  let base =
+    Composition.load store comparison |> ok Composition.error_to_string
+  in
+  let content =
+    Snapshot.Content.store store bytes |> ok Snapshot.error_to_string
+  in
+  let replacement =
+    Composition.overlay ~base
+      [
+        ( [ "note.txt" ],
+          Some (Composition.File { mode = Snapshot.Regular; content }) );
+      ]
+    |> ok Composition.error_to_string
+    |> Composition.store store
+    |> ok Composition.error_to_string
+  in
+  let scope =
+    Composition.Scope.store store [ [ "note.txt" ] ]
+    |> ok Composition.error_to_string
+  in
+  let payload =
+    C.make_resolution_revision ~branch:selected.L.branch
+      ~accepted_heads:heads.C.accepted_heads ~chosen_revisions:revisions
+      ~superseded_variants:
+        (C.resolution_variants (L.pool local_before)
+           ~accepted_heads:heads.C.accepted_heads ~chosen_revisions:revisions
+        |> model)
+      ~decision_scope_root:scope ~comparison_snapshot:comparison
+      ~replacement_snapshot:replacement
+    |> model
+    |> fun v -> C.Resolution_revision v
+  in
+  let context =
+    C.make_context
+      ~repository:(C.pool_repository (L.pool local_before))
+      ~author_certificate:(C.Digest.of_hex certificate |> model)
+      ~authority_heads:
+        (T.authority_heads authority
+        |> List.map (fun id -> C.Digest.of_hex id |> model))
+      ~display_time:None
+    |> model
+  in
+  let signed =
+    T.Core.sign authority capability (C.make_body ~context ~payload)
+    |> ok T.Core.error_to_string
+  in
+  let identity = R.id signed |> ok R.error_to_string in
+  let stored =
+    R.encode signed |> ok R.error_to_string |> Yeokcham_envelope.decode
+    |> ok Yeokcham_envelope.decode_error_to_string
+    |> Raw.put store |> ok Raw.error_to_string
+  in
+  let next =
+    L.receive_records ~store ~authority
+      ~records:[ (identity, stored) ]
+      local_before
+    |> ok L.receive_error_to_string
+  in
+  let published =
+    S.save_collaborative repository ~expected:before.S.head
+      ~project:before.S.project ~history:before.S.history
+      ~collaboration:(Option.get before.S.collaboration)
+      ~local:next
+    |> ok S.error_to_string
+  in
+  Alcotest.(check string)
+    "resolution proposal preserves exact private history"
+    (H.encode before.S.history |> ok Fun.id)
+    (H.encode published.S.history |> ok Fun.id);
+  Alcotest.(check bool)
+    "proposal does not accept shared work" true
+    (L.branches local_before = L.branches (local published));
+  (identity, replacement)
+
+let resolved_native_integration_proves_exact_acceptance_and_retries () =
+  List.iter
+    (fun replacement ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let left, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "left\r\n"
+          in
+          let right, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "right\r\n"
+          in
+          let revisions = List.sort C.Record_id.compare [ left; right ] in
+          let unresolved = native_plan root revisions in
+          Alcotest.(check bool)
+            "unresolved work has no acceptance" true
+            (match I.readiness unresolved with
+            | I.Conflicted _ -> true
+            | I.Ready _ | I.Decision _ -> false);
+          write_private root "private E stays local";
+          let resolution, public_result =
+            stage_resolution_proposal repository capability certificate
+              authority revisions replacement
+          in
+          Alcotest.(check bool)
+            "preparation leaves the conflicted ordinary file absent" false
+            (Sys.file_exists (root ^ "/note.txt"));
+          let before = load repository in
+          let prepared =
+            Native_integrate.prepare_resolved ~root
+              ~selected_revisions:revisions ~resolution_ids:[ resolution ]
+              ~reconcile_heads:None
+            |> integrate_ok
+          in
+          Alcotest.(check bool)
+            "exact resolution identity binds the canonical plan" true
+            ((I.request prepared).C.resolution_ids = [ resolution ]);
+          Alcotest.(check bool)
+            "new resolved proposal does not reuse unresolved identity" false
+            (C.Plan_id.equal (I.id prepared) (I.id unresolved));
+          Alcotest.(check bool)
+            "resolved preparation preserves root" true
+            (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+          let applied = native_apply root prepared (Some capability) in
+          let committed = load repository in
+          let accepted =
+            Composition.Graph.accepted
+              (L.pool (local committed))
+              (L.selected (local committed)).L.basis
+            |> ok Composition.Graph.error_to_string
+          in
+          Alcotest.(check bool)
+            "accepted record binds the actual explicit resolution" true
+            (accepted.C.resolutions = [ resolution ]);
+          Alcotest.(check bool)
+            "public result contains only the exact decided shared bytes" true
+            (C.Object_id.equal accepted.C.result_snapshot public_result);
+          Alcotest.(check string)
+            "private continuation remains private and on disk"
+            "private E stays local" (read_private root);
+          Alcotest.(check string)
+            "whole-path replacement bytes are exact" replacement
+            (read_file root "note.txt");
+          let repeated = native_apply root prepared None in
+          Alcotest.(check bool)
+            "resolved application retries the same operation without a signer"
+            true
+            ((Option.get applied.Native_integrate.operation).Op.token
+           = (Option.get repeated.Native_integrate.operation).Op.token);
+          Alcotest.(check bool)
+            "retry publishes no duplicate acceptance/history" true
+            (Raw.Mutable_ref.equal committed.S.head (load repository).S.head)))
+    [
+      "explicit text\r\nwithout final newline";
+      "\000" ^ String.make ((2 * 1024 * 1024) + 31) 'b';
+    ]
+
+let resolved_native_integration_resumes_durable_facts () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, certificate, authority, _ =
+            initialize root
+          in
+          let left, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "left"
+          in
+          let right, _ =
+            add_incoming_revision repository capability certificate authority
+              "note.txt" "right"
+          in
+          let revisions = List.sort C.Record_id.compare [ left; right ] in
+          let resolution, _ =
+            stage_resolution_proposal repository capability certificate
+              authority revisions "chosen"
+          in
+          let plan =
+            Native_integrate.prepare_resolved ~root
+              ~selected_revisions:revisions ~resolution_ids:[ resolution ]
+              ~reconcile_heads:None
+            |> integrate_ok
+          in
+          interrupt_native root plan capability boundary;
+          ignore (native_apply root plan None);
+          let after = load repository in
+          Alcotest.(check string)
+            "resolved resume materializes exact choice" "chosen"
+            (read_file root "note.txt");
+          Alcotest.(check int)
+            "resolved resume allocates one navigation" 2
+            (List.length (H.nodes after.S.history));
+          ignore (native_apply root plan None);
+          Alcotest.(check bool)
+            "resolved fact retry keeps the same root" true
+            (Raw.Mutable_ref.equal after.S.head (load repository).S.head)))
+    [
+      Native_integrate.Prepared_root;
+      Native_integrate.Mutation
+        (Service.Safe_apply.After_mutation, [ "note.txt" ]);
+      Native_integrate.Materialized_root;
+      Native_integrate.Committed_root;
+    ]
+
+let unaccepted_resolution_replacement_survives_gc () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let left, _ =
+        add_incoming_revision repository capability certificate authority
+          "note.txt" "left"
+      in
+      let right, _ =
+        add_incoming_revision repository capability certificate authority
+          "note.txt" "right"
+      in
+      let revisions = List.sort C.Record_id.compare [ left; right ] in
+      let bytes = "\000" ^ String.make ((2 * 1024 * 1024) + 23) 'q' in
+      let resolution, replacement =
+        stage_resolution_proposal repository capability certificate authority
+          revisions bytes
+      in
+      let before = load repository in
+      let replacement_id =
+        C.Object_id.to_hex replacement
+        |> Raw.Stored_object_id.of_hex
+        |> ok Raw.Stored_object_id.parse_error_to_string
+      in
+      let planned =
+        Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string
+      in
+      let entry =
+        List.find
+          (fun entry ->
+            Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id
+              replacement_id)
+          planned.Yeokcham_v1_gc.objects
+      in
+      Alcotest.(check bool)
+        "unaccepted replacement is a shared root before any plan exists" false
+        (entry.Yeokcham_v1_gc.disposition = Yeokcham_v1_gc.Collect);
+      Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string |> ignore;
+      let after = load repository in
+      Alcotest.(check bool)
+        "GC does not accept, navigate or publish project metadata" true
+        (Raw.Mutable_ref.equal before.S.head after.S.head);
+      let store = S.underlying_store repository in
+      let tree =
+        Composition.load store replacement |> ok Composition.error_to_string
+      in
+      let content =
+        match List.assoc [ "note.txt" ] (Composition.entries tree) with
+        | Composition.File file -> file.content
+        | Composition.Directory -> Alcotest.fail "replacement is not a file"
+      in
+      Alcotest.(check string)
+        "complete streamed replacement closure remains readable after \
+         collection"
+        bytes
+        (Snapshot.Content.load store content |> ok Snapshot.error_to_string);
+      let prepared =
+        Native_integrate.prepare_resolved ~root ~selected_revisions:revisions
+          ~resolution_ids:[ resolution ] ~reconcile_heads:None
+        |> integrate_ok
+      in
+      ignore (native_apply root prepared (Some capability));
+      Alcotest.(check string)
+        "collected store still materializes the exact pending decision" bytes
+        (read_file root "note.txt"))
+
 let native_integration_resumes_real_file_and_root_boundaries () =
   List.iter
     (fun boundary ->
@@ -5272,5 +5570,16 @@ let () =
              write authority"
             `Quick
             metadata_inspection_survives_missing_shared_chunks_without_authorizing_writes;
+          Alcotest.test_case
+            "resolved text and large opaque acceptance bind exact proof and \
+             retry"
+            `Quick
+            resolved_native_integration_proves_exact_acceptance_and_retries;
+          Alcotest.test_case
+            "resolved integration resumes actual file and root facts" `Quick
+            resolved_native_integration_resumes_durable_facts;
+          Alcotest.test_case
+            "unaccepted resolution replacement survives actual GC" `Quick
+            unaccepted_resolution_replacement_survives_gc;
         ] );
     ]

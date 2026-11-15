@@ -95,12 +95,27 @@ type branch_event = private {
   display_name : string option;
 }
 
+type resolution_revision = private {
+  branch : Branch_id.t;
+  accepted_heads : Record_id.t list;
+  chosen_revisions : Record_id.t list;
+  superseded_variants : Record_id.t list;
+  decision_scope_root : Object_id.t;
+  comparison_snapshot : Object_id.t;
+  replacement_snapshot : Object_id.t;
+}
+
 type payload =
   | Shared_revision of shared_revision
   | Accepted_version of accepted_version
   | Branch_event of branch_event
+  | Resolution_revision of resolution_revision
 
-type kind = Shared_revision_kind | Accepted_version_kind | Branch_event_kind
+type kind =
+  | Shared_revision_kind
+  | Accepted_version_kind
+  | Branch_event_kind
+  | Resolution_revision_kind
 
 val kind : payload -> kind
 val kind_name : kind -> string
@@ -125,6 +140,19 @@ val make_accepted_version :
   policy_heads:Digest.t list ->
   review_evidence:Digest.t list ->
   (accepted_version, error) result
+
+val make_resolution_revision :
+  branch:Branch_id.t ->
+  accepted_heads:Record_id.t list ->
+  chosen_revisions:Record_id.t list ->
+  superseded_variants:Record_id.t list ->
+  decision_scope_root:Object_id.t ->
+  comparison_snapshot:Object_id.t ->
+  replacement_snapshot:Object_id.t ->
+  (resolution_revision, error) result
+(** One explicit whole-path decision. The scope must contain exactly one path;
+    content and exact-context verification belong to the composition boundary.
+*)
 
 val validate_branch_name : string -> (unit, error) result
 
@@ -168,13 +196,21 @@ val change_heads : pool -> Change_id.t -> Record_id.t list
 
 val find : pool -> Record_id.t -> body option
 
+val resolution_variants :
+  pool ->
+  accepted_heads:Record_id.t list ->
+  chosen_revisions:Record_id.t list ->
+  (Record_id.t list, error) result
+(** Exact accepted heads plus the complete chosen revision dependency/previous
+    closure, bounded to the canonical reference-set limit. *)
+
 val retain : pool -> id:Record_id.t -> body -> (pool * insertion, error) result
 (** Validates scope, identity collisions and known reference
     kinds/relationships. This is a pure record pool, not signature verification,
     snapshot closure, composition proof, current authority admission, or
     accepted-head publication. Use the trust boundary before retaining bytes
-    from outside the process. Unsupported policy/review/resolution references
-    block new retention. *)
+    from outside the process. Unsupported policy/review references block new
+    retention. *)
 
 type branch_state = {
   branch_id : Branch_id.t;

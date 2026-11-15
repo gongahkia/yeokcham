@@ -35,6 +35,19 @@ val prepare :
     filesystem observation. Divergent heads require explicit reconciliation. No
     ordinary file, history cursor, accepted head or outbox is published. *)
 
+val prepare_resolved :
+  resolution_ids:Core.Record_id.t list ->
+  store:Yeokcham_store.repository ->
+  loaded:Yeokcham_v1_store.loaded ->
+  observed:Yeokcham_v1_model.Snapshot_id.t ->
+  observation:Yeokcham_snapshot.Observation.t ->
+  selected_revisions:Core.Record_id.t list ->
+  reconcile_heads:Core.Record_id.t list option ->
+  (t, error) result
+(** Exact immutable preparation from verified domain records and a complete
+    filesystem observation. Divergent heads require explicit reconciliation. No
+    ordinary file, history cursor, accepted head or outbox is published. *)
+
 val id : t -> Core.Plan_id.t
 val stored_id : t -> Yeokcham_store.Stored_object_id.t
 val encode : t -> string

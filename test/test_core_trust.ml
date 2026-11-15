@@ -179,9 +179,9 @@ let all_families_and_arrival_order () =
     T.Core.receive authority pool (R.encode signed_record |> record)
     |> core_trust |> fst
   in
-  let version ?(parents = []) ?(chosen = []) snapshot =
+  let version ?(parents = []) ?(chosen = []) ?(resolutions = []) snapshot =
     M.make_accepted_version ~branch ~accepted_parents:parents
-      ~chosen_revisions:chosen ~resolutions:[] ~result_snapshot:(o snapshot)
+      ~chosen_revisions:chosen ~resolutions ~result_snapshot:(o snapshot)
       ~composition_profile:"line-hunks-v1" ~policy_heads:[] ~review_evidence:[]
     |> model
     |> fun v -> signed (M.Accepted_version v)
@@ -235,6 +235,34 @@ let all_families_and_arrival_order () =
   Alcotest.(check int)
     "all record families and branch actions consumed" 9
     (List.length (M.records final));
+  let decision =
+    M.make_resolution_revision ~branch ~accepted_heads:[ left_id; right_id ]
+      ~chosen_revisions:[] ~superseded_variants:[ left_id; right_id ]
+      ~decision_scope_root:(o 's') ~comparison_snapshot:(o 'g')
+      ~replacement_snapshot:(o 'z')
+    |> model
+    |> fun value -> signed (M.Resolution_revision value)
+  in
+  let decision_id = R.id decision |> record in
+  rejects "valid resolution signature cannot invent its causal references"
+    (T.Core.receive authority pool (R.encode decision |> record));
+  let final = receive final decision in
+  let repeated, insertion =
+    T.Core.receive authority final (R.encode decision |> record) |> core_trust
+  in
+  Alcotest.(check bool)
+    "identical authenticated resolution repeats are unchanged" true
+    (insertion = M.Unchanged && repeated = final);
+  let resolved =
+    version ~parents:[ left_id; right_id ] ~resolutions:[ decision_id ] 'z'
+  in
+  ignore (receive final resolved);
+  let invalid =
+    R.attach_signature (R.body decision) ~signature:(String.make 64 '\000')
+    |> record
+  in
+  rejects "resolution bad signature cannot enter the typed pool"
+    (T.Core.receive authority final (R.encode invalid |> record));
   let bad = version ~parents:[ revision_id ] 'z' in
   rejects "revision cannot be an accepted parent"
     (T.Core.receive authority pool (R.encode bad |> record))

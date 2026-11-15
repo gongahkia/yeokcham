@@ -174,11 +174,97 @@ let[@warning "-4"] public_closure_preserves_d_e_and_mixed_fidelity () =
             [ "note.txt" ]; [ "opaque.bin" ]; [ "run" ]; [ "empty" ]; [ "link" ];
           ]
       in
+      let store = S.underlying_store repository in
+      let captured = load repository in
+      let local_before = local captured in
+      let collaboration = Option.get captured.S.collaboration in
+      let certificate = S.local_certificate collaboration in
+      let note_snapshot bytes =
+        Composition.tree
+          [
+            ( [ "note.txt" ],
+              Composition.File
+                {
+                  mode = Snapshot.Regular;
+                  content =
+                    Snapshot.Content.store store bytes
+                    |> ok Snapshot.error_to_string;
+                } );
+          ]
+        |> ok Composition.error_to_string
+        |> Composition.store store
+        |> ok Composition.error_to_string
+      in
+      let scope =
+        Composition.Scope.store store [ [ "note.txt" ] ]
+        |> ok Composition.error_to_string
+      in
+      let next, other =
+        L.prepare_revision ~store ~authority ~certificate
+          ~signing_capability:capability ~change:None ~previous_revisions:[]
+          ~base_snapshot:(L.empty_snapshot local_before)
+          ~result_snapshot:(note_snapshot "competing public D\r\n")
+          ~edit_scope_root:scope ~dependencies:[] local_before
+        |> ok Fun.id
+      in
+      let selected = L.selected next in
+      let heads =
+        List.find
+          (fun row -> C.Branch_id.equal row.C.branch_id selected.L.branch)
+          (L.branches next)
+      in
+      let revisions =
+        List.sort C.Record_id.compare
+          [ Option.get shared.Service.Share.revision; other ]
+      in
+      let payload =
+        C.make_resolution_revision ~branch:selected.L.branch
+          ~accepted_heads:heads.C.accepted_heads ~chosen_revisions:revisions
+          ~superseded_variants:
+            (C.resolution_variants (L.pool next)
+               ~accepted_heads:heads.C.accepted_heads
+               ~chosen_revisions:revisions
+            |> model)
+          ~decision_scope_root:scope
+          ~comparison_snapshot:(L.empty_snapshot next)
+          ~replacement_snapshot:(note_snapshot "shared D\r\n")
+        |> model
+        |> fun value -> C.Resolution_revision value
+      in
+      let context =
+        C.make_context
+          ~repository:(C.pool_repository (L.pool next))
+          ~author_certificate:(C.Digest.of_hex certificate |> model)
+          ~authority_heads:
+            (T.authority_heads authority
+            |> List.map (fun h -> C.Digest.of_hex h |> model))
+          ~display_time:None
+        |> model
+      in
+      let signed =
+        T.Core.sign authority capability (C.make_body ~context ~payload)
+        |> ok T.Core.error_to_string
+      in
+      let resolution = R.id signed |> ok R.error_to_string in
+      let stored =
+        R.encode signed |> ok R.error_to_string |> Envelope.decode
+        |> ok Envelope.decode_error_to_string
+        |> Raw.put store |> ok Raw.error_to_string
+      in
+      let next =
+        L.receive_records ~store ~authority
+          ~records:[ (resolution, stored) ]
+          next
+        |> ok L.receive_error_to_string
+      in
+      S.save_collaborative repository ~expected:captured.S.head
+        ~project:captured.S.project ~history:captured.S.history ~collaboration
+        ~local:next
+      |> ok S.error_to_string |> ignore;
       write (root ^ "/note.txt") "shared D\r\nprivate later E\n";
       let plan =
-        Service.Integrate.prepare ~root
-          ~selected_revisions:[ Option.get shared.Service.Share.revision ]
-          ~reconcile_heads:None
+        Service.Integrate.prepare_resolved ~root ~selected_revisions:revisions
+          ~resolution_ids:[ resolution ] ~reconcile_heads:None
         |> ok Service.Integrate.error_to_string
       in
       let applied =
@@ -197,9 +283,14 @@ let[@warning "-4"] public_closure_preserves_d_e_and_mixed_fidelity () =
       Alcotest.(check string)
         "later private E remains live" "shared D\r\nprivate later E\n"
         (read (root ^ "/note.txt"));
-      let ids = ref [] in
+      let ids = ref [] and saw_resolution = ref false in
       Package.iter_artifact_objects artifact ~f:(fun id bytes ->
           ids := id :: !ids;
+          let envelope =
+            Envelope.decode bytes |> ok Envelope.decode_error_to_string
+          in
+          if Envelope.object_type envelope = Envelope.Core_resolution_revision
+          then saw_resolution := true;
           Alcotest.(check bool)
             "private sentinel absent from every exported object" false
             (contains bytes "PRIVATE SENTINEL DO NOT EXPORT");
@@ -208,6 +299,9 @@ let[@warning "-4"] public_closure_preserves_d_e_and_mixed_fidelity () =
             (contains bytes "private later E");
           Ok ())
       |> package;
+      Alcotest.(check bool)
+        "exact native resolution is part of the public closure" true
+        !saw_resolution;
       let private_ids =
         operation.L.Operation.plan_object
         :: List.map
@@ -249,6 +343,9 @@ let[@warning "-4"] public_closure_preserves_d_e_and_mixed_fidelity () =
           operation.L.Operation.accepted
         |> ok Composition.Graph.error_to_string
       in
+      Alcotest.(check bool)
+        "isolated accepted proof binds exact resolution" true
+        (accepted.C.resolutions = [ resolution ]);
       let tree =
         Composition.load store accepted.C.result_snapshot
         |> ok Composition.error_to_string

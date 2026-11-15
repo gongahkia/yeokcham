@@ -15,13 +15,15 @@ integration execution and its CLI are described below. See the
 
 ## Registry and canonical bytes
 
-`Yeokcham_envelope.object_type_code` is the sole object-type registry. P1 uses:
+`Yeokcham_envelope.object_type_code` is the sole object-type registry. P1 supplies
+the first three signed kinds; P3 adds the resolution kind:
 
 | Body kind (UTF-8 text) | Envelope constructor / code | Ed25519 domain |
 | --- | --- | --- |
 | `shared-revision` | `Core_shared_revision` / 41 | `yeokcham/record/shared-revision/v1` |
 | `accepted-version` | `Core_accepted_version` / 42 | `yeokcham/record/accepted-version/v1` |
 | `branch-event` | `Core_branch_event` / 43 | `yeokcham/record/branch-event/v1` |
+| `resolution-revision` | `Core_resolution_revision` / 47 | `yeokcham/record/resolution-revision/v1` |
 
 No second type-code table is used by production consumers. Existing object
 codes 1-40 retain their meanings. Existing GC conservatively retains these new
@@ -41,10 +43,12 @@ The payload is a consecutive integer-keyed map, starting at zero:
 | Shared revision | change, previous revisions, base snapshot, result snapshot, edit-scope root, dependencies |
 | Accepted version | branch, accepted parents, chosen revisions, resolutions, result snapshot, composition profile, policy heads, review evidence |
 | Branch event | branch, previous events, action, targets, display name |
+| Resolution revision | branch, accepted heads, chosen revisions, superseded variants, decision-scope root, comparison snapshot, replacement snapshot |
 
 Branch action integers are create=0, rename=1, advance=2, reconcile=3.
 The top-level parents must equal the payload's previous-revision, accepted-parent
-or previous-event set, respectively. Every identifier set is strictly increasing
+or previous-event set for the first three kinds. A resolution uses its complete
+superseded-variant set as parents. Every identifier set is strictly increasing
 by raw bytes, without duplicates. Constructors sort sets and reject duplicates;
 decoders reject unsorted input instead of silently repairing signed bytes.
 
@@ -140,8 +144,9 @@ retention; a future receipt adapter can stage/reorder them without inventing
 missing history. The pool preserves all retained records, independent of arrival
 order, without reducing branch heads or selecting an accepted version.
 
-New retention of policy/review/resolution-bearing acceptances is unsupported and
-returns `Unsupported_policy`. Their typed references remain representable for
+New retention of policy/review-bearing acceptances is unsupported and
+returns `Unsupported_policy`. Resolution references now require the exact typed
+context described in the P3 resolution section below. Policy/review references remain representable for
 future implementers; absence of an evaluator cannot mean approval. Snapshot
 closure, declared-scope proof, genesis-empty-tree proof, actual composition,
 branch-head reduction and durable publication remain downstream responsibilities.
@@ -1018,7 +1023,7 @@ follows exact dependencies and previous versions separately from pending
 composition. Concurrent change heads require a decision. Divergent branch
 heads require every current event and accepted head explicitly named, including
 equal resulting contents. An active enrolled local author and one authority head are
-required. Required policy/review/resolution semantics still refuse explicitly.
+required. Required policy/review semantics still refuse explicitly. Native resolution proof is described below.
 
 Private preservation begins with the recorded accepted basis. It overlays only
 newly represented publication scopes whose exact source lies on the current
@@ -1877,3 +1882,82 @@ outcomes, strict write refusal, exact root/ordinary-byte preservation and explic
 failure of implicit corrupt-object replacement. This is inspection support, not
 remote repair: exchange still requires full existing state validation, and
 automatic re-fetch/repair plus remaining conflict/error/fault acceptance are P3 work.
+
+### P3 exact public resolution proof and native application (in progress)
+
+Registry 47 is `Core_resolution_revision`; the original 41–46 meanings and bytes
+are unchanged. Its kind/domain are `resolution-revision` and
+`yeokcham/record/resolution-revision/v1`. The same eight-field signed body,
+64-byte Ed25519 signature, 8 MiB bound and complete-envelope SHA-256 identity
+apply. Its version-1 payload is the integer-keyed map, in this order:
+
+```text
+0 branch: branch-id
+1 accepted_heads: sorted accepted-version IDs
+2 chosen_revisions: sorted shared-revision IDs
+3 superseded_variants: sorted accepted-head and revision-closure IDs
+4 decision_scope_root: object-id
+5 comparison_snapshot: object-id
+6 replacement_snapshot: object-id
+```
+
+The body parents equal `superseded_variants`. `Core.resolution_variants pool
+~accepted_heads ~chosen_revisions` computes the exact accepted heads plus complete
+chosen dependency/previous-revision closure, with the canonical reference bound.
+`make_resolution_revision` checks sets, nonempty accepted context and inclusion of
+all direct roots; `Core.retain` verifies reference kinds and the complete variant
+set. Accepted/request resolution IDs must name this kind and match their exact
+branch, accepted heads and chosen revisions. Changed contexts cannot reuse a
+decision. Policy/review semantics remain explicitly unsupported; resolution
+support does not waive them. Independent Python CBOR/OpenSSL vectors cover body,
+signing input, signature envelope and identity; old three-family vectors are unchanged.
+
+`Composition.Graph.compose ?resolutions store pool ~parents ~revisions` verifies
+each decision against the unique recorded common accepted base. Its scope must
+contain exactly one valid path; replacement contents may differ only within that
+path/subtree. Choosing absence or unchanged comparison contents is valid. The
+verifier derives actual conflicts, installs only matching decisions and reruns
+the ordinary dependency/whole-path/line-hunks composition with those paths masked.
+It then installs the exact replacement subtree, checking parent/type invariants.
+Overlapping, unused, stale, incomplete-variant and out-of-scope decisions refuse;
+other conflicts stay explicit and automatic changes elsewhere survive. Ambiguous
+bases still require a decision rather than a synthetic base. Concurrent change
+versions name all relevant scopes; unchanged concurrent variants require exact
+revision selection. `Graph.validate` proves standalone declaration scope/base and
+every accepted result using its exact resolutions. A proposal alone is not proof
+of an accepted result. Represented shared revision ancestry remains distinct from
+resolution record identity.
+
+`Integration.prepare_resolved ~resolution_ids` and
+`Service.Integrate.prepare_resolved ~resolution_ids` extend the existing preparation
+arguments. Ordinary `prepare` uses an empty list. Exact IDs were already fields
+of the canonical registry-46 request, so no plan schema change is needed. Fresh
+preparation, decode and revalidation check the typed context; resolved preparations
+cannot claim no-op. These APIs currently consume authenticated resolution proposals
+already retained in the local public record pool; they do not invent a new store.
+Preparation stages immutable objects/retained plans without acceptance or file writes.
+
+`Local.prepare_acceptance ?resolutions` proves the resolved result before signing.
+Native execution passes the exact plan IDs and stages its acceptance/event pair.
+Operation control parsing bounds and canonicalizes the resolution references;
+operation validation requires that same list in the staged accepted record and
+still proves the complete candidate graph. Prepared/Applying/Materialized/Committed/
+Completed facts, private safety/history, retry, writer/signing separation and
+offline outbound publication use the existing engine. Known accepted catch-up
+does not invent another resolution or signature.
+
+Public packages include resolution records, their two snapshot closures and
+single-path scope pages. Isolated preparation reruns the actual composition proof;
+metadata alone cannot admit a false accepted result. Shared GC roots include both
+resolution snapshots, while conservative control-object retention covers its
+record/scope. Tests extend the public D/E mixed-file journey through a real signed
+resolution and isolated export/import, retaining every private-sentinel exclusion.
+Native tests apply text and large opaque choices, preserve unrelated private E,
+retry without a signer and interrupt at actual file/Prepared/Materialized/Committed
+boundaries without duplicate acceptance/navigation.
+
+This is a connected record/graph/plan/application prerequisite. Ordinary native
+`conflicts`/`resolve` commands, named-version/replacement-file journeys and private
+workspace choices remain unfinished; the earlier V1 `resolve --decision` family
+does not supply them. P3 and its full end-to-end resolution/authority/fault audit
+are incomplete. No review, native custody, human or cross-OS qualification is claimed.

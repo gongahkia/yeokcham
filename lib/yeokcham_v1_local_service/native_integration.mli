@@ -51,6 +51,15 @@ val prepare :
 (** Captures a complete observation, prepares and retains an immutable proposal.
     Does not advance private/accepted history or mutate ordinary files. *)
 
+val prepare_resolved :
+  resolution_ids:Core.Record_id.t list ->
+  root:string ->
+  selected_revisions:Core.Record_id.t list ->
+  reconcile_heads:Core.Record_id.t list option ->
+  (Plan.t, error) result
+(** Captures a complete observation, prepares and retains an immutable proposal.
+    Does not advance private/accepted history or mutate ordinary files. *)
+
 val apply :
   root:string ->
   plan:Core.Plan_id.t ->

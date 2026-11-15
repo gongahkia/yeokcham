@@ -107,11 +107,15 @@ module Graph : sig
     Core.pool -> Core.Record_id.t list -> (Core.Record_id.t, failure) result
 
   val compose :
+    ?resolutions:Core.Record_id.t list ->
     Yeokcham_store.repository ->
     Core.pool ->
     parents:Core.Record_id.t list ->
     revisions:Core.Record_id.t list ->
     (tree, failure) result
+  (** Resolutions bind exact parents/revision closure and one whole path each.
+      Stale, unused, overlapping or out-of-scope decisions refuse. Unresolved
+      paths remain explicit conflicts, while other automatic changes survive. *)
 
   val validate :
     Yeokcham_store.repository -> Core.pool -> (unit, failure) result

@@ -156,7 +156,13 @@ let[@warning "-4"] entry_equal a b =
 let find_revision pool id =
   match Core.find pool id with
   | Some { Core.payload = Core.Shared_revision revision; _ } -> Ok revision
-  | Some { Core.payload = Core.Accepted_version _ | Core.Branch_event _; _ } ->
+  | Some
+      {
+        Core.payload =
+          ( Core.Accepted_version _ | Core.Branch_event _
+          | Core.Resolution_revision _ );
+        _;
+      } ->
       Error "publication receipt must name a shared revision"
   | None -> Error "publication receipt names an unknown revision"
 

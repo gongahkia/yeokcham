@@ -1569,6 +1569,12 @@ module Core = struct
               ( [ revision.M.base_snapshot; revision.M.result_snapshot ],
                 Some revision.M.edit_scope_root )
           | M.Accepted_version version -> ([ version.M.result_snapshot ], None)
+          | M.Resolution_revision resolution ->
+              ( [
+                  resolution.M.comparison_snapshot;
+                  resolution.M.replacement_snapshot;
+                ],
+                Some resolution.M.decision_scope_root )
           | M.Branch_event _ -> ([], None)
         in
         let* objects =

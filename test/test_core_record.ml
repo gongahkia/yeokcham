@@ -49,6 +49,14 @@ let fixture_payloads () =
          ~composition_profile:"line-hunks-v1" ~policy_heads:[]
          ~review_evidence:[]
       |> model);
+    M.Resolution_revision
+      (M.make_resolution_revision ~branch
+         ~accepted_heads:[ r 'a'; r 'b' ]
+         ~chosen_revisions:[ r 'r' ]
+         ~superseded_variants:[ r 'a'; r 'b'; r 'r' ]
+         ~decision_scope_root:(o 's') ~comparison_snapshot:(o 'b')
+         ~replacement_snapshot:(o 'z')
+      |> model);
     M.Branch_event
       (M.make_branch_event ~branch
          ~previous_events:[ r 'a'; r 'b' ]
@@ -145,9 +153,9 @@ let replace_payload key replacement = function
       Alcotest.fail "expected body"
 
 let malformed_bodies () =
-  let shared, accepted, event =
+  let shared, accepted, resolution, event =
     match fixtures () with
-    | [ a; b; c ] -> (value a, value b, value c)
+    | [ a; b; resolution; c ] -> (value a, value b, value resolution, value c)
     | _ -> assert false
   in
   let bad label v = rejects label (R.decode_body ~repository (E.encode v)) in
@@ -178,6 +186,27 @@ let malformed_bodies () =
        accepted);
   bad "unknown composition profile"
     (replace_payload 5L (E.text "future" |> Result.get_ok) accepted);
+  bad "resolution unknown mandatory version"
+    (replace 1 (E.integer 2L) resolution);
+  bad "resolution wrong repository"
+    (replace 2 (E.bytes (String.make 32 'x')) resolution);
+  bad "resolution causal parents mismatch" (replace 3 (array []) resolution);
+  bad "resolution requires accepted variants"
+    (replace_payload 1L (array []) resolution);
+  bad "resolution duplicate accepted variants"
+    (replace_payload 1L
+       (array [ E.bytes (String.make 32 'a'); E.bytes (String.make 32 'a') ])
+       resolution);
+  bad "resolution unsorted accepted variants"
+    (replace_payload 1L
+       (array [ E.bytes (String.make 32 'b'); E.bytes (String.make 32 'a') ])
+       resolution);
+  bad "resolution variant set omits selected roots"
+    (replace_payload 3L
+       (array [ E.bytes (String.make 32 'a'); E.bytes (String.make 32 'b') ])
+       resolution);
+  bad "resolution malformed decision scope"
+    (replace_payload 4L (E.bytes "short") resolution);
   bad "unknown action" (replace_payload 2L (E.integer 4L) event);
   bad "branch action mismatch" (replace_payload 2L (E.integer 0L) event);
   bad "invalid name" (replace_payload 4L (E.bytes "main") event);
@@ -253,7 +282,12 @@ let malformed_envelopes () =
     bad "truncated signed record" (String.sub raw 0 length)
   done;
   rejects "cannot attach short signature"
-    (R.attach_signature body ~signature:"")
+    (R.attach_signature body ~signature:"");
+  let resolution = List.nth (fixtures ()) 2 in
+  let signed = sign_unchecked resolution in
+  bad "resolution envelope kind differs from its domain/body"
+    (envelope_for Envelope.Core_shared_revision (value resolution)
+       (R.signature signed))
 
 let properties =
   let open QCheck2 in
@@ -277,10 +311,21 @@ let properties =
         | Ok s -> R.encode s = Ok raw);
     Test.make
       ~name:"all body byte mutations either reject or reencode canonically"
-      ~count:500
-      (Gen.pair (Gen.int_range 0 500) (Gen.int_range 1 255))
-      (fun (index, mask) ->
-        let raw = golden "shared-revision-body" |> Bytes.of_string in
+      ~count:1000
+      (Gen.triple (Gen.int_range 0 3) (Gen.int_range 0 500)
+         (Gen.int_range 1 255))
+      (fun (kind, index, mask) ->
+        let name =
+          List.nth
+            [
+              "shared-revision";
+              "accepted-version";
+              "branch-event";
+              "resolution-revision";
+            ]
+            kind
+        in
+        let raw = golden (name ^ "-body") |> Bytes.of_string in
         let index = index mod Bytes.length raw in
         Bytes.set raw index
           (Char.chr (Char.code (Bytes.get raw index) lxor mask));

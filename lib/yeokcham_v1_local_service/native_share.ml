@@ -68,7 +68,7 @@ let change_heads pool change =
         when List.exists (Core.Record_id.equal id) heads ->
           Some (id, value)
       | Core.Shared_revision _ | Core.Accepted_version _ | Core.Branch_event _
-        ->
+      | Core.Resolution_revision _ ->
           None)
 
 let prepare ~store ~loaded ~observed ~observation ~paths ~update ~title =
@@ -278,7 +278,9 @@ let prepare ~store ~loaded ~observed ~observation ~paths ~update ~title =
           | None
           | Some
               {
-                Core.payload = Core.Accepted_version _ | Core.Branch_event _;
+                Core.payload =
+                  ( Core.Accepted_version _ | Core.Branch_event _
+                  | Core.Resolution_revision _ );
                 _;
               } ->
               None
@@ -367,8 +369,13 @@ let stage ~store ~signing_capability prepared =
       | Some { Core.payload = Core.Shared_revision value; _ } ->
           Ok value.Core.change
       | None
-      | Some { Core.payload = Core.Accepted_version _ | Core.Branch_event _; _ }
-        ->
+      | Some
+          {
+            Core.payload =
+              ( Core.Accepted_version _ | Core.Branch_event _
+              | Core.Resolution_revision _ );
+            _;
+          } ->
           Error (Metadata "staged shared revision disappeared")
     in
     Ok

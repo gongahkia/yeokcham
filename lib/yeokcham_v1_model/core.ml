@@ -246,27 +246,46 @@ type branch_event = {
   display_name : string option;
 }
 
+type resolution_revision = {
+  branch : Branch_id.t;
+  accepted_heads : Record_id.t list;
+  chosen_revisions : Record_id.t list;
+  superseded_variants : Record_id.t list;
+  decision_scope_root : Object_id.t;
+  comparison_snapshot : Object_id.t;
+  replacement_snapshot : Object_id.t;
+}
+
 type payload =
   | Shared_revision of shared_revision
   | Accepted_version of accepted_version
   | Branch_event of branch_event
+  | Resolution_revision of resolution_revision
 
-type kind = Shared_revision_kind | Accepted_version_kind | Branch_event_kind
+type kind =
+  | Shared_revision_kind
+  | Accepted_version_kind
+  | Branch_event_kind
+  | Resolution_revision_kind
 
 let kind = function
   | Shared_revision _ -> Shared_revision_kind
   | Accepted_version _ -> Accepted_version_kind
   | Branch_event _ -> Branch_event_kind
+  | Resolution_revision _ -> Resolution_revision_kind
 
 let kind_name = function
   | Shared_revision_kind -> "shared-revision"
   | Accepted_version_kind -> "accepted-version"
   | Branch_event_kind -> "branch-event"
+  | Resolution_revision_kind -> "resolution-revision"
 
 let parents = function
   | Shared_revision revision -> revision.previous_revisions
   | Accepted_version version -> version.accepted_parents
   | Branch_event event -> event.previous_events
+  | Resolution_revision value ->
+      List.sort_uniq Record_id.compare value.superseded_variants
 
 let make_shared_revision ~change ~previous_revisions ~base_snapshot
     ~result_snapshot ~edit_scope_root ~dependencies =
@@ -306,6 +325,43 @@ let make_accepted_version ~branch ~accepted_parents ~chosen_revisions
         composition_profile;
         policy_heads;
         review_evidence;
+      }
+
+let make_resolution_revision ~branch ~accepted_heads ~chosen_revisions
+    ~superseded_variants ~decision_scope_root ~comparison_snapshot
+    ~replacement_snapshot =
+  let* accepted_heads = record_set "resolution accepted heads" accepted_heads in
+  let* chosen_revisions =
+    record_set "resolution chosen revisions" chosen_revisions
+  in
+  let* roots =
+    record_set "resolution roots" (accepted_heads @ chosen_revisions)
+  in
+  let* superseded_variants =
+    record_set "resolution variants" superseded_variants
+  in
+  let* () =
+    if
+      List.for_all
+        (fun root -> List.exists (Record_id.equal root) superseded_variants)
+        roots
+    then Ok ()
+    else
+      Error
+        (Invalid_field "resolution variants omit exact chosen/accepted roots")
+  in
+  if accepted_heads = [] then
+    Error (Invalid_field "resolution requires accepted context")
+  else
+    Ok
+      {
+        branch;
+        accepted_heads;
+        chosen_revisions;
+        superseded_variants;
+        decision_scope_root;
+        comparison_snapshot;
+        replacement_snapshot;
       }
 
 let make_branch_event ~branch ~previous_events ~action ~targets ~display_name =
@@ -372,7 +428,9 @@ let change_heads pool change =
         match body.payload with
         | Shared_revision version when Change_id.equal version.change change ->
             Some (id, version)
-        | Shared_revision _ | Accepted_version _ | Branch_event _ -> None)
+        | Shared_revision _ | Accepted_version _ | Branch_event _
+        | Resolution_revision _ ->
+            None)
   in
   let previous =
     List.concat_map (fun (_, version) -> version.previous_revisions) versions
@@ -403,14 +461,50 @@ let require_all pool expected ids =
       Ok ())
     ids
 
-let supported_policy ~policy_heads ~review_evidence ~resolutions =
+let supported_policy ~policy_heads ~review_evidence =
   if policy_heads <> [] then
     Error (Unsupported_policy "policy records are not implemented")
   else if review_evidence <> [] then
     Error (Unsupported_policy "review evidence is not implemented")
-  else if resolutions <> [] then
-    Error (Unsupported_policy "resolution records are not implemented")
   else Ok ()
+
+let resolution_variants pool ~accepted_heads ~chosen_revisions =
+  let* () = require_all pool Accepted_version_kind accepted_heads in
+  let rec walk seen count = function
+    | [] ->
+        record_set "resolution variant closure"
+          (accepted_heads @ List.map fst (Records.bindings seen))
+    | id :: rest when Records.mem id seen -> walk seen count rest
+    | _ when count >= max_references ->
+        Error
+          (Invalid_field "resolution variant closure exceeds reference bound")
+    | id :: rest -> (
+        let* body = require pool Shared_revision_kind id in
+        match body.payload with
+        | Shared_revision revision ->
+            walk (Records.add id body seen) (count + 1)
+              (revision.previous_revisions @ revision.dependencies @ rest)
+        | Accepted_version _ | Branch_event _ | Resolution_revision _ ->
+            Error (Wrong_reference_kind (Record_id.to_hex id)))
+  in
+  walk Records.empty 0 chosen_revisions
+
+let validate_resolutions pool ~branch ~accepted_heads ~chosen_revisions ids =
+  check_all
+    (fun id ->
+      let* body = require pool Resolution_revision_kind id in
+      match body.payload with
+      | Resolution_revision resolution
+        when Branch_id.equal resolution.branch branch
+             && resolution.accepted_heads = accepted_heads
+             && resolution.chosen_revisions = chosen_revisions ->
+          Ok ()
+      | Resolution_revision _ | Shared_revision _ | Accepted_version _
+      | Branch_event _ ->
+          Error
+            (Invalid_field
+               "resolution context differs from exact integration variants"))
+    ids
 
 let retain (pool : pool) ~id body =
   if not (Repository_id.equal pool.repository body.context.repository) then
@@ -431,7 +525,9 @@ let retain (pool : pool) ~id body =
                          match body.payload with
                          | Shared_revision existing ->
                              Change_id.equal existing.change revision.change
-                         | Accepted_version _ | Branch_event _ -> false)
+                         | Accepted_version _ | Branch_event _
+                         | Resolution_revision _ ->
+                             false)
                        pool.records
                 then
                   Error
@@ -447,23 +543,40 @@ let retain (pool : pool) ~id body =
                     | Shared_revision previous
                       when Change_id.equal previous.change revision.change ->
                         Ok ()
-                    | Shared_revision _ | Accepted_version _ | Branch_event _ ->
+                    | Shared_revision _ | Accepted_version _ | Branch_event _
+                    | Resolution_revision _ ->
                         Error
                           (Invalid_field
                              "previous revision belongs to another change"))
                   revision.previous_revisions
               in
               require_all pool Shared_revision_kind revision.dependencies
+          | Resolution_revision resolution ->
+              let* expected =
+                resolution_variants pool
+                  ~accepted_heads:resolution.accepted_heads
+                  ~chosen_revisions:resolution.chosen_revisions
+              in
+              if expected = resolution.superseded_variants then Ok ()
+              else
+                Error
+                  (Invalid_field
+                     "resolution variants differ from exact \
+                      dependency/previous closure")
           | Accepted_version version ->
               let* () =
                 supported_policy ~policy_heads:version.policy_heads
                   ~review_evidence:version.review_evidence
-                  ~resolutions:version.resolutions
               in
               let* () =
                 require_all pool Accepted_version_kind version.accepted_parents
               in
-              require_all pool Shared_revision_kind version.chosen_revisions
+              let* () =
+                require_all pool Shared_revision_kind version.chosen_revisions
+              in
+              validate_resolutions pool ~branch:version.branch
+                ~accepted_heads:version.accepted_parents
+                ~chosen_revisions:version.chosen_revisions version.resolutions
           | Branch_event event ->
               let* () =
                 check_all
@@ -473,7 +586,8 @@ let retain (pool : pool) ~id body =
                     | Branch_event previous
                       when Branch_id.equal previous.branch event.branch ->
                         Ok ()
-                    | Shared_revision _ | Accepted_version _ | Branch_event _ ->
+                    | Shared_revision _ | Accepted_version _ | Branch_event _
+                    | Resolution_revision _ ->
                         Error
                           (Invalid_field
                              "previous event belongs to another branch"))
@@ -488,7 +602,9 @@ let retain (pool : pool) ~id body =
                        | Branch_event previous ->
                            previous.action = Create
                            && Branch_id.equal previous.branch event.branch
-                       | Shared_revision _ | Accepted_version _ -> false)
+                       | Shared_revision _ | Accepted_version _
+                       | Resolution_revision _ ->
+                           false)
                      pool.records
               then
                 Error
@@ -517,7 +633,8 @@ let branch_states pool =
               Option.value (Branch_map.find_opt event.branch groups) ~default:[]
             in
             Branch_map.add event.branch ((id, event) :: events) groups
-        | Shared_revision _ | Accepted_version _ -> groups)
+        | Shared_revision _ | Accepted_version _ | Resolution_revision _ ->
+            groups)
       pool.records Branch_map.empty
   in
   let inherited ~extract ~add ~empty ids =
@@ -532,8 +649,13 @@ let branch_states pool =
               if values = [] then
                 walk visited collected (event.previous_events @ rest)
               else walk visited (List.fold_left add collected values) rest
-          | Some { payload = Shared_revision _ | Accepted_version _; _ } | None
-            ->
+          | Some
+              {
+                payload =
+                  Shared_revision _ | Accepted_version _ | Resolution_revision _;
+                _;
+              }
+          | None ->
               walk visited collected rest)
     in
     walk Record_set.empty empty ids
@@ -547,7 +669,13 @@ let branch_states pool =
           match find pool id with
           | Some { payload = Accepted_version version; _ } ->
               walk visited (version.accepted_parents @ rest)
-          | Some { payload = Shared_revision _ | Branch_event _; _ } | None ->
+          | Some
+              {
+                payload =
+                  Shared_revision _ | Branch_event _ | Resolution_revision _;
+                _;
+              }
+          | None ->
               walk visited rest)
     in
     walk visited ids
@@ -582,7 +710,13 @@ let branch_states pool =
             match find pool id with
             | Some { payload = Accepted_version version; _ } ->
                 accepted_ancestors set version.accepted_parents
-            | Some { payload = Shared_revision _ | Branch_event _; _ } | None ->
+            | Some
+                {
+                  payload =
+                    Shared_revision _ | Branch_event _ | Resolution_revision _;
+                  _;
+                }
+            | None ->
                 set)
           Record_set.empty targets
       in
@@ -747,11 +881,15 @@ let validate_request_references (pool : pool) (request : composition_request) =
     let* () =
       supported_policy ~policy_heads:request.policy_heads
         ~review_evidence:request.review_evidence
-        ~resolutions:request.resolution_ids
     in
     let* () = require_all pool Accepted_version_kind request.accepted_heads in
     let* () =
       require_all pool Shared_revision_kind request.selected_revisions
+    in
+    let* () =
+      validate_resolutions pool ~branch:request.branch
+        ~accepted_heads:request.accepted_heads
+        ~chosen_revisions:request.selected_revisions request.resolution_ids
     in
     let* _ =
       require pool Accepted_version_kind request.workspace.working_basis

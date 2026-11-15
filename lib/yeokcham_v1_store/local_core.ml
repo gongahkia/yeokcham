@@ -333,8 +333,13 @@ let selection_target state name =
                  snapshot = version.Core.result_snapshot;
                })
       | None
-      | Some { Core.payload = Core.Shared_revision _ | Core.Branch_event _; _ }
-        ->
+      | Some
+          {
+            Core.payload =
+              ( Core.Shared_revision _ | Core.Branch_event _
+              | Core.Resolution_revision _ );
+            _;
+          } ->
           Error "branch accepted head is not retained")
 
 let lookup state name =
@@ -1074,7 +1079,9 @@ let fresh_change_using ~random_bytes state =
           match body.Core.payload with
           | Core.Shared_revision value ->
               Core.Change_id.equal change value.Core.change
-          | Core.Accepted_version _ | Core.Branch_event _ -> false)
+          | Core.Accepted_version _ | Core.Branch_event _
+          | Core.Resolution_revision _ ->
+              false)
         (Core.records state.pool)
     then
       if count = 1 then Error "change identity collision after three attempts"
@@ -1110,8 +1117,9 @@ let prepare_revision ~store ~authority ~certificate ~signing_capability ~change
   in
   Ok (next, id)
 
-let prepare_acceptance ~store ~authority ~certificate ~signing_capability
-    ~parents ~chosen_revisions ~result_snapshot ~cursor state =
+let prepare_acceptance ?(resolutions = []) ~store ~authority ~certificate
+    ~signing_capability ~parents ~chosen_revisions ~result_snapshot ~cursor
+    state =
   let* row =
     List.find_opt
       (fun row -> Core.Branch_id.equal row.Core.branch_id state.selected_branch)
@@ -1123,7 +1131,7 @@ let prepare_acceptance ~store ~authority ~certificate ~signing_capability
     Error "accepted heads changed; prepare a new integration plan"
   else
     let* expected =
-      Composition.Graph.compose store state.pool ~parents
+      Composition.Graph.compose ~resolutions store state.pool ~parents
         ~revisions:chosen_revisions
       |> Result.map_error Composition.Graph.error_to_string
     in
@@ -1136,7 +1144,7 @@ let prepare_acceptance ~store ~authority ~certificate ~signing_capability
     else
       let* value =
         Core.make_accepted_version ~branch:state.selected_branch
-          ~accepted_parents:parents ~chosen_revisions ~resolutions:[]
+          ~accepted_parents:parents ~chosen_revisions ~resolutions
           ~result_snapshot ~composition_profile:"line-hunks-v1" ~policy_heads:[]
           ~review_evidence:[]
         |> model

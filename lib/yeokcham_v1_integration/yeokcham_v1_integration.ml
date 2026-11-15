@@ -174,8 +174,12 @@ let selection_root store pool revisions =
             Ok value.Core.change
         | None
         | Some
-            { Core.payload = Core.Accepted_version _ | Core.Branch_event _; _ }
-          ->
+            {
+              Core.payload =
+                ( Core.Accepted_version _ | Core.Branch_event _
+                | Core.Resolution_revision _ );
+              _;
+            } ->
             Error
               (Invalid
                  "integration selections must name retained shared revisions"))
@@ -263,8 +267,8 @@ let encode_readiness = function
       let* detail = text detail in
       array [ E.integer 2L; detail ]
 
-let prepare ~store ~loaded ~observed ~observation ~selected_revisions
-    ~reconcile_heads =
+let prepare_resolved ~resolution_ids ~store ~loaded ~observed ~observation
+    ~selected_revisions ~reconcile_heads =
   let* local =
     loaded.Store.local
     |> Option.to_result
@@ -379,7 +383,7 @@ let prepare ~store ~loaded ~observed ~observation ~selected_revisions
     Core.make_composition_request
       ~repository:(Core.pool_repository pool)
       ~branch:selected.Local.branch ~accepted_heads:branch.Core.accepted_heads
-      ~selected_revisions ~resolution_ids:[] ~authority_heads ~policy_heads:[]
+      ~selected_revisions ~resolution_ids ~authority_heads ~policy_heads:[]
       ~review_evidence:[] ~workspace:workspace_observation
       ~composition_profile:"line-hunks-v1"
     |> model
@@ -395,7 +399,8 @@ let prepare ~store ~loaded ~observed ~observation ~selected_revisions
   in
   let* accepted_snapshot, readiness =
     match
-      Composition.Graph.compose store pool ~parents:request.Core.accepted_heads
+      Composition.Graph.compose ~resolutions:request.Core.resolution_ids store
+        pool ~parents:request.Core.accepted_heads
         ~revisions:request.Core.selected_revisions
     with
     | Error (Composition.Graph.Content_error (Composition.Conflicts paths)) ->
@@ -447,7 +452,8 @@ let prepare ~store ~loaded ~observed ~observation ~selected_revisions
     Composition.Graph.represented pool [ selected.Local.basis ] |> graph
   in
   let no_op =
-    branch.Core.accepted_heads = [ selected.Local.basis ]
+    request.Core.resolution_ids = []
+    && branch.Core.accepted_heads = [ selected.Local.basis ]
     && List.length branch.Core.event_heads = 1
     && List.for_all
          (fun id -> List.exists (Core.Record_id.equal id) already)
@@ -496,6 +502,8 @@ let prepare ~store ~loaded ~observed ~observation ~selected_revisions
         contributions = known.Preservation.contributions;
         no_op;
       }
+
+let prepare = prepare_resolved ~resolution_ids:[]
 
 let[@warning "-4"] decoded_model value =
   Result.map_error
@@ -967,7 +975,8 @@ let[@warning "-4"] revalidate ~store ~loaded ~observed ~observation plan =
     else None
   in
   let* current =
-    prepare ~store ~loaded ~observed ~observation
+    prepare_resolved ~resolution_ids:plan.request.Core.resolution_ids ~store
+      ~loaded ~observed ~observation
       ~selected_revisions:plan.request.Core.selected_revisions ~reconcile_heads
     |> Result.map_error (function
       | Choice detail -> Stale detail

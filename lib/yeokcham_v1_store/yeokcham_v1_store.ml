@@ -876,6 +876,11 @@ let[@warning "-42"] local_shared_snapshots loaded =
               ]
           | Model.Core.Accepted_version value ->
               [ value.Model.Core.result_snapshot ]
+          | Model.Core.Resolution_revision value ->
+              [
+                value.Model.Core.comparison_snapshot;
+                value.Model.Core.replacement_snapshot;
+              ]
           | Model.Core.Branch_event _ -> [])
       |> List.map (fun id ->
           Model.Snapshot_id.of_string (Model.Core.Object_id.to_hex id)

@@ -198,7 +198,8 @@ let is_collectible_type = function
   | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
   | Envelope.Core_shared_revision | Envelope.Core_accepted_version
   | Envelope.Core_branch_event | Envelope.Core_edit_scope
-  | Envelope.Core_metadata_page | Envelope.Core_integration_plan ->
+  | Envelope.Core_metadata_page | Envelope.Core_integration_plan
+  | Envelope.Core_resolution_revision ->
       false
 
 let classify ~state_head ~objects ~reachable =
@@ -574,7 +575,8 @@ let traverse_content store reasons content_id reachable =
     | Envelope.V1_project_state | Envelope.Core_shared_revision
     | Envelope.Core_accepted_version | Envelope.Core_branch_event
     | Envelope.Core_edit_scope | Envelope.Core_metadata_page
-    | Envelope.Core_integration_plan ) as object_type ->
+    | Envelope.Core_integration_plan | Envelope.Core_resolution_revision ) as
+    object_type ->
       Error
         (Invalid_schema
            (Printf.sprintf "tree file refers to object type %d"

@@ -33,9 +33,10 @@ let shared ?(previous = []) ?(dependencies = []) c =
     ~dependencies
   |> ok
 
-let accepted ?(parents = []) ?(chosen = []) ?(policy = []) ?(reviews = []) () =
+let accepted ?(parents = []) ?(chosen = []) ?(resolutions = []) ?(policy = [])
+    ?(reviews = []) () =
   M.make_accepted_version ~branch:(b 'm') ~accepted_parents:parents
-    ~chosen_revisions:chosen ~resolutions:[] ~result_snapshot:(o 'z')
+    ~chosen_revisions:chosen ~resolutions ~result_snapshot:(o 'z')
     ~composition_profile:"line-hunks-v1" ~policy_heads:policy
     ~review_evidence:reviews
   |> ok
@@ -217,6 +218,95 @@ let shape_and_sets () =
        ~targets:[ r 'g' ]
        ~display_name:(Some "\255"))
 
+let resolution_context_and_reference_kinds () =
+  let pool =
+    M.empty_pool ~repository:(repo 'r') |> fun pool ->
+    retain pool (r 'g') (body (M.Accepted_version (accepted ()))) |> fun pool ->
+    retain pool (r 's') (body (M.Shared_revision (shared 'c')))
+  in
+  let resolution ?(branch = b 'm') ?(heads = [ r 'g' ]) ?(chosen = [ r 's' ]) ()
+      =
+    M.make_resolution_revision ~branch ~accepted_heads:heads
+      ~chosen_revisions:chosen
+      ~superseded_variants:(List.sort_uniq M.Record_id.compare (heads @ chosen))
+      ~decision_scope_root:(o 'p') ~comparison_snapshot:(o 'a')
+      ~replacement_snapshot:(o 'z')
+  in
+  rejects "resolution has no accepted context" (resolution ~heads:[] ());
+  rejects "duplicate accepted variants" (resolution ~heads:[ r 'g'; r 'g' ] ());
+  rejects "accepted/revision variants reuse the same record identity"
+    (resolution ~chosen:[ r 'g' ] ());
+  rejects "resolution accepts wrong reference kind"
+    (M.retain pool ~id:(r 'r')
+       (body
+          (M.Resolution_revision
+             (resolution ~heads:[ r 's' ] ~chosen:[] () |> ok))));
+  let pool =
+    retain pool (r 'r') (body (M.Resolution_revision (resolution () |> ok)))
+  in
+  ignore
+    (M.retain pool ~id:(r 'a')
+       (body
+          (M.Accepted_version
+             (accepted
+                ~parents:[ r 'g' ]
+                ~chosen:[ r 's' ]
+                ~resolutions:[ r 'r' ]
+                ())))
+    |> ok);
+  rejects "acceptance changed resolution chosen revisions"
+    (M.retain pool ~id:(r 'a')
+       (body
+          (M.Accepted_version
+             (accepted ~parents:[ r 'g' ] ~resolutions:[ r 'r' ] ()))));
+  let pool =
+    retain pool (r 'w')
+      (body (M.Resolution_revision (resolution ~branch:(b 'x') () |> ok)))
+  in
+  rejects "acceptance retargeted a resolution to another branch"
+    (M.retain pool ~id:(r 'a')
+       (body
+          (M.Accepted_version
+             (accepted
+                ~parents:[ r 'g' ]
+                ~chosen:[ r 's' ]
+                ~resolutions:[ r 'w' ]
+                ()))));
+  rejects "a shared revision masquerades as a resolution"
+    (M.retain pool ~id:(r 'a')
+       (body
+          (M.Accepted_version
+             (accepted
+                ~parents:[ r 'g' ]
+                ~chosen:[ r 's' ]
+                ~resolutions:[ r 's' ]
+                ()))));
+  let pool =
+    retain pool (r 'n')
+      (body (M.Shared_revision (shared ~dependencies:[ r 's' ] 'd')))
+  in
+  let complete =
+    M.resolution_variants pool
+      ~accepted_heads:[ r 'g' ]
+      ~chosen_revisions:[ r 'n' ]
+    |> ok
+  in
+  Alcotest.(check (list string))
+    "all dependency variants are explicitly named"
+    (List.map M.Record_id.to_hex [ r 'g'; r 'n'; r 's' ])
+    (List.map M.Record_id.to_hex complete);
+  let incomplete =
+    M.make_resolution_revision ~branch:(b 'm')
+      ~accepted_heads:[ r 'g' ]
+      ~chosen_revisions:[ r 'n' ]
+      ~superseded_variants:[ r 'g'; r 'n' ]
+      ~decision_scope_root:(o 'p') ~comparison_snapshot:(o 'a')
+      ~replacement_snapshot:(o 'z')
+    |> ok
+  in
+  rejects "resolution omits a dependency variant"
+    (M.retain pool ~id:(r 'q') (body (M.Resolution_revision incomplete)))
+
 let policy_and_consumers () =
   let pool =
     M.empty_pool ~repository:(repo 'r') |> fun pool ->
@@ -316,6 +406,8 @@ let () =
           Alcotest.test_case "bounded canonical fields" `Quick shape_and_sets;
           Alcotest.test_case "consumer contracts fail closed" `Quick
             policy_and_consumers;
+          Alcotest.test_case "resolution exact context and typed references"
+            `Quick resolution_context_and_reference_kinds;
         ] );
       ("properties", properties);
     ]

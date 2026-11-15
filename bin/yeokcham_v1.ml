@@ -4264,6 +4264,31 @@ let render_metadata_status ~root metadata =
                                  (Core.Object_id.to_hex
                                     version.Core.result_snapshot) );
                            ]
+                       | Core.Resolution_revision resolution ->
+                           [
+                             ( "branch_id",
+                               `String
+                                 (Core.Branch_id.to_hex resolution.Core.branch)
+                             );
+                             ( "accepted_heads",
+                               json_ids resolution.Core.accepted_heads );
+                             ( "chosen_revisions",
+                               json_ids resolution.Core.chosen_revisions );
+                             ( "superseded_variants",
+                               json_ids resolution.Core.superseded_variants );
+                             ( "decision_scope_root",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    resolution.Core.decision_scope_root) );
+                             ( "comparison_snapshot",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    resolution.Core.comparison_snapshot) );
+                             ( "replacement_snapshot",
+                               `String
+                                 (Core.Object_id.to_hex
+                                    resolution.Core.replacement_snapshot) );
+                           ]
                        | Core.Branch_event event ->
                            [
                              ( "branch_id",
@@ -6490,7 +6515,9 @@ let integration_selection root ~all selectors =
     |> List.filter_map (fun (_, body) ->
         match body.Core.payload with
         | Core.Shared_revision value -> Some value.Core.change
-        | Core.Accepted_version _ | Core.Branch_event _ -> None)
+        | Core.Accepted_version _ | Core.Branch_event _
+        | Core.Resolution_revision _ ->
+            None)
     |> List.sort_uniq Core.Change_id.compare
   in
   let eligible =
@@ -6524,8 +6551,13 @@ let integration_selection root ~all selectors =
       match Core.find pool id with
       | Some { Core.payload = Core.Shared_revision _; _ } -> id
       | None
-      | Some { Core.payload = Core.Accepted_version _ | Core.Branch_event _; _ }
-        ->
+      | Some
+          {
+            Core.payload =
+              ( Core.Accepted_version _ | Core.Branch_event _
+              | Core.Resolution_revision _ );
+            _;
+          } ->
           fail_with "invalid-shared-revision"
             "Integration selections must name retained shared revisions."
   in

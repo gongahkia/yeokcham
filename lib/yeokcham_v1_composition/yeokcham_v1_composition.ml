@@ -635,14 +635,16 @@ module Graph = struct
     let* body = body pool id in
     match body.Core.payload with
     | Core.Accepted_version value -> Ok value
-    | Core.Shared_revision _ | Core.Branch_event _ ->
+    | Core.Shared_revision _ | Core.Branch_event _ | Core.Resolution_revision _
+      ->
         Error (Invalid_graph "expected an accepted version")
 
   let revision pool id =
     let* body = body pool id in
     match body.Core.payload with
     | Core.Shared_revision value -> Ok value
-    | Core.Accepted_version _ | Core.Branch_event _ ->
+    | Core.Accepted_version _ | Core.Branch_event _ | Core.Resolution_revision _
+      ->
         Error (Invalid_graph "expected a shared revision")
 
   let rec ancestors pool seen = function
@@ -708,7 +710,7 @@ module Graph = struct
         (fun id acc ->
           let* roots = acc in
           let* value = accepted pool id in
-          Ok (value.Core.chosen_revisions @ value.Core.resolutions @ roots))
+          Ok (value.Core.chosen_revisions @ roots))
         versions (Ok [])
     in
     represented_revisions pool roots
@@ -808,7 +810,92 @@ module Graph = struct
              "revision base has no unambiguous accepted/dependency \
               correspondence at this target")
 
-  let compose_with context ~parents ~revisions =
+  let comparison_snapshot pool parents =
+    let* common = common_base pool parents in
+    let* version = accepted pool common in
+    Ok version.Core.result_snapshot
+
+  let resolution pool id =
+    let* body = body pool id in
+    match body.Core.payload with
+    | Core.Resolution_revision value -> Ok value
+    | Core.Shared_revision _ | Core.Accepted_version _ | Core.Branch_event _ ->
+        Error (Invalid_graph "expected a resolution revision")
+
+  let validate_resolution context (value : Core.resolution_revision) =
+    let* comparison =
+      comparison_snapshot context.pool value.Core.accepted_heads
+    in
+    if not (Core.Object_id.equal comparison value.Core.comparison_snapshot) then
+      Error
+        (Invalid_graph
+           "resolution comparison differs from its recorded common accepted \
+            base")
+    else
+      let* before = load context comparison in
+      let* replacement = load context value.Core.replacement_snapshot in
+      let* scope =
+        Scope.load context.repository value.Core.decision_scope_root |> content
+      in
+      match scope with
+      | [ path ] ->
+          if List.for_all (prefix path) (differences before replacement) then
+            Ok (path, replacement)
+          else
+            Error
+              (Invalid_graph
+                 "resolution replacement changes contents outside its decided \
+                  path")
+      | [] | _ :: _ :: _ ->
+          Error (Invalid_graph "resolution scope must contain exactly one path")
+
+  let minimal_paths paths =
+    List.sort_uniq Stdlib.compare paths
+    |> List.filter (fun path ->
+        not
+          (List.exists
+             (fun ancestor -> ancestor <> path && prefix ancestor path)
+             paths))
+
+  let splice target path replacement =
+    let result =
+      Paths.filter (fun candidate _ -> not (prefix path candidate)) target
+    in
+    let subtree =
+      Paths.filter (fun candidate _ -> prefix path candidate) replacement
+    in
+    let* result =
+      Paths.fold
+        (fun candidate entry acc ->
+          let* result = acc in
+          let rec ensure ancestor result =
+            match ancestor with
+            | [] -> Ok result
+            | ancestor -> (
+                match Paths.find_opt ancestor result with
+                | Some (File _) -> Error (Conflicts [ ancestor ])
+                | Some Directory | None ->
+                    ensure (parent ancestor)
+                      (Paths.add ancestor Directory result))
+          in
+          let* result = ensure (parent candidate) result in
+          Ok (Paths.add candidate entry result))
+        subtree (Ok result)
+    in
+    tree (entries result)
+
+  let compose_unresolved context ~masked ~parents ~revisions =
+    let mask tree =
+      Paths.filter
+        (fun path _ ->
+          not (List.exists (fun chosen -> prefix chosen path) masked))
+        tree
+    in
+    let merge_here ~base ~variants =
+      merge context.repository ~base:(mask base)
+        ~variants:(List.map mask variants)
+    in
+
     let* parents_ancestry = ancestors context.pool Ids.empty parents in
     let* represented =
       represented context.pool parents |> Result.map Ids.of_list
@@ -845,10 +932,30 @@ module Graph = struct
                 in
                 if Ids.mem other first || Ids.mem id second then Ok ()
                 else
-                  Error
-                    (Decision
-                       "concurrent versions of one change require exact \
-                        selection or resolution")
+                  let* first =
+                    Scope.load context.repository value.Core.edit_scope_root
+                    |> content
+                  in
+                  let* second =
+                    Scope.load context.repository
+                      other_value.Core.edit_scope_root
+                    |> content
+                  in
+                  let conflicts =
+                    minimal_paths (first @ second)
+                    |> List.filter (fun path ->
+                        not
+                          (List.exists
+                             (fun chosen -> prefix chosen path)
+                             masked))
+                  in
+                  if first = [] && second = [] then
+                    Error
+                      (Decision
+                         "concurrent unchanged versions require exact revision \
+                          selection")
+                  else if conflicts = [] then Ok ()
+                  else Error (Content_error (Conflicts conflicts))
               else Ok ())
             pending (Ok ()))
         pending (Ok ())
@@ -873,7 +980,7 @@ module Graph = struct
                 Ok (tree :: variants))
               (Ok []) parents
           in
-          merge context.repository ~base ~variants |> content
+          merge_here ~base ~variants |> content
     in
     let rec layers target applied pending =
       if Ids.is_empty pending then Ok target
@@ -907,28 +1014,86 @@ module Graph = struct
                 let* base = load context base in
                 let* changed = load context value.Core.result_snapshot in
                 let* combined =
-                  merge context.repository ~base ~variants:[ target; changed ]
-                  |> content
+                  merge_here ~base ~variants:[ target; changed ] |> content
                 in
                 Ok (combined :: variants))
               (Ok []) ready
           in
-          let* combined =
-            merge context.repository ~base:target ~variants |> content
-          in
+          let* combined = merge_here ~base:target ~variants |> content in
           let ready = Ids.of_list ready in
           layers combined (Ids.union applied ready) (Ids.diff pending ready)
     in
-    layers target represented pending
+    layers (mask target) represented pending
 
-  let compose repository pool ~parents ~revisions =
-    compose_with (context repository pool) ~parents ~revisions
+  let compose_with context ~parents ~revisions ~resolutions =
+    let* decisions =
+      List.fold_left
+        (fun acc id ->
+          let* decisions = acc in
+          let* value = resolution context.pool id in
+          if
+            value.Core.accepted_heads
+            <> List.sort_uniq Core.Record_id.compare parents
+            || value.Core.chosen_revisions
+               <> List.sort_uniq Core.Record_id.compare revisions
+          then
+            Error
+              (Invalid_graph
+                 "resolution names different exact accepted/revision variants")
+          else
+            let* path, replacement = validate_resolution context value in
+            if
+              List.exists
+                (fun (previous, _) ->
+                  prefix previous path || prefix path previous)
+                decisions
+            then Error (Invalid_graph "overlapping resolution decisions")
+            else Ok ((path, replacement) :: decisions))
+        (Ok []) resolutions
+    in
+    let rec apply installed pending =
+      match
+        compose_unresolved context ~masked:(List.map fst installed) ~parents
+          ~revisions
+      with
+      | Error (Content_error (Conflicts conflicts)) ->
+          let conflicts = minimal_paths conflicts in
+          let ready, pending =
+            List.partition (fun (path, _) -> List.mem path conflicts) pending
+          in
+          if ready = [] then
+            if pending = [] then Error (Content_error (Conflicts conflicts))
+            else
+              Error
+                (Invalid_graph
+                   "resolution does not address a reachable conflict")
+          else apply (installed @ ready) pending
+      | Error
+          (( Invalid_graph _ | Decision _
+           | Content_error (Invalid_input _ | Unavailable _ | Integrity _) ) as
+           error) ->
+          Error error
+      | Ok _ when pending <> [] ->
+          Error
+            (Invalid_graph "resolution targets contents that do not conflict")
+      | Ok target ->
+          List.fold_left
+            (fun acc (path, replacement) ->
+              let* target = acc in
+              splice target path replacement |> content)
+            (Ok target) installed
+    in
+    apply [] decisions
+
+  let compose ?(resolutions = []) repository pool ~parents ~revisions =
+    compose_with (context repository pool) ~parents ~revisions ~resolutions
 
   let event pool id =
     let* body = body pool id in
     match body.Core.payload with
     | Core.Branch_event value -> Ok value
-    | Core.Shared_revision _ | Core.Accepted_version _ ->
+    | Core.Shared_revision _ | Core.Accepted_version _
+    | Core.Resolution_revision _ ->
         Error (Invalid_graph "expected a branch event")
 
   let rec event_targets pool seen ids =
@@ -963,7 +1128,9 @@ module Graph = struct
                     | Core.Accepted_version accepted ->
                         Core.Object_id.equal accepted.Core.result_snapshot
                           value.Core.base_snapshot
-                    | Core.Shared_revision _ | Core.Branch_event _ -> false)
+                    | Core.Shared_revision _ | Core.Branch_event _
+                    | Core.Resolution_revision _ ->
+                        false)
                   (Core.records pool)
               in
               let* from_dependency =
@@ -984,6 +1151,9 @@ module Graph = struct
                   (Invalid_graph
                      "shared revision base is not a recorded \
                       accepted/dependency snapshot")
+          | Core.Resolution_revision value ->
+              let* _ = validate_resolution context value in
+              Ok ()
           | Core.Accepted_version _ | Core.Branch_event _ -> Ok ())
         (Ok ()) (Core.records pool)
     in
@@ -1003,21 +1173,19 @@ module Graph = struct
             (Ok ()) value.Core.accepted_parents
         in
         let* () =
-          if
-            value.Core.resolutions = []
-            && value.Core.policy_heads = []
-            && value.Core.review_evidence = []
+          if value.Core.policy_heads = [] && value.Core.review_evidence = []
           then Ok ()
           else
             Error
               (Decision
-                 "required policy/review/resolution semantics are unsupported \
-                  by this verifier")
+                 "required policy/review semantics are unsupported by this \
+                  verifier")
         in
         let* actual = load context value.Core.result_snapshot in
         let* expected =
           compose_with context ~parents:value.Core.accepted_parents
             ~revisions:value.Core.chosen_revisions
+            ~resolutions:value.Core.resolutions
         in
         if differences expected actual <> [] then
           Error
@@ -1035,14 +1203,18 @@ module Graph = struct
           let* () = acc in
           match body.Core.payload with
           | Core.Accepted_version _ -> verify id
-          | Core.Shared_revision _ | Core.Branch_event _ -> Ok ())
+          | Core.Shared_revision _ | Core.Branch_event _
+          | Core.Resolution_revision _ ->
+              Ok ())
         (Ok ()) (Core.records pool)
     in
     List.fold_left
       (fun acc (_, body) ->
         let* () = acc in
         match body.Core.payload with
-        | Core.Shared_revision _ | Core.Accepted_version _ -> Ok ()
+        | Core.Shared_revision _ | Core.Accepted_version _
+        | Core.Resolution_revision _ ->
+            Ok ()
         | Core.Branch_event value -> (
             match value.Core.action with
             | Core.Rename -> Ok ()

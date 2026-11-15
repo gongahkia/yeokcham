@@ -1,4 +1,4 @@
-"""Regenerate P1 vectors independently with Python CBOR and OpenSSL Ed25519.
+"""Regenerate core vectors (P1 and P3 resolution) independently with Python CBOR and OpenSSL Ed25519.
 
 Run from the repository root with Python 3 and OpenSSL on PATH. The fixed seed
 is public test material. No Yeokcham implementation is imported or executed.
@@ -53,6 +53,9 @@ def main():
         ("accepted-version", 42, [b"a" * 32, b"b" * 32],
          [b"m" * 16, [b"a" * 32, b"b" * 32], [b"r" * 32], [],
           b"z" * 32, "line-hunks-v1", [], []]),
+        ("resolution-revision", 47, [b"a" * 32, b"b" * 32, b"r" * 32],
+         [b"m" * 16, [b"a" * 32, b"b" * 32], [b"r" * 32],
+          [b"a" * 32, b"b" * 32, b"r" * 32], b"s" * 32, b"b" * 32, b"z" * 32]),
         ("branch-event", 43, [b"a" * 32, b"b" * 32],
          [b"m" * 16, [b"a" * 32, b"b" * 32], 3, [b"v" * 32], None]),
     ]

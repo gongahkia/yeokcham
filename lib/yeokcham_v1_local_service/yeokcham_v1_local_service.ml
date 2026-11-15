@@ -5414,7 +5414,8 @@ let[@warning "-4"] inspect_local_status ~root =
                       match body.Model.Core.payload with
                       | Model.Core.Shared_revision value -> Some (id, value)
                       | Model.Core.Accepted_version _
-                      | Model.Core.Branch_event _ ->
+                      | Model.Core.Branch_event _
+                      | Model.Core.Resolution_revision _ ->
                           None));
             status_publications =
               (match loaded.Store.local with

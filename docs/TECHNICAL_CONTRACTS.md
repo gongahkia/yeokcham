@@ -582,6 +582,7 @@ checks cross-record constraints; no consumer invents a parallel encoding.
 | Shared revision | change ID, previous revision IDs, base snapshot, result snapshot, declared edit-scope root, dependency revision IDs |
 | Accepted version | branch ID, accepted parent IDs, chosen revision IDs, resolution IDs, result snapshot, composition profile, policy heads, review-evidence IDs |
 | Branch event | branch ID, previous branch-event IDs, action, target accepted IDs, display name |
+| Resolution revision | branch ID, exact accepted head IDs, exact chosen revision IDs, complete superseded-variant IDs, single-path decision-scope root, comparison snapshot, replacement snapshot |
 | Review version | request ID, previous request-version IDs, target branch ID, submitted revision IDs, comparison snapshot, affected-path context root, title, description |
 | Review event | request-version ID, previous events by this reviewer, action, text, related event IDs |
 | Repository policy | previous policy IDs, reviews-required flag, minimum approvals, renewed-approval flag |
@@ -665,6 +666,14 @@ return a decision instead of synthesizing a hidden base. Combine independent
 edits as a set; sorting IDs stabilizes output, never chooses a conflict winner.
 Explicit resolutions name all superseded variants and exact replacement bytes.
 Apply the same rules when joining concurrent accepted histories.
+
+A resolution revision names the entire exact accepted/chosen context, including
+equal-content alternatives. Its comparison is the unique recorded common accepted
+base; its replacement changes only the one declared path/subtree. Choosing the
+comparison contents or deletion is permitted. Acceptance must prove that the
+decision addresses an actual conflict in that context, preserve other automatic
+changes, and reject overlapping, unused or stale decisions. A private-workspace
+decision belongs to the private integration plan, not a public resolution record.
 
 Publishing records the correspondence between a shared revision and its local
 history node. To preserve private work, select the most recent ancestor node

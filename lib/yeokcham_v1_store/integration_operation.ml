@@ -394,6 +394,19 @@ let validate_update ~previous t =
       "acknowledgement must follow an independent committed-state transition"
   else validate_recovery_update ~previous t
 
+let[@warning "-4"] control_record_ids = function
+  | E.Array xs when List.length xs <= Core.max_references ->
+      let* xs =
+        traverse
+          (function
+            | E.Bytes raw -> Core.Record_id.of_raw raw |> model
+            | _ -> Error "malformed integration control reference")
+          xs
+      in
+      if xs = List.sort_uniq Core.Record_id.compare xs then Ok xs
+      else Error "noncanonical integration control references"
+  | _ -> Error "invalid integration control references"
+
 let[@warning "-4"] plan_outputs store scope plan plan_object =
   let* envelope =
     Raw.get ~max_bytes:(8 * 1024 * 1024) store plan_object
@@ -423,7 +436,7 @@ let[@warning "-4"] plan_outputs store scope plan plan_object =
               _events;
               _heads;
               _revisions;
-              E.Array [];
+              E.Array resolutions;
               _authority;
               E.Array [];
               E.Array [];
@@ -445,6 +458,8 @@ let[@warning "-4"] plan_outputs store scope plan plan_object =
           E.Array [ E.Integer 0L; E.Bytes accepted; E.Bytes target ];
           E.Bool false;
         ] ->
+        let* resolution_values = array resolutions in
+        let* _ = control_record_ids resolution_values in
         let* repository = Core.Repository_id.of_raw repository |> model in
         let* branch = Core.Branch_id.of_raw branch |> model in
         let* workspace = Core.Workspace_id.of_raw workspace |> model in
@@ -945,19 +960,6 @@ let[@warning "-4"] control_inputs store t =
     Raw.get ~max_bytes:(8 * 1024 * 1024) store t.plan_object
     |> Result.map_error Raw.error_to_string
   in
-  let ids = function
-    | E.Array xs when List.length xs <= Core.max_references ->
-        let* xs =
-          traverse
-            (function
-              | E.Bytes raw -> Core.Record_id.of_raw raw |> model
-              | _ -> Error "malformed integration control reference")
-            xs
-        in
-        if xs = List.sort_uniq Core.Record_id.compare xs then Ok xs
-        else Error "noncanonical integration control references"
-    | _ -> Error "invalid integration control references"
-  in
   match Envelope.payload envelope with
   | E.Array
       [
@@ -969,7 +971,7 @@ let[@warning "-4"] control_inputs store t =
             events;
             heads;
             revisions;
-            _resolutions;
+            resolutions;
             _authority;
             _policies;
             _evidence;
@@ -983,10 +985,11 @@ let[@warning "-4"] control_inputs store t =
         _ready;
         _no_op;
       ] ->
-      let* events = ids events in
-      let* heads = ids heads in
-      let* revisions = ids revisions in
-      Ok (events, heads, revisions)
+      let* events = control_record_ids events in
+      let* heads = control_record_ids heads in
+      let* revisions = control_record_ids revisions in
+      let* resolutions = control_record_ids resolutions in
+      Ok (events, heads, revisions, resolutions)
   | _ -> Error "malformed integration control inputs"
 
 let[@warning "-4"] validate ~store ~authority pool operations =
@@ -1060,7 +1063,7 @@ let[@warning "-4"] validate ~store ~authority pool operations =
             Composition.Graph.validate store candidate
             |> Result.map_error Composition.Graph.error_to_string
         in
-        let* events, heads, revisions = control_inputs store t in
+        let* events, heads, revisions, resolutions = control_inputs store t in
         let* () =
           match staged with
           | [] ->
@@ -1069,7 +1072,7 @@ let[@warning "-4"] validate ~store ~authority pool operations =
                 |> Result.map_error Composition.Graph.error_to_string
               in
               if
-                heads = [ t.accepted ]
+                resolutions = [] && heads = [ t.accepted ]
                 && List.for_all
                      (fun id ->
                        List.exists (Core.Record_id.equal id) represented)
@@ -1108,7 +1111,7 @@ let[@warning "-4"] validate ~store ~authority pool operations =
                 && List.length event = 1
                 && version.Core.accepted_parents = heads
                 && version.Core.chosen_revisions = revisions
-                && version.Core.resolutions = []
+                && version.Core.resolutions = resolutions
                 && version.Core.policy_heads = []
                 && version.Core.review_evidence = []
               then Ok ()
