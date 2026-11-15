@@ -1,5 +1,6 @@
 module Safe_apply = Safe_apply
 module Text_diff = Text_diff
+module Share = Native_share
 
 (** Local V1 saved-work transitions and verified offline-package receive.
 
@@ -9,6 +10,7 @@ module Text_diff = Text_diff
     part of this module. *)
 
 type error =
+  | Share_error of Share.error
   | History_error of string
   | Safe_application_error of string
   | Selection_conflict of string
@@ -766,6 +768,12 @@ type pending_local_recovery = {
 
 type local_status = {
   saved_metadata : status;
+  status_basis : Yeokcham_v1_model.Core.Record_id.t option;
+  status_shared_revisions :
+    (Yeokcham_v1_model.Core.Record_id.t
+    * Yeokcham_v1_model.Core.shared_revision)
+    list;
+  status_publications : Yeokcham_v1_store.Local.publication list;
   status_branch : branch_listing option;
   status_cursor : state_view;
   status_head : string;
@@ -899,7 +907,26 @@ val recover_operation :
   operation:string option ->
   (recovery_result option, error) result
 
+val share_selected :
+  root:string ->
+  paths:string list list ->
+  update:Yeokcham_v1_model.Core.Change_id.t option ->
+  title:string option ->
+  dry_run:bool ->
+  signing_capability:Yeokcham_v1_trust.signing_capability option ->
+  (Share.result, error) result
+
 module For_test : sig
+  val share_selected :
+    observe:(application_boundary -> unit) ->
+    root:string ->
+    paths:string list list ->
+    update:Yeokcham_v1_model.Core.Change_id.t option ->
+    title:string option ->
+    dry_run:bool ->
+    signing_capability:Yeokcham_v1_trust.signing_capability option ->
+    (Share.result, error) result
+
   val copy_out :
     observe:(application_boundary -> unit) ->
     root:string ->

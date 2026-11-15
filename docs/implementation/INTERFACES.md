@@ -932,3 +932,51 @@ These APIs stage metadata. The actual share service/CLI must still atomically
 publish capture/history, signed records and receipts; transport acknowledgements
 and recoverable integration operations remain later P3 work. No exchange or
 integration success follows from this checkpoint.
+
+### P3 selected-publication service and CLI (in progress)
+
+`Local_service.Share` aliases `Native_share`. `Share.prepare ~store ~loaded
+~observed ~observation ~paths ~update ~title` returns an opaque prepared value;
+`preview` exposes its domain result. `stage ~store ~signing_capability` returns
+project/history/local state plus the result, without publishing the mutable root.
+`Local_service.share_selected ~root ~paths ~update ~title ~dry_run
+~signing_capability` holds the existing workspace writer boundary and publishes
+capture/history, signed revision and private receipt atomically. Preview needs
+no signing capability. Fresh change/operation identities are generated only
+when recording; source history identity in a dirty preview is provisional.
+
+New changes use the recorded private accepted basis; explicit updates select
+one causal change head and preserve unselected prior public fields. Concurrent
+change/authority heads refuse with a choice. Missing content, invalid selection,
+policy and metadata errors remain distinct. Current active local author/key
+checks precede signing; the existing trust admission still verifies the result.
+`Snapshot.Observation.ignored ~path ~directory` evaluates rules retained by that
+successful capture, including ignored formerly-public paths absent from its
+snapshot. It never rereads mutable ignore files while constructing public work.
+
+The retry intent is SHA-256 over domain `yeokcham/local-share-intent/v1\0` and
+canonical ordered CBOR `[1, repository, workspace, effective_source_sequence,
+branch, accepted_basis, observed_snapshot, selected_paths, update_change_or_null,
+title]`. Effective source is the existing current node or the unpublished next
+node for changed bytes, so an acknowledged or lost-response retry resolves the
+same intent after root publication. Unchanged new sharing is an honest no-op;
+explicit updates with changed inputs create a new immutable version. A
+same-content update may contribute an empty scope, which claims no new local
+path correspondence. Its snapshot-only witness still binds the source node.
+
+The ordinary CLI supports `share [PATH...]`, `--title`, `--update CHANGE`,
+`--preview`/`--dry-run`, root-relative paths and literal `--` paths. No extra
+confirmation is required for an explicit share. Advanced `--change/--revision`
+V1 sharing remains a separate parser/record family. Native output uses domain
+schema 2 with generated IDs, source/provisional capture information, exact
+base/public snapshots and contributed/full public paths; transfer is pending
+and acceptance is false. Status exposes the verified native revisions, current
+private basis and retained local publication receipts separately from branch
+heads. Share hooks run after a new publication, not preview or repeated intent.
+
+Actual root-boundary fault injection is available through trusted
+`Store.For_test.save_collaborative` callbacks and the service's existing
+`Before_metadata_publish`/`After_metadata_publish` seam. The fork tests verify
+that history never commits separately from its revision/receipt and that a
+lost response adds no duplicate record, root update or history node. This does
+not yet complete public export, transfer acknowledgement, clone or integration.

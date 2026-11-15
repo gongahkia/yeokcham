@@ -180,7 +180,10 @@ let proof repository pool ~revision:id ~observed ~contributed_scope =
   let* paths =
     Composition.Scope.load repository contributed_scope |> composition
   in
-  if paths = [] || paths <> Composition.differences before after then
+  if
+    (paths = [] && revision.Core.previous_revisions = [])
+    || paths <> Composition.differences before after
+  then
     Error
       "publication contribution must equal the newly selected public \
        differences"

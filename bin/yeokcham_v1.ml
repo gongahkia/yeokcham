@@ -52,6 +52,14 @@ type requested_format = Text_format | Json_format
 
 let raw_arguments () = Array.to_list Sys.argv
 
+let rec legacy_share_arguments = function
+  | [] | "--" :: _ -> false
+  | ("--change" | "--revision") :: _ -> true
+  | ("--root" | "--title" | "--update" | "--authority" | "--format" | "--color")
+    :: _ :: rest ->
+      legacy_share_arguments rest
+  | _ :: rest -> legacy_share_arguments rest
+
 let requested_format () =
   let rec loop = function
     | "--" :: _ -> Text_format
@@ -113,28 +121,29 @@ let command_name () =
   | [] -> "cli"
 
 let native_json_command command =
-  List.mem command
-    [
-      "status";
-      "history";
-      "diff";
-      "changes";
-      "save";
-      "ignore-explain";
-      "branch";
-      "branch-list";
-      "branch-create";
-      "switch";
-      "restore";
-      "verify";
-      "repair-plan";
-      "repair-apply";
-      "repair-defer";
-      "hook-list";
-      "undo-tree";
-      "undo";
-      "redo";
-    ]
+  (command = "share" && not (legacy_share_arguments (raw_arguments ())))
+  || List.mem command
+       [
+         "status";
+         "history";
+         "diff";
+         "changes";
+         "save";
+         "ignore-explain";
+         "branch";
+         "branch-list";
+         "branch-create";
+         "switch";
+         "restore";
+         "verify";
+         "repair-plan";
+         "repair-apply";
+         "repair-defer";
+         "hook-list";
+         "undo-tree";
+         "undo";
+         "redo";
+       ]
 
 let json_stdout_destination : Unix.file_descr option ref = ref None
 let public_warnings : string list ref = ref []
@@ -158,22 +167,23 @@ let print_json bytes =
           Out_channel.flush output)
 
 let domain_command command =
-  List.mem command
-    [
-      "status";
-      "history";
-      "diff";
-      "changes";
-      "save";
-      "ignore-explain";
-      "branch";
-      "branch-list";
-      "branch-create";
-      "switch";
-      "undo";
-      "redo";
-      "restore";
-    ]
+  (command = "share" && not (legacy_share_arguments (raw_arguments ())))
+  || List.mem command
+       [
+         "status";
+         "history";
+         "diff";
+         "changes";
+         "save";
+         "ignore-explain";
+         "branch";
+         "branch-list";
+         "branch-create";
+         "switch";
+         "undo";
+         "redo";
+         "restore";
+       ]
 
 let local_failure_context :
     (unit -> Yojson.Safe.t * Cli_data.next_action list * string option) option
@@ -323,6 +333,23 @@ let action ?(confirmation_required = false) ~root arguments explanation =
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.Share_error (Service.Share.Invalid message) ->
+      fail_with_status 2 "invalid-share" message
+  | Service.Share_error (Service.Share.Choice message) ->
+      fail_with_status 3 "share-choice-required" message
+  | Service.Share_error (Service.Share.Policy message) ->
+      fail_with_status 7 "share-authority-blocked" message
+  | Service.Share_error
+      (Service.Share.Content (Yeokcham_v1_composition.Invalid_input message)) ->
+      fail_with_status 2 "invalid-share-selection" message
+  | Service.Share_error
+      (Service.Share.Content (Yeokcham_v1_composition.Conflicts paths)) ->
+      fail_with_status 4 "share-selection-conflict"
+        ("Selected paths require a decision: "
+        ^ String.concat ", " (List.map (String.concat "/") paths))
+  | Service.Share_error
+      (Service.Share.Content (Yeokcham_v1_composition.Unavailable message)) ->
+      fail_with_status 5 "share-content-unavailable" message
   | Service.History_error message
     when String.starts_with ~prefix:"choose a redo branch" message
          || String.starts_with ~prefix:"choose a recovery operation" message ->
@@ -496,7 +523,8 @@ let usage_text =
   \  yeokcham workspace activate [--root PATH]\n\
   \  yeokcham workspace update [--root PATH] [--replace]\n\
   \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
-  \  yeokcham share [--root PATH] --change ID --revision ID [--authority EPOCH]\n\
+  \  yeokcham share [PATH...] [--root PATH] [--title TITLE] [--update CHANGE] \
+   [--preview]\n\
   \  yeokcham withdraw [--root PATH] --change ID\n\
   \  yeokcham resolve [--root PATH] --decision ID --change ID --revision ID \
    [--tree PATH] [--authority EPOCH]\n\
@@ -739,10 +767,14 @@ let help_for = function
          Start a new local draft from the current local recovery state."
   | [ "share" ] ->
       Some
-        "usage: yeokcham share [--root PATH] --change ID --revision ID \
-         [--authority EPOCH]\n\n\
-         Explicitly sign and share the active draft delta as a revision. An \
-         authority fork requires --authority."
+        "usage: yeokcham share [PATH...] [--root PATH] [--title TITLE] \
+         [--update CHANGE] [--preview]\n\n\
+         Capture current disk contents privately and record only selected \
+         included changes. With no paths, select all included changes. Change \
+         and revision identities are generated. --update explicitly revises a \
+         change; --preview signs and publishes nothing. Local recording and \
+         pending transfer are separate from acceptance. Advanced V1 sharing \
+         with --change ID --revision ID [--authority EPOCH] remains available."
   | [ "withdraw" ] ->
       Some
         "usage: yeokcham withdraw [--root PATH] --change ID\n\n\
@@ -3889,6 +3921,44 @@ let run_status arguments =
         ("saved", json_state status.Service.status_cursor);
         ("state_head", `String status.Service.status_head);
         ("branch", Option.value branch ~default:`Null);
+        ( "working_basis",
+          json_optional
+            (fun id -> `String (Core.Record_id.to_hex id))
+            status.Service.status_basis );
+        ( "shared_revisions",
+          `List
+            (List.map
+               (fun (id, revision) ->
+                 `Assoc
+                   [
+                     ("revision_id", `String (Core.Record_id.to_hex id));
+                     ( "change_id",
+                       `String (Core.Change_id.to_hex revision.Core.change) );
+                     ( "previous_revisions",
+                       json_ids revision.Core.previous_revisions );
+                     ( "base_snapshot",
+                       `String
+                         (Core.Object_id.to_hex revision.Core.base_snapshot) );
+                     ( "result_snapshot",
+                       `String
+                         (Core.Object_id.to_hex revision.Core.result_snapshot)
+                     );
+                   ])
+               status.Service.status_shared_revisions) );
+        ( "local_publications",
+          `List
+            (List.map
+               (fun p ->
+                 `Assoc
+                   [
+                     ( "operation_id",
+                       `String (Core.Operation_id.to_hex p.Local.operation) );
+                     ( "revision_id",
+                       `String (Core.Record_id.to_hex p.Local.revision) );
+                     ("title", `String p.Local.title);
+                     ("transfer_state", `String "pending");
+                   ])
+               status.Service.status_publications) );
         ("capture", capture);
         ("uncaptured", uncaptured);
         ("changes", changed_paths);
@@ -3971,6 +4041,23 @@ let run_status arguments =
       render_status
         ~uncaptured_known:(Result.is_ok status.Service.capture_observation)
         status.Service.saved_metadata;
+      Option.iter
+        (fun basis ->
+          Printf.printf "working-basis %s\n" (Core.Record_id.to_hex basis))
+        status.Service.status_basis;
+      List.iter
+        (fun (id, revision) ->
+          Printf.printf "shared-revision %s change:%s\n"
+            (Core.Record_id.to_hex id)
+            (Core.Change_id.to_hex revision.Core.change))
+        status.Service.status_shared_revisions;
+      List.iter
+        (fun p ->
+          Printf.printf "publication %s revision:%s transfer:pending title:%s\n"
+            (Core.Operation_id.to_hex p.Local.operation)
+            (Core.Record_id.to_hex p.Local.revision)
+            (Output.display_value p.Local.title))
+        status.Service.status_publications;
       Printf.printf "cursor %s\n"
         status.Service.status_cursor.Service.state_name;
       (match status.Service.status_branch with
@@ -5306,7 +5393,7 @@ let run_new_draft arguments =
   |> require_ok Service.error_to_string
   |> render_status
 
-let run_share arguments =
+let run_legacy_share arguments =
   let root, change, revision, authority_epoch = parse_share arguments in
   let change =
     parse_identifier "invalid change identifier" Model.Change_id.of_string
@@ -5321,6 +5408,196 @@ let run_share arguments =
     ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
+
+let parse_selected_share arguments =
+  let rec loop root title update preview paths = function
+    | [] ->
+        ( Option.value root ~default:default_root,
+          title,
+          update,
+          preview,
+          List.rev paths )
+    | "--" :: remaining ->
+        ( Option.value root ~default:default_root,
+          title,
+          update,
+          preview,
+          List.rev paths @ remaining )
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) title update preview paths rest
+    | "--title" :: value :: rest when Option.is_none title ->
+        loop root (Some value) update preview paths rest
+    | "--update" :: value :: rest when Option.is_none update ->
+        loop root title (Some value) preview paths rest
+    | ("--preview" | "--dry-run") :: rest when not preview ->
+        loop root title update true paths rest
+    | value :: _ when String.starts_with ~prefix:"-" value -> usage ()
+    | value :: rest -> loop root title update preview (value :: paths) rest
+  in
+  let root, title, update, preview, paths =
+    loop None None None false [] arguments
+  in
+  let normalize text =
+    if text = "" || not (Filename.is_relative text) then
+      fail_with "invalid-share-path"
+        "Share paths must be relative to the workspace root.";
+    let rec trim_start text =
+      if String.starts_with ~prefix:"./" text then
+        trim_start (String.sub text 2 (String.length text - 2))
+      else text
+    in
+    let text = trim_start text in
+    let text = if text = "" then "." else text in
+    let rec trim_end length =
+      if length > 0 && text.[length - 1] = '/' then trim_end (length - 1)
+      else length
+    in
+    let text = String.sub text 0 (trim_end (String.length text)) in
+    if text = "." then []
+    else
+      let parts = String.split_on_char '/' text in
+      if
+        List.exists
+          (fun part ->
+            part = "" || part = "." || part = ".."
+            || String.contains part '\000')
+          parts
+      then
+        fail_with "invalid-share-path"
+          "Share paths cannot contain empty, dot, parent, or NUL components.";
+      parts
+  in
+  let paths = List.map normalize paths in
+  let paths = if List.mem [] paths then [] else paths in
+  let update =
+    Option.map
+      (fun value ->
+        match Core.Change_id.of_hex value with
+        | Ok id -> id
+        | Error error ->
+            fail_with "invalid-change-identity" (Core.error_to_string error))
+      update
+  in
+  (root, title, update, preview, paths)
+
+let run_share arguments =
+  if legacy_share_arguments arguments then (
+    run_legacy_share arguments;
+    true)
+  else
+    let root, title, update, dry_run, paths = parse_selected_share arguments in
+    let signing_capability =
+      if dry_run then None
+      else
+        let identity = Service.identity ~root |> require_local in
+        match
+          V1_signer.load ~root (Trust.device_id identity.Service.device)
+        with
+        | Ok capability -> Some capability
+        | Error error ->
+            fail_with_status 5 "signing-provider-unavailable"
+              (V1_signer.error_to_string error)
+    in
+    let result =
+      Service.share_selected ~root ~paths ~update ~title ~dry_run
+        ~signing_capability
+      |> require_local
+    in
+    let share = result in
+    let module Share = Service.Share in
+    let operation_id =
+      Option.map
+        (fun p -> Core.Operation_id.to_hex p.Local.operation)
+        share.Share.publication
+    in
+    let optional encode =
+      Option.fold ~none:`Null ~some:(fun value -> `String (encode value))
+    in
+    let paths values =
+      `List
+        (List.map (fun path -> json_byte_path (String.concat "/" path)) values)
+    in
+    let recorded = Option.is_some share.Share.publication in
+    let code, message =
+      if dry_run then
+        ( "share-preview",
+          "Selected public work previewed; no revision or history was \
+           published." )
+      else if share.Share.repeated then
+        ( "share-repeated",
+          "The recorded publication was reused; transfer is pending." )
+      else if recorded then
+        ( "share-recorded",
+          "Selected work was recorded locally; transfer is pending." )
+      else ("share-unchanged", "No newly selected public changes were recorded.")
+    in
+    (match requested_format () with
+    | Json_format ->
+        domain_json ?operation_id
+          ~outcome:
+            (if (not dry_run) && (share.Share.repeated || not recorded) then
+               `Unchanged
+             else `Completed)
+          ~code ~message
+          ~data:
+            (`Assoc
+               [
+                 ("preview", `Bool dry_run);
+                 ("repeated", `Bool share.Share.repeated);
+                 ("change_id", optional Core.Change_id.to_hex share.Share.change);
+                 ( "revision_id",
+                   optional Core.Record_id.to_hex share.Share.revision );
+                 ("title", `String share.Share.title);
+                 ( "workspace_id",
+                   `String
+                     (Core.Workspace_id.to_hex
+                        (Core.History_id.workspace share.Share.source)) );
+                 ( "source_sequence",
+                   `String
+                     (Int64.to_string
+                        (Core.History_id.sequence share.Share.source)) );
+                 ( "source_provisional",
+                   `Bool (dry_run && share.Share.captures_unsaved) );
+                 ( "observed_snapshot",
+                   `String (Core.Object_id.to_hex share.Share.observed) );
+                 ( "base_snapshot",
+                   `String (Core.Object_id.to_hex share.Share.base_snapshot) );
+                 ( "public_snapshot",
+                   `String (Core.Object_id.to_hex share.Share.public_snapshot)
+                 );
+                 ("contributed_paths", paths share.Share.contributed_paths);
+                 ("public_paths", paths share.Share.public_paths);
+                 ("captures_unsaved", `Bool share.Share.captures_unsaved);
+                 ( "transfer_state",
+                   `String (if recorded then "pending" else "none") );
+                 ("accepted", `Bool false);
+               ])
+          ~next_actions:
+            [
+              action ~root [ "status" ]
+                "Inspect local capture and shared-work state.";
+            ]
+          ()
+    | Text_format ->
+        print_endline message;
+        Printf.printf "title %s\n" (Output.display_value share.Share.title);
+        Option.iter
+          (fun id -> Printf.printf "change %s\n" (Core.Change_id.to_hex id))
+          share.Share.change;
+        Option.iter
+          (fun id -> Printf.printf "revision %s\n" (Core.Record_id.to_hex id))
+          share.Share.revision;
+        Option.iter (fun id -> Printf.printf "operation %s\n" id) operation_id;
+        List.iter
+          (fun path ->
+            Printf.printf "selected %s\n"
+              (Output.display_value (String.concat "/" path)))
+          share.Share.contributed_paths;
+        Printf.printf "public-snapshot %s\n"
+          (Core.Object_id.to_hex share.Share.public_snapshot);
+        if recorded then
+          print_endline "transfer pending; shared acceptance is separate");
+    (not dry_run) && recorded && not share.Share.repeated
 
 let parse_package_create arguments =
   let rec loop root destination = function
@@ -6374,8 +6651,7 @@ let dispatch () =
       observe_after_success [ "draft"; "new" ] arguments (fun () ->
           run_new_draft arguments)
   | _ :: "share" :: arguments ->
-      observe_after_success [ "share" ] arguments (fun () ->
-          run_share arguments)
+      observe_after_commit [ "share" ] arguments (fun () -> run_share arguments)
   | _ :: "withdraw" :: arguments ->
       observe_after_success [ "withdraw" ] arguments (fun () ->
           run_withdraw arguments)

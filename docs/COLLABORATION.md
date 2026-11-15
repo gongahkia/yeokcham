@@ -5,6 +5,35 @@ transfer boundaries. It is not a Git migration, a general clone recipe, or an
 online membership workflow. Start with the local recovery tutorial before
 adding another person.
 
+## Selected native publication (P3 in progress)
+
+Ordinary sharing now generates its change/revision identities and captures disk
+contents without a separate save:
+
+```sh
+yeokcham share notes.txt images/ --preview
+yeokcham share notes.txt images/ --title "Update project notes"
+yeokcham share notes.txt --update CHANGE_ID --title "Revise project notes"
+yeokcham status
+```
+
+Paths are relative to the workspace root. With no paths (or `.`), select all
+included changes. Native captured ignore rules apply; explicitly selecting an
+excluded path refuses and points to `ignore explain`. Preview publishes no
+history or signed revision and does not require the signing provider. The actual
+command authorizes the selected publication; it does not ask again. Unselected
+contents stay in private local capture/history. Sharing does not accept work or
+change ordinary files. A recorded identical request reuses its revision and
+operation identities. An explicit update with changed inputs creates another
+immutable version, including equal contents with a changed title.
+
+Status shows native revision identities, the private working basis and local
+publication receipts separately from accepted heads. At this checkpoint transfer
+is pending: the legacy package/relay journeys below carry the earlier V1 record
+family and do not yet export these new Core records. Native clone/exchange and
+journaled integration remain required before P3 is complete. Do not substitute
+the old package commands for verification of the new selected-publication loop.
+
 ## Two people, offline package
 
 Assume Alice already owns an initial V1 repository and Bob will use a separate

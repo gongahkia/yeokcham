@@ -972,14 +972,8 @@ let save ?history ?local repository ~expected ~project =
     ~after_publish:(fun () -> ())
     ?history ?local repository ~expected ~project
 
-module For_test = struct
-  let save ~before_publish ~after_publish repository ~expected ~project =
-    save_at_boundaries ~before_publish ~after_publish repository ~expected
-      ~project
-end
-
-let save_collaborative ?history ?local repository ~expected ~project
-    ~collaboration =
+let save_collaborative_at_boundaries ~before_publish ~after_publish ?history
+    ?local repository ~expected ~project ~collaboration =
   let* collaboration = validate_collaboration ~project collaboration in
   let* _, _, existing_history, existing_local = previous repository expected in
   let* history = observed_history ?history existing_history project in
@@ -1006,11 +1000,13 @@ let save_collaborative ?history ?local repository ~expected ~project
     store_with_history ?local repository.store project (Some collaboration)
       history
   in
+  before_publish ();
   let* head =
     Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
     |> Result.map_error (fun error -> Store_error error)
   in
+  after_publish ();
   Ok
     {
       project;
@@ -1020,6 +1016,21 @@ let save_collaborative ?history ?local repository ~expected ~project
       head;
       object_id;
     }
+
+let save_collaborative ?history ?local repository ~expected ~project
+    ~collaboration =
+  save_collaborative_at_boundaries
+    ~before_publish:(fun () -> ())
+    ~after_publish:(fun () -> ())
+    ?history ?local repository ~expected ~project ~collaboration
+
+module For_test = struct
+  let save ~before_publish ~after_publish repository ~expected ~project =
+    save_at_boundaries ~before_publish ~after_publish repository ~expected
+      ~project
+
+  let save_collaborative = save_collaborative_at_boundaries
+end
 
 let init_local_collaborative_with ~root ~bootstrap =
   let metadata = repository_metadata_path root in

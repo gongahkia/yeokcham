@@ -879,7 +879,7 @@ module Tree = struct
     let rec validate_references = function
       | [] -> Ok ()
       | (_, File { content; _ }) :: rest ->
-          let* _ = Content.load repository content in
+          let* () = Content.verify repository content in
           validate_references rest
       | (_, Directory child) :: rest ->
           let* _ = load repository child in
@@ -1515,6 +1515,7 @@ type capture_stage = Before_open | After_read | Before_publish
 type observation =
   | Observed_entry of string list * string option
   | Observed_directory of string list * string * string list
+  | Observed_rules of string list * Ignore.t
 
 let native_observation path operation f =
   try Ok (f ()) with
@@ -1614,6 +1615,7 @@ let scan_with_observer ~complete ~observe ~excluded_root_names ~root ~store =
               observations :=
                 Observed_directory (relative, stamp, before) :: !observations;
               let* rules = load_rules rules relative fd in
+              observations := Observed_rules (relative, rules) :: !observations;
               let rec scan_entries reversed = function
                 | [] -> Tree.create (List.rev reversed)
                 | name :: rest ->
@@ -1709,6 +1711,7 @@ let scan_with_observer ~complete ~observe ~excluded_root_names ~root ~store =
                 (fun result observation ->
                   let* () = result in
                   match observation with
+                  | Observed_rules _ -> Ok ()
                   | Observed_entry (path, expected) ->
                       verify_entry path expected
                   | Observed_directory (path, stamp, expected) ->
@@ -1776,7 +1779,7 @@ module Observation = struct
       (function
         | Observed_entry (path, Some stamp) -> Some (path, stamp)
         | Observed_directory (path, stamp, _) -> Some (path, stamp)
-        | Observed_entry (_, None) -> None)
+        | Observed_entry (_, None) | Observed_rules _ -> None)
       observations
     |> List.sort_uniq compare
 
@@ -1786,7 +1789,7 @@ module Observation = struct
         | Observed_entry (path, stamp)
           when List.rev path |> List.hd = ".yeokchamignore" ->
             Some (path, stamp)
-        | Observed_entry _ | Observed_directory _ -> None)
+        | Observed_entry _ | Observed_directory _ | Observed_rules _ -> None)
       observations
     |> List.sort_uniq compare
 
@@ -1794,6 +1797,27 @@ module Observation = struct
     List.filter_map
       (function
         | Observed_directory (path, stamp, names) -> Some (path, stamp, names)
-        | Observed_entry _ -> None)
+        | Observed_entry _ | Observed_rules _ -> None)
       observations
+
+  let ignored observations ~path ~directory =
+    let rec prefix base path =
+      match (base, path) with
+      | [], _ -> true
+      | part :: base, name :: path when part = name -> prefix base path
+      | _ :: _, [] | _ :: _, _ :: _ -> false
+    in
+    let _, rules =
+      List.fold_left
+        (fun (depth, rules) -> function
+          | Observed_rules (base, candidate)
+            when List.length base > depth && base <> path && prefix base path ->
+              (List.length base, candidate)
+          | Observed_rules _ | Observed_entry _ | Observed_directory _ ->
+              (depth, rules))
+        (-1, Ignore.empty) observations
+    in
+    List.mem ".yeokcham" path
+    || (match path with ".git" :: _ -> true | [] | _ :: _ -> false)
+    || (Ignore.evaluate rules ~path ~directory).Ignore.ignored
 end

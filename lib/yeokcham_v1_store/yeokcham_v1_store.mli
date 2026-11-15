@@ -142,6 +142,17 @@ val save_collaborative :
   (loaded, error) result
 
 module For_test : sig
+  val save_collaborative :
+    before_publish:(unit -> unit) ->
+    after_publish:(unit -> unit) ->
+    ?history:Yeokcham_v1_undo.t ->
+    ?local:Local.t ->
+    repository ->
+    expected:Yeokcham_store.Mutable_ref.t ->
+    project:Yeokcham_v1_model.project ->
+    collaboration:collaboration ->
+    (loaded, error) result
+
   val save :
     before_publish:(unit -> unit) ->
     after_publish:(unit -> unit) ->

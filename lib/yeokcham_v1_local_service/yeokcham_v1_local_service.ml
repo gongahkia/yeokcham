@@ -1,5 +1,6 @@
 module Safe_apply = Safe_apply
 module Text_diff = Text_diff
+module Share = Native_share
 module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model
 module Journal = Yeokcham_v1_restore_journal
@@ -28,6 +29,7 @@ end)
 module Name_map = Map.Make (String)
 
 type error =
+  | Share_error of Share.error
   | History_error of string
   | Safe_application_error of string
   | Selection_conflict of string
@@ -253,6 +255,7 @@ type workspace_update =
   | Workspace_updated of workspace_materialization
 
 let error_to_string = function
+  | Share_error error -> Share.error_to_string error
   | Selection_unavailable detail -> "local selection unavailable: " ^ detail
   | Selection_integrity detail -> "local selection integrity failure: " ^ detail
   | Selection_conflict detail -> "local selection conflict: " ^ detail
@@ -4902,6 +4905,10 @@ type pending_local_recovery = {
 
 type local_status = {
   saved_metadata : status;
+  status_basis : Model.Core.Record_id.t option;
+  status_shared_revisions :
+    (Model.Core.Record_id.t * Model.Core.shared_revision) list;
+  status_publications : Store.Local.publication list;
   status_branch : branch_listing option;
   status_cursor : state_view;
   status_head : string;
@@ -5142,6 +5149,25 @@ let[@warning "-4"] inspect_local_status ~root =
         Ok
           {
             saved_metadata = status_of_project ~uncaptured loaded.Store.project;
+            status_basis =
+              Option.map
+                (fun local -> (Store.Local.selected local).Store.Local.basis)
+                loaded.Store.local;
+            status_shared_revisions =
+              (match loaded.Store.local with
+              | None -> []
+              | Some local ->
+                  Model.Core.records (Store.Local.pool local)
+                  |> List.filter_map (fun (id, body) ->
+                      match body.Model.Core.payload with
+                      | Model.Core.Shared_revision value -> Some (id, value)
+                      | Model.Core.Accepted_version _
+                      | Model.Core.Branch_event _ ->
+                          None));
+            status_publications =
+              (match loaded.Store.local with
+              | None -> []
+              | Some local -> Store.Local.publications local);
             status_branch;
             status_cursor =
               view_of_node loaded.Store.history
@@ -5289,10 +5315,57 @@ let inspect_local_history ~root ~before ~limit =
             next_before;
           })
 
+let share_selected_with ~observe ~root ~paths ~update ~title ~dry_run
+    ~signing_capability =
+  with_writable_repository ~root (fun repository loaded ->
+      let store = Store.underlying_store repository in
+      let* identity, _, observation =
+        Snapshot.Observation.scan ~root ~store
+        |> Result.map_error (fun e -> Snapshot_error e)
+      in
+      let* observed = snapshot_id identity in
+      let* prepared =
+        Share.prepare ~store ~loaded ~observed ~observation ~paths ~update
+          ~title
+        |> Result.map_error (fun e -> Share_error e)
+      in
+      if dry_run then Ok (Share.preview prepared)
+      else
+        let* signing_capability =
+          signing_capability
+          |> Option.to_result
+               ~none:
+                 (Share_error
+                    (Share.Policy
+                       "sharing requires the enrolled local signing capability"))
+        in
+        let* project, history, local, result =
+          Share.stage ~store ~signing_capability prepared
+          |> Result.map_error (fun e -> Share_error e)
+        in
+        if
+          result.Share.captures_unsaved
+          || (not result.Share.repeated)
+             && Option.is_some result.Share.publication
+        then
+          let* _ =
+            Store.For_test.save_collaborative
+              ~before_publish:(fun () -> observe Before_metadata_publish)
+              ~after_publish:(fun () -> observe After_metadata_publish)
+              ~history ~local repository ~expected:loaded.Store.head ~project
+              ~collaboration:(Option.get loaded.Store.collaboration)
+            |> Result.map_error (fun e -> Store_error e)
+          in
+          Ok result
+        else Ok result)
+
+let share_selected = share_selected_with ~observe:(fun _ -> ())
+
 module For_test = struct
   include Navigation_for_test
 
   let copy_out = copy_out_with
+  let share_selected = share_selected_with
 
   let branch_switch ~observe ~root ~name ~dry_run =
     branch_switch_with ~observe ~expected:None ~expected_plan:None ~root ~name

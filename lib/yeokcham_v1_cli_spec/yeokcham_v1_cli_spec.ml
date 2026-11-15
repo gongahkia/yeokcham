@@ -164,6 +164,10 @@ let commands =
       ~options:
         [
           root;
+          option "--title" Free_argument;
+          identifier "--update";
+          flag "--preview";
+          flag "--dry-run";
           identifier "--change";
           identifier "--revision";
           identifier "--authority";

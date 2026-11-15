@@ -1801,11 +1801,275 @@ let publication_update_witnesses_only_newly_selected_edits () =
         "private source never contained carried remote file" false
         (Sys.file_exists (root ^ "/remote.txt")))
 
+let selected_share root capability ?update paths =
+  Service.share_selected ~root ~paths ~update ~title:None ~dry_run:false
+    ~signing_capability:(Some capability)
+  |> service
+
+let native_share_captures_only_selected_public_work () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "unsaved selected D\n");
+      let before = load repository in
+      let preview =
+        Service.share_selected ~root ~paths:[ [ "note.txt" ] ] ~update:None
+          ~title:None ~dry_run:true ~signing_capability:None
+        |> service
+      in
+      Alcotest.(check bool)
+        "preview generates no change identity" true
+        (preview.Service.Share.change = None);
+      Alcotest.(check bool)
+        "preview preserves authoritative root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let receipt = shared.Service.Share.publication |> Option.get in
+      let after = load repository in
+      Alcotest.(check int)
+        "capture and publication in one history step" 2
+        (List.length (H.nodes after.S.history));
+      Alcotest.(check int)
+        "one durable outbound receipt" 1
+        (List.length (L.publications (local after)));
+      Alcotest.(check bool)
+        "publication source is exact captured history" true
+        (C.History_id.equal receipt.L.source
+           (H.identity after.S.history (H.current after.S.history) |> ok Fun.id));
+      let public =
+        Composition.load
+          (S.underlying_store repository)
+          shared.Service.Share.public_snapshot
+        |> ok Composition.error_to_string
+        |> Composition.entries
+      in
+      Alcotest.(check (list (list string)))
+        "public tree contains selected path" [ [ "note.txt" ] ]
+        (List.map fst public);
+      Alcotest.(check bool)
+        "sharing does not advance accepted basis" true
+        (C.Record_id.equal (L.selected (local before)).L.basis
+           (L.selected (local after)).L.basis);
+      let again = selected_share root capability [ [ "note.txt" ] ] in
+      Alcotest.(check bool) "retry reported" true again.Service.Share.repeated;
+      Alcotest.(check bool)
+        "recorded revision identity reused" true
+        (Option.equal C.Record_id.equal shared.Service.Share.revision
+           again.Service.Share.revision);
+      Alcotest.(check bool)
+        "retry does not republish root" true
+        (Raw.Mutable_ref.equal after.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "unselected bytes remain private" "private\000bytes\255"
+        (read_private root))
+
+let native_share_updates_are_explicit_and_immutable () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "first\n");
+      let first = selected_share root capability [ [ "note.txt" ] ] in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "second\n");
+      write_private root "private E\000";
+      let second =
+        selected_share root capability
+          ~update:(Option.get first.Service.Share.change)
+          [ [ "note.txt" ] ]
+      in
+      Alcotest.(check bool)
+        "same change identity" true
+        (Option.equal C.Change_id.equal first.Service.Share.change
+           second.Service.Share.change);
+      Alcotest.(check bool)
+        "new immutable revision" false
+        (Option.equal C.Record_id.equal first.Service.Share.revision
+           second.Service.Share.revision);
+      let loaded = load repository in
+      let body =
+        C.find
+          (L.pool (local loaded))
+          (Option.get second.Service.Share.revision)
+        |> Option.get
+      in
+      (match body.C.payload with
+      | C.Shared_revision version ->
+          Alcotest.(check bool)
+            "exact predecessor" true
+            (version.C.previous_revisions
+            = [ Option.get first.Service.Share.revision ])
+      | C.Accepted_version _ | C.Branch_event _ ->
+          Alcotest.fail "expected revision");
+      Alcotest.(check int)
+        "both publications durable" 2
+        (List.length (L.publications (local loaded)));
+      Alcotest.(check string)
+        "private E never overwritten" "private E\000" (read_private root);
+      let unchanged =
+        selected_share root capability
+          ~update:(Option.get first.Service.Share.change)
+          [ [ "note.txt" ] ]
+      in
+      Alcotest.(check bool)
+        "unchanged update reuses recorded publication" true
+        unchanged.Service.Share.repeated;
+      Alcotest.(check bool)
+        "unchanged update has same revision" true
+        (Option.equal C.Record_id.equal unchanged.Service.Share.revision
+           second.Service.Share.revision);
+      Alcotest.(check bool)
+        "no-op retains root" true
+        (Raw.Mutable_ref.equal loaded.S.head (load repository).S.head))
+
+let native_share_recovers_atomic_root_and_lost_ack () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, _, _, _ = initialize root in
+          Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+              output_string out "selected before interruption\n");
+          let before = load repository in
+          let child = Unix.fork () in
+          if child = 0 then (
+            ignore
+              (Service.For_test.share_selected
+                 ~observe:(fun stage -> if stage = boundary then Unix._exit 73)
+                 ~root ~paths:[ [ "note.txt" ] ] ~update:None ~title:None
+                 ~dry_run:false ~signing_capability:(Some capability));
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "stopped at actual root boundary" true (status = Unix.WEXITED 73);
+          let interrupted = load repository in
+          let committed = boundary = Service.After_metadata_publish in
+          Alcotest.(check int)
+            "history and outbound state commit together"
+            (if committed then 1 else 0)
+            (List.length (L.publications (local interrupted)));
+          Alcotest.(check int)
+            "capture never published separately"
+            (if committed then 2 else 1)
+            (List.length (H.nodes interrupted.S.history));
+          if not committed then
+            Alcotest.(check bool)
+              "uncommitted root unchanged" true
+              (Raw.Mutable_ref.equal before.S.head interrupted.S.head);
+          let result = selected_share root capability [ [ "note.txt" ] ] in
+          let after = load repository in
+          Alcotest.(check bool)
+            "recorded retry reuses identity" committed
+            result.Service.Share.repeated;
+          Alcotest.(check int)
+            "one captured node after restart" 2
+            (List.length (H.nodes after.S.history));
+          Alcotest.(check int)
+            "one revision after restart" 3
+            (List.length (L.record_objects (local after)));
+          Alcotest.(check int)
+            "one outbound receipt after restart" 1
+            (List.length (L.publications (local after)));
+          if committed then
+            Alcotest.(check bool)
+              "lost response adds no root update" true
+              (Raw.Mutable_ref.equal interrupted.S.head after.S.head)))
+    [ Service.Before_metadata_publish; Service.After_metadata_publish ]
+
+let native_share_refuses_excluded_paths_and_incomplete_capture () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/.yeokchamignore") (fun out ->
+          output_string out "private.bin\n");
+      let before = load repository in
+      reject "ignored path explicitly published"
+        (Service.share_selected ~root ~paths:[ [ "private.bin" ] ] ~update:None
+           ~title:None ~dry_run:false ~signing_capability:(Some capability));
+      Alcotest.(check bool)
+        "ignored selection leaves root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Out_channel.with_open_bin (root ^ "/.yeokchamignore") (fun out ->
+          output_string out "[bad\n");
+      reject "malformed ignore capture published"
+        (Service.share_selected ~root ~paths:[] ~update:None ~title:None
+           ~dry_run:false ~signing_capability:(Some capability));
+      Alcotest.(check bool)
+        "incomplete capture leaves last complete state" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+
+let native_share_uses_observed_rules_for_missing_public_paths () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      Out_channel.with_open_bin (root ^ "/note.txt") (fun out ->
+          output_string out "accepted note\n");
+      let shared = selected_share root capability [ [ "note.txt" ] ] in
+      let loaded = load repository in
+      let store = S.underlying_store repository in
+      let accepted, _ =
+        L.prepare_acceptance ~store ~authority ~certificate
+          ~signing_capability:capability
+          ~parents:[ (L.selected (local loaded)).L.basis ]
+          ~chosen_revisions:[ Option.get shared.Service.Share.revision ]
+          ~result_snapshot:shared.Service.Share.public_snapshot
+          ~cursor:(H.current loaded.S.history).H.id (local loaded)
+        |> ok Fun.id
+      in
+      let loaded =
+        S.save_collaborative ~local:accepted repository ~expected:loaded.S.head
+          ~project:loaded.S.project
+          ~collaboration:(Option.get loaded.S.collaboration)
+        |> ok S.error_to_string
+      in
+      Out_channel.with_open_bin (root ^ "/.yeokchamignore") (fun out ->
+          output_string out "note.txt\nprivate.bin\n");
+      let identity, _, observation =
+        Snapshot.Observation.scan ~root ~store |> ok Snapshot.error_to_string
+      in
+      Out_channel.with_open_bin (root ^ "/.yeokchamignore") (fun out ->
+          output_string out "!note.txt\n");
+      Alcotest.(check bool)
+        "capture retains its own rule decision" true
+        (Snapshot.Observation.ignored observation ~path:[ "note.txt" ]
+           ~directory:false);
+      let observed =
+        Snapshot.Snapshot.stored_object_id identity
+        |> Raw.Stored_object_id.to_hex |> snapshot
+      in
+      let prepared =
+        Service.Share.prepare ~store ~loaded ~observed ~observation ~paths:[]
+          ~update:None ~title:None
+        |> ok Service.Share.error_to_string
+      in
+      let result = Service.Share.preview prepared in
+      Alcotest.(check bool)
+        "ignored public file is not a deletion" false
+        (List.mem [ "note.txt" ] result.Service.Share.contributed_paths);
+      let public =
+        Composition.load store result.Service.Share.public_snapshot
+        |> ok Composition.error_to_string
+      in
+      Alcotest.(check bool)
+        "previous public ignored path preserved" true
+        (List.mem_assoc [ "note.txt" ] (Composition.entries public)))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "native share captures only selected public work and retries" `Quick
+            native_share_captures_only_selected_public_work;
+          Alcotest.test_case
+            "native share updates are explicit immutable revisions" `Quick
+            native_share_updates_are_explicit_and_immutable;
+          Alcotest.test_case
+            "native share survives root interruption and lost response" `Quick
+            native_share_recovers_atomic_root_and_lost_ack;
+          Alcotest.test_case
+            "native share refuses excluded and incomplete captures" `Quick
+            native_share_refuses_excluded_paths_and_incomplete_capture;
+          Alcotest.test_case
+            "native share uses captured rules for absent public paths" `Quick
+            native_share_uses_observed_rules_for_missing_public_paths;
           Alcotest.test_case
             "publication receipts commit and retry with exact identity" `Quick
             publication_receipts_are_atomic_and_retryable;

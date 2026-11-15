@@ -251,6 +251,10 @@ module Observation : sig
   val entries : t -> (string list * string) list
   val rules : t -> (string list * string option) list
 
+  val ignored : t -> path:string list -> directory:bool -> bool
+  (** Evaluate the successfully captured native rules, including missing paths.
+      Does not reread mutable live ignore files after the observation. *)
+
   val directories : t -> (string list * string * string list) list
   (** Native fingerprints from one successful bounded consistent observation.
       They do not reserve filesystem names or provide a filesystem transaction.
