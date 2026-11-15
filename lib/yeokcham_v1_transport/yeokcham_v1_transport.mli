@@ -133,6 +133,25 @@ module Core_outbox : sig
   (** The owning state-root writer must preserve pending batches and facts. *)
 end
 
+module Core_inbox : sig
+  type receipt
+
+  val receipts : local_state -> receipt list
+  val remote : receipt -> string
+  val endpoint : receipt -> string
+  val manifest : receipt -> string
+  val publication : receipt -> publication
+  val find : local_state -> remote:string -> publication:string -> receipt option
+
+  val receive :
+    local_state -> remote:string -> endpoint:string -> cursor:string option ->
+    manifest:string -> publication:publication -> (local_state, error) result
+  (** Persists already verified complete public package/courier provenance with
+      feed references. Caller verifies authority/admission before root publication. *)
+
+  val validate_update : previous:local_state -> local_state -> (unit, error) result
+end
+
 module V2 : sig
   (** Pure V2 relay-transfer planning. These values describe only raw immutable
       bytes and relay-local sessions; they are not V1 history or state. *)

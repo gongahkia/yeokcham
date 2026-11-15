@@ -12,12 +12,14 @@ type error =
   | Package_error of Package.error
   | Store_error of Store.error
   | Transport_error of Transport.error
+  | Signer_required
   | Metadata of string
 
 let error_to_string = function
   | Package_error error -> Package.error_to_string error
   | Store_error error -> Store.error_to_string error
   | Transport_error error -> Transport.error_to_string error
+  | Signer_required -> "a new Core courier requires the enrolled local signer; a frozen pending batch can resume without it"
   | Metadata message -> message
 
 let ( let* ) = Result.bind
@@ -186,10 +188,7 @@ let prepare_with ~observe ~root ~remote ~endpoint ~signing_capability =
             let* signing_capability =
               signing_capability
               |> Option.to_result
-                   ~none:
-                     (Metadata
-                        "a new Core courier requires the enrolled local \
-                         signer; a frozen pending batch can resume without it")
+                   ~none:Signer_required
             in
             let* publisher = local_device collaboration authority in
             let certificate = Store.local_certificate collaboration in

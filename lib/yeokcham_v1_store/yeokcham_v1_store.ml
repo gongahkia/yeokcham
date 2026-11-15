@@ -982,7 +982,11 @@ let save_collaborative_at_boundaries ~before_publish ~after_publish ?history
     match existing_collaboration with
     | None -> Ok ()
     | Some previous ->
-        Transport.Core_outbox.validate_update ~previous:(transport previous)
+        let* () = Transport.Core_outbox.validate_update ~previous:(transport previous)
+          (transport collaboration)
+        |> Result.map_error (fun error -> Transport_error error)
+        in
+        Transport.Core_inbox.validate_update ~previous:(transport previous)
           (transport collaboration)
         |> Result.map_error (fun error -> Transport_error error)
   in

@@ -1366,7 +1366,7 @@ module Core = struct
         Ok (id, obj))
       rows
 
-  let[@warning "-4"] verify_records store authority repository records =
+  let[@warning "-4"] verify_record_metadata store authority repository records =
     let* records =
       traverse
         (fun (id, obj) ->
@@ -1406,7 +1406,10 @@ module Core = struct
             Error (Invalid_package "Core package has missing causal references")
           else retain pool remaining
     in
-    let* pool = retain (M.empty_pool ~repository) records in
+    retain (M.empty_pool ~repository) records
+
+  let verify_records store authority repository records =
+    let* pool = verify_record_metadata store authority repository records in
     let* () = Composition.Graph.validate store pool |> graph in
     Ok pool
 
@@ -1517,6 +1520,19 @@ module Core = struct
     in
     let* _ = title_rows pool titles in
     Ok titles
+
+  let public_titles = load_titles
+
+  let[@warning "-4"] declared_selected_snapshots store manifest ~known_authority =
+    let* authority = load_authority store manifest known_authority in
+    let* records = record_rows store manifest in
+    let* pool = verify_record_metadata store authority manifest.repository records in
+    let* branch = List.find_opt (fun branch -> M.Branch_id.equal
+        branch.M.branch_id manifest.selected_branch) (M.branch_states pool)
+      |> Option.to_result ~none:(Invalid_package "selected public branch is unknown") in
+    traverse (fun id -> match M.find pool id with
+        | Some { M.payload = M.Accepted_version version; _ } -> Ok version.M.result_snapshot
+        | _ -> Error (Invalid_package "selected public accepted head is unavailable")) branch.M.accepted_heads
 
   let source_objects source pool records =
     let object_snapshot id =

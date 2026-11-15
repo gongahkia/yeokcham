@@ -520,7 +520,7 @@ module Manifest = struct
       then Error Manifest_content_identity_mismatch
       else Ok contents
 
-  let load repository identity =
+  let load_metadata repository identity =
     let* object_ =
       Store.get repository (stored_object_id identity)
       |> Result.map_error (fun error -> Store_error error)
@@ -534,8 +534,12 @@ module Manifest = struct
            })
     else
       let* manifest = decode (Envelope.payload object_) in
-      let* () = verify_stream repository manifest in
       Ok manifest
+
+  let load repository identity =
+    let* manifest = load_metadata repository identity in
+    let* () = verify_stream repository manifest in
+    Ok manifest
 end
 
 module Content = struct

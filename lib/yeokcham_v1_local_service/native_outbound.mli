@@ -4,6 +4,7 @@ type error =
   | Package_error of Yeokcham_v1_package.error
   | Store_error of Yeokcham_v1_store.error
   | Transport_error of Transport.error
+  | Signer_required
   | Metadata of string
 
 val error_to_string : error -> string

@@ -5,6 +5,7 @@ type error =
   | Store_error of Yeokcham_v1_store.error
   | Trust_error of Yeokcham_v1_trust.error
   | Admission_error of Yeokcham_v1_store.Local.receive_error
+  | Transport_error of Yeokcham_v1_transport.error
   | Metadata of string
 
 val error_to_string : error -> string
@@ -26,6 +27,12 @@ val receive : root:string -> package:string -> (outcome, error) result
     signing, project hooks, integration or transport acknowledgement. Known
     shared branches receive no fabricated private working positions. *)
 
+val receive_publication :
+  root:string -> remote:string -> endpoint:string -> cursor:string option ->
+  publication:Yeokcham_v1_transport.publication -> package:string -> (outcome, error) result
+(** Same admission boundary, atomically retaining verified courier/manifest
+    provenance and feed references. No transfer acknowledgement or integration. *)
+
 type boundary = Before_metadata_publish | After_metadata_publish
 
 module For_test : sig
@@ -34,4 +41,9 @@ module For_test : sig
     root:string ->
     package:string ->
     (outcome, error) result
+
+  val receive_publication :
+    observe:(boundary -> unit) -> root:string -> remote:string -> endpoint:string ->
+    cursor:string option -> publication:Yeokcham_v1_transport.publication ->
+    package:string -> (outcome, error) result
 end

@@ -98,6 +98,17 @@ module Core : sig
     result
   (** Canonical public metadata rows, not admission or availability proof. *)
 
+  val public_titles :
+    Yeokcham_store.repository -> manifest -> Model.Core.pool ->
+    ((Model.Core.Record_id.t * string) list, error) result
+
+  val declared_selected_snapshots :
+    Yeokcham_store.repository -> manifest -> known_authority:Trust.authority option ->
+    (Model.Core.Object_id.t list, error) result
+  (** Authenticated declared targets for transfer priority. This checks signed
+      metadata/references only, not actual composition or available contents.
+      It is never a materialization or admission proof. *)
+
   val restore_artifact :
     source:Yeokcham_store.repository ->
     destination:string ->

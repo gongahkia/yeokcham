@@ -134,10 +134,10 @@ let write_file path bytes =
   with Unix.Unix_error (error, operation, _) ->
     Error (Io_error { path; operation; message = Unix.error_message error })
 
-let read_file_limited path =
+let read_file_limited ?(max_bytes = max_response_bytes) path =
   try
     let info = Unix.lstat path in
-    if info.Unix.st_size > max_response_bytes then Error Response_too_large
+    if info.Unix.st_size > max_bytes then Error Response_too_large
     else In_channel.with_open_bin path In_channel.input_all |> Result.ok
   with
   | Unix.Unix_error (error, operation, _) ->
@@ -188,7 +188,9 @@ type parallel_request = {
   request_body : string option;
 }
 
-let run client ~method_ ~url ~body =
+let run ?(max_bytes = max_response_bytes) client ~method_ ~url ~body =
+  let* () = if max_bytes <= 0 || max_bytes > max_response_bytes then
+      Error (Invalid_response "invalid bounded HTTPS response limit") else Ok () in
   with_temporary_directory (fun temporary ->
       let config = Filename.concat temporary "curl.conf" in
       let response = Filename.concat temporary "response" in
@@ -222,7 +224,7 @@ let run client ~method_ ~url ~body =
             "--max-time";
             "30";
             "--max-filesize";
-            string_of_int max_response_bytes;
+            string_of_int max_bytes;
             "--request";
             method_;
             "--config";
@@ -265,7 +267,7 @@ let run client ~method_ ~url ~body =
         let* status = status_of_output status_output in
         match process_status with
         | Unix.WEXITED 0 ->
-            let* response = read_file_limited response in
+            let* response = read_file_limited ~max_bytes response in
             Ok (status, response)
         | Unix.WEXITED code ->
             if status >= 400 then Ok (status, "")
@@ -410,9 +412,9 @@ let route client ~project ~kind ~id =
     (client.url ^ "/v1/repositories/" ^ project ^ "/" ^ kind_name kind ^ "/"
    ^ id)
 
-let get client ~project ~kind ~id =
+let get ?max_bytes client ~project ~kind ~id =
   let* url = route client ~project ~kind ~id in
-  let* status, response = run client ~method_:"GET" ~url ~body:None in
+  let* status, response = run ?max_bytes client ~method_:"GET" ~url ~body:None in
   if status = 200 then Ok response else Error (Unexpected_status status)
 
 let put_v1 client ~project ~kind ~id ~bytes =
