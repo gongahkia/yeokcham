@@ -26,14 +26,14 @@ class IntegrationCliTests(unittest.TestCase):
         result = self.cli("init", self.root, machine=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def cli(self, *arguments, machine=True, environment=None, timeout=20):
+    def cli(self, *arguments, machine=True, environment=None, timeout=20, cwd=None):
         args = [str(arg) for arg in arguments]
         if args[0] != "init":
             args += ["--root", str(self.root)]
         if machine:
             args += ["--format", "json"]
         return subprocess.run([BINARY, *args], env=environment or self.environment,
-                              capture_output=True, text=True, timeout=timeout)
+                              capture_output=True, text=True, timeout=timeout, cwd=cwd)
 
     def data(self, result, status=0):
         self.assertEqual(result.returncode, status, result.stdout + result.stderr)
@@ -112,6 +112,10 @@ class IntegrationCliTests(unittest.TestCase):
         self.assertNotEqual(chosen["plan_id"], conflict["plan_id"])
         self.assertRegex(chosen["data"]["public_resolution"], r"^[0-9a-f]{64}$")
         self.assertTrue(chosen["data"]["retained"])
+        proposal = next(row for row in self.data(self.cli("status"))["data"]["resolution_proposals"]
+                        if row["resolution_id"] == chosen["data"]["public_resolution"])
+        self.assertEqual(proposal["state"], "recorded_proposal")
+        self.assertEqual(proposal["accepted_by"], [])
         self.assertEqual((self.root / "note.txt").read_bytes(), b"PRIVATE overlapping E\r\n")
         retained = self.head()
         unavailable = dict(self.environment, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(self.parent / "missing"))
@@ -132,6 +136,9 @@ class IntegrationCliTests(unittest.TestCase):
         self.assertEqual(self.head(), retained)
         applied = self.data(self.cli("integrate", "--plan", kept["plan_id"], "--yes"))
         self.assertEqual(applied["data"]["accepted_snapshot"], first["public_snapshot"])
+        proposal = next(row for row in self.data(self.cli("status"))["data"]["resolution_proposals"]
+                        if row["resolution_id"] == chosen["data"]["public_resolution"])
+        self.assertEqual(proposal["accepted_by"], [applied["data"]["operation"]["accepted_record"]])
         self.assertEqual((self.root / "note.txt").read_bytes(), b"PRIVATE overlapping E\r\n")
         self.assertEqual((self.root / "private.txt").read_text(), "PRIVATE SENTINEL\n")
 
@@ -169,6 +176,50 @@ class IntegrationCliTests(unittest.TestCase):
         self.data(self.cli("resolve", conflict["conflict_id"], "--use", "revision:" + first["revision_id"]), 3)
         self.assertEqual(self.head(), before)
         self.assertEqual((self.root / "private.txt").read_text(), "external edit after inspection\n")
+
+    def test_resolution_alias_failure_reports_recorded_proposal_and_exact_retry(self):
+        first = self.share()
+        (self.root / "note.txt").write_text("second conflicting version\n")
+        self.share()
+        conflict = self.data(self.cli("conflicts"))["data"]["conflicts"][0]
+        before = self.head()
+        plans = self.root / ".yeokcham/integration-plans"
+        plans.chmod(0o500)
+        try:
+            failed = self.data(self.cli("resolve", conflict["conflict_id"], "--use", "revision:" + first["revision_id"]), 8)
+        finally:
+            plans.chmod(0o700)
+        self.assertEqual(failed["code"], "resolution-plan-incomplete")
+        self.assertFalse(failed["data"]["retained"])
+        self.assertRegex(failed["data"]["public_resolution"], r"^[0-9a-f]{64}$")
+        self.assertNotEqual(self.head(), before)
+        self.assertEqual((self.root / "note.txt").read_text(), "second conflicting version\n")
+        status = self.data(self.cli("status"))["data"]
+        self.assertEqual(status["integration_operations"], [])
+        self.assertEqual(status["resolution_proposals"][0]["accepted_by"], [])
+        recorded = self.head()
+        action = failed["next_actions"][0]["arguments"]
+        self.assertIn("revision:" + first["revision_id"], action)
+        unavailable = dict(self.environment, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(self.parent / "missing"))
+        args = action[1:] if action[0] == "yeokcham" else action
+        repeated = subprocess.run([BINARY, *args, "--format", "json"], env=unavailable,
+                                  capture_output=True, text=True, timeout=20)
+        repeated = self.data(repeated)
+        self.assertTrue(repeated["data"]["retained"])
+        self.assertEqual(repeated["data"]["public_resolution"], failed["data"]["public_resolution"])
+        self.assertEqual(repeated["plan_id"], failed["plan_id"])
+        self.assertEqual(self.head(), recorded)
+
+    def test_replacement_filename_that_matches_legacy_option_is_literal(self):
+        self.share()
+        (self.root / "note.txt").write_text("second conflicting version\n")
+        self.share()
+        conflict = self.data(self.cli("conflicts"))["data"]["conflicts"][0]
+        (self.parent / "--decision").write_bytes(b"explicit combined bytes\r\n")
+        result = self.data(self.cli("resolve", conflict["conflict_id"], "--file", "--decision", cwd=self.parent))
+        self.assertTrue(result["data"]["retained"])
+        self.assertRegex(result["data"]["public_resolution"], r"^[0-9a-f]{64}$")
+        self.assertEqual((self.root / "note.txt").read_text(), "second conflicting version\n")
 
     def test_noninteractive_confirmation_and_stale_plan(self):
         shared = self.share()

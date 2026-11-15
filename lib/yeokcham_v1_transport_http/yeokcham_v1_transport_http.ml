@@ -303,6 +303,7 @@ let run_parallel client ~parallelism requests =
               ^ curl_escape client.token ^ "\"\n"
             in
             let* () = write_file config config_body in
+            let* () = write_file response "" in
             let* body_arguments =
               match request_body with
               | None -> Ok []
@@ -391,11 +392,13 @@ let run_parallel client ~parallelism requests =
         let* responses =
           let rec read reversed = function
             | [] -> Ok (List.rev reversed)
-            | (_, response) :: rest ->
-                let* bytes = read_file_limited response in
+            | (status, (_, response)) :: rest ->
+                let* bytes =
+                  if status = 200 then read_file_limited response else Ok ""
+                in
                 read (bytes :: reversed) rest
           in
-          read [] prepared
+          read [] (List.combine statuses prepared)
         in
         match process_status with
         | Unix.WEXITED 0 | Unix.WEXITED _ ->
@@ -494,6 +497,7 @@ module V2 = struct
   type error =
     | V2_unavailable
     | Http_error of string
+    | Http_status of int
     | Protocol_error of string
     | Transfer_error of Transfer.error
     | Wire_error of Wire.error
@@ -503,6 +507,7 @@ module V2 = struct
   let error_to_string = function
     | V2_unavailable -> "the relay does not provide V2 transfer"
     | Http_error detail -> "V2 HTTPS request failed: " ^ detail
+    | Http_status status -> Printf.sprintf "V2 relay returned HTTP %d" status
     | Protocol_error detail -> "invalid V2 HTTPS response: " ^ detail
     | Transfer_error error -> Transfer.error_to_string error
     | Wire_error error -> Wire.error_to_string error
@@ -634,8 +639,7 @@ module V2 = struct
       |> Result.map_error http_error
     in
     if status = 404 then Error V2_unavailable
-    else if status <> 200 then
-      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else if status <> 200 then Error (Http_status status)
     else decode_capability response
 
   let start_upload client ~project ~object_id ~raw_size ~expires_in =
@@ -647,8 +651,7 @@ module V2 = struct
       |> Result.map_error http_error
     in
     if status = 404 then Error V2_unavailable
-    else if status <> 201 then
-      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else if status <> 201 then Error (Http_status status)
     else
       let* session = decode_session response in
       let offer = Transfer.session_offer session in
@@ -669,8 +672,7 @@ module V2 = struct
       |> Result.map_error http_error
     in
     if status = 404 then Error (Protocol_error "upload session is absent")
-    else if status <> 200 then
-      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else if status <> 200 then Error (Http_status status)
     else decode_session response
 
   let put_segment client ~project ~session_id ~offset ~raw =
@@ -695,8 +697,7 @@ module V2 = struct
             run client ~method_:"PUT" ~url ~body:(Some compressed))
         |> Result.map_error http_error
       in
-      if status = 204 then Ok ()
-      else Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+      if status = 204 then Ok () else Error (Http_status status)
 
   let complete_upload client ~project ~session_id =
     let* () = check_id session_id |> Result.map_error http_error in
@@ -704,8 +705,7 @@ module V2 = struct
     let* status, _ =
       run client ~method_:"POST" ~url ~body:None |> Result.map_error http_error
     in
-    if status = 201 then Ok ()
-    else Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    if status = 201 then Ok () else Error (Http_status status)
 
   let get_segment client ~project ~object_id ~offset ~length =
     if not (valid_segment ~offset ~length) then
@@ -722,8 +722,7 @@ module V2 = struct
             run client ~method_:"GET" ~url ~body:None)
         |> Result.map_error http_error
       in
-      if status <> 200 then
-        Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+      if status <> 200 then Error (Http_status status)
       else
         Wire.decompress ~raw_length:length compressed
         |> Result.map_error (fun error -> Wire_error error)
@@ -790,8 +789,7 @@ module V2 = struct
       in
       match List.find_opt (fun (status, _) -> status <> 204) responses with
       | None -> Ok ()
-      | Some (status, _) ->
-          Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+      | Some (status, _) -> Error (Http_status status)
 
   let download_ranges client ~parallelism ~project ~object_id ranges =
     let rec requests reversed = function
@@ -819,8 +817,7 @@ module V2 = struct
     let rec decompress reversed = function
       | [], [] -> Ok (List.rev reversed)
       | (status, compressed) :: response_rest, length :: length_rest ->
-          if status <> 200 then
-            Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+          if status <> 200 then Error (Http_status status)
           else
             let* raw =
               Wire.decompress ~raw_length:length compressed
@@ -896,9 +893,14 @@ let put client ~project ~kind ~id ~bytes =
   | Object -> (
       match V2.upload_object client ~project ~object_id:id bytes with
       | Ok () -> Ok ()
-      | Error error ->
-          if error = V2.V2_unavailable then
-            put_v1 client ~project ~kind ~id ~bytes
-          else Error (Invalid_response (V2.error_to_string error)))
+      | Error V2.V2_unavailable -> put_v1 client ~project ~kind ~id ~bytes
+      | Error (V2.Http_status status) -> Error (Unexpected_status status)
+      | Error (V2.Http_error message) ->
+          Error
+            (Io_error { path = client.url; operation = "V2 upload"; message })
+      | Error
+          ((V2.Protocol_error _ | V2.Transfer_error _ | V2.Wire_error _) as
+           error) ->
+          Error (Invalid_response (V2.error_to_string error)))
   | Manifest | Publication | Bootstrap ->
       put_v1 client ~project ~kind ~id ~bytes

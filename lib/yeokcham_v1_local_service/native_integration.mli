@@ -3,6 +3,8 @@ module Plan = Yeokcham_v1_integration
 module Operation = Yeokcham_v1_store.Local.Operation
 
 type error =
+  | Pending_operation of Core.Operation_id.t
+  | Pending_restore of string
   | Plan_error of Plan.error
   | Capture_error of Yeokcham_snapshot.error
   | Application_error of Safe_apply.error

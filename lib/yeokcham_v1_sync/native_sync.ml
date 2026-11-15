@@ -49,6 +49,7 @@ type error =
   | Raw_error of Raw.error
   | Transport_error of Transport.error
   | Authority_error of string
+  | Integrity_error of string
   | Invalid of string
 
 let error_to_string = function
@@ -60,7 +61,7 @@ let error_to_string = function
   | Store_error e -> Store.error_to_string e
   | Raw_error e -> Raw.error_to_string e
   | Transport_error e -> Transport.error_to_string e
-  | Authority_error s -> s
+  | Authority_error s | Integrity_error s -> s
   | Invalid s -> s
 
 let ( let* ) = Result.bind
@@ -71,6 +72,7 @@ let raw r = Result.map_error (fun e -> Raw_error e) r
 let transport r = Result.map_error (fun e -> Transport_error e) r
 let service r = Result.map_error (fun e -> Service_error e) r
 let invalid r = Result.map_error (fun s -> Invalid s) r
+let integrity r = Result.map_error (fun s -> Integrity_error s) r
 
 let snapshot r =
   Result.map_error (fun e -> Invalid (Snapshot.error_to_string e)) r
@@ -78,6 +80,7 @@ let snapshot r =
 let pages r = Result.map_error (fun e -> Invalid (Pages.error_to_string e)) r
 
 type boundary =
+  | Object_requested of Raw.Stored_object_id.t
   | Object_offered of string
   | Manifest_sent of string
   | Courier_sent of string
@@ -149,7 +152,9 @@ let fetch_publication client project id =
   let* publication = Transport.decode_publication bytes |> transport in
   if Transport.publication_id publication = id then Ok publication
   else
-    Error (Invalid "relay courier route does not match its canonical identity")
+    Error
+      (Integrity_error
+         "relay courier route does not match its canonical identity")
 
 let collect_publications ~max_bytes ~fetch ~known ids =
   if max_bytes < 0 || max_bytes > Transport.max_local_state_bytes then
@@ -240,8 +245,8 @@ module Id_map = Map.Make (struct
   let compare = Raw.Stored_object_id.compare
 end)
 
-let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
-    project source directory manifest_bytes =
+let[@warning "-4"] fetch_core ~preferred ~observe ~known_authority ~reusable
+    ~check_authority client project source directory manifest_bytes =
   let* scope =
     Core.Repository_id.of_hex project
     |> Result.map_error Core.error_to_string
@@ -279,6 +284,7 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
         if cached && (Option.is_none exact || Id_map.mem id reusable) then
           Raw.get ~max_bytes:limit source id |> raw
         else
+          let () = observe id in
           let id_text = Raw.Stored_object_id.to_hex id in
           let* bytes =
             match exact with
@@ -292,19 +298,29 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
                     ~raw_size
                 with
                 | Ok bytes -> Ok bytes
-                | Error Http.V2.V2_unavailable ->
+                | Error (Http.V2.V2_unavailable | Http.V2.Http_status 404) ->
                     Http.get ~max_bytes:limit client ~project ~kind:Http.Object
                       ~id:id_text
                     |> http
-                | Error e -> Error (Invalid (Http.V2.error_to_string e)))
+                | Error
+                    ( Http.V2.Protocol_error _ | Http.V2.Transfer_error _
+                    | Http.V2.Wire_error _ ) as error ->
+                    Result.map_error
+                      (fun e -> Integrity_error (Http.V2.error_to_string e))
+                      error
+                | Error (Http.V2.Http_error _ as e) ->
+                    Error (Invalid (Http.V2.error_to_string e))
+                | Error (Http.V2.Http_status status) ->
+                    Error (Http_error (Http.Unexpected_status status)))
           in
           let* envelope =
             Envelope.decode bytes
             |> Result.map_error Envelope.decode_error_to_string
-            |> invalid
+            |> integrity
           in
           if not (Raw.Stored_object_id.equal id (Raw.id_of_envelope envelope))
-          then Error (Invalid "downloaded public object identity mismatch")
+          then
+            Error (Integrity_error "downloaded public object identity mismatch")
           else
             let* _ = Raw.put source envelope |> raw in
             Ok envelope
@@ -315,7 +331,7 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
         || Option.exists (fun size -> String.length bytes <> size) exact
       then
         Error
-          (Invalid
+          (Integrity_error
              "downloaded public object size differs from its bounded inventory")
       else
         let* () =
@@ -363,14 +379,14 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
     match Id_map.find_opt id sizes with
     | None ->
         Error
-          (Invalid
+          (Integrity_error
              "public target references an object outside the declared inventory")
     | Some size -> ensure ~limit:size ~exact:size id
   in
   let* records = Package.Core.record_inventory source manifest |> package in
   let* () = each (fun (_, id) -> ensure_public id) records in
   let* selected =
-    Package.Core.declared_selected_snapshots source manifest
+    Package.Core.declared_selected_snapshots ?preferred source manifest
       ~known_authority:(Some authority)
     |> package
   in
@@ -419,7 +435,8 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
       | Envelope.Content | Envelope.Chunk -> Ok ()
       | _ ->
           Error
-            (Invalid "public target references an unsupported contents kind")
+            (Integrity_error
+               "public target references an unsupported contents kind")
   in
   let* () =
     each
@@ -442,8 +459,91 @@ let fetch_legacy client project directory manifest =
       write (Filename.concat (Filename.concat directory "objects") id) bytes)
     objects
 
-let[@warning "-4"] receive client project root remote endpoint repository
-    publication =
+let[@warning "-4"] prefetch_latest ~root ~client ~project ~source
+    ~known_authority ~reusable ~preferred ~check_authority ~observe publications
+    =
+  let ancestors = Hashtbl.create 128 in
+  List.iter
+    (fun courier ->
+      List.iter
+        (fun id -> Hashtbl.replace ancestors id ())
+        (Transport.publication_parents courier))
+    publications;
+  let latest =
+    List.filter
+      (fun courier ->
+        not (Hashtbl.mem ancestors (Transport.publication_id courier)))
+      publications
+  in
+  let* fetched =
+    List.fold_left
+      (fun result courier ->
+        let* fetched = result in
+        let id = Transport.publication_manifest courier in
+        let* manifest =
+          Http.get
+            ~max_bytes:(8 * 1024 * 1024)
+            client ~project ~kind:Http.Manifest ~id
+          |> http
+        in
+        let* () =
+          if Transport.sha256 manifest = id then Ok ()
+          else
+            Error
+              (Integrity_error "prefetched manifest does not match its courier")
+        in
+        let* value =
+          Yeokcham_encoding.decode manifest
+          |> Result.map_error Yeokcham_encoding.decode_error_to_string
+          |> integrity
+        in
+        match value with
+        | Yeokcham_encoding.Array (Yeokcham_encoding.Integer 2L :: _) ->
+            with_package root (fun directory ->
+                let* () =
+                  fetch_core ~preferred ~observe ~known_authority
+                    ~reusable:(reusable @ List.map fst (Id_map.bindings fetched))
+                    ~check_authority client project source directory manifest
+                in
+                let* repository =
+                  Core.Repository_id.of_hex project
+                  |> Result.map_error Core.error_to_string
+                  |> invalid
+                in
+                let* prepared =
+                  Package.Core.prepare ~package:directory ~repository
+                    ~known_authority
+                  |> package
+                in
+                let* () =
+                  Transport.verify_publication
+                    ~authority:(Package.Core.prepared_authority prepared)
+                    courier
+                  |> transport
+                in
+                let fetched = ref fetched in
+                let count = ref (Id_map.cardinal !fetched) in
+                let* () =
+                  Package.iter_artifact_objects
+                    (Package.Core.prepared_artifact prepared) ~f:(fun id _ ->
+                      if not (Id_map.mem id !fetched) then incr count;
+                      fetched := Id_map.add id () !fetched;
+                      if !count > 1000000 then
+                        Error
+                          (Package.Invalid_package
+                             "prefetched public inventory exceeds its \
+                              aggregate bound")
+                      else Ok ())
+                  |> package
+                in
+                Ok !fetched)
+        | _ -> Ok fetched)
+      (Ok Id_map.empty) latest
+  in
+  Ok (List.map fst (Id_map.bindings fetched))
+
+let[@warning "-4"] receive ~prefetched ~observe client project root remote
+    endpoint repository publication =
   let id = Transport.publication_manifest publication in
   let* manifest =
     Http.get
@@ -452,7 +552,7 @@ let[@warning "-4"] receive client project root remote endpoint repository
     |> http
   in
   if Transport.sha256 manifest <> id then
-    Error (Invalid "relay manifest route does not match its courier")
+    Error (Integrity_error "relay manifest route does not match its courier")
   else
     let* value =
       Yeokcham_encoding.decode manifest
@@ -472,7 +572,14 @@ let[@warning "-4"] receive client project root remote endpoint repository
               |> package
             in
             let* () =
-              fetch_core ~known_authority:(Some authority) ~reusable
+              fetch_core
+                ~preferred:
+                  (Some
+                     (Package.Core.Branch_id
+                        (Store.Local.selected local).Store.Local.branch))
+                ~observe:(fun id -> observe (Object_requested id))
+                ~known_authority:(Some authority)
+                ~reusable:(reusable @ prefetched)
                 ~check_authority:(fun _ -> Ok ())
                 client project
                 (Store.underlying_store repository)
@@ -605,12 +712,33 @@ let run_with ~observe ~root ~remote ~load_signing_capability =
   let known_ids = List.map Transport.reference_id known in
   let* publications = fetch_publications ~known:known_ids client project ids in
   let* publications = order_feed ~known publications in
+  let* _, _, authority = context loaded in
+  let* reusable =
+    Package.Core.public_object_ids
+      ~source:(Store.underlying_store repository)
+      ~authority
+      ~records:(Store.Local.record_objects local)
+    |> package
+  in
+  let* prefetched =
+    prefetch_latest ~root ~client ~project
+      ~source:(Store.underlying_store repository)
+      ~known_authority:(Some authority) ~reusable
+      ~preferred:
+        (Some
+           (Package.Core.Branch_id
+              (Store.Local.selected local).Store.Local.branch))
+      ~check_authority:(fun _ -> Ok ())
+      ~observe:(fun id -> observe (Object_requested id))
+      publications
+  in
   let* records, branches, legacy =
     List.fold_left
       (fun result publication ->
         let* records, branches, legacy = result in
         let* more, added, old =
-          receive client project root remote endpoint repository publication
+          receive ~prefetched ~observe client project root remote endpoint
+            repository publication
         in
         Ok (records + more, branches + added, legacy + old))
       (Ok (0, 0, 0))
@@ -658,14 +786,15 @@ module Fetch = struct
   let publication = fetch_publication
   let publications = fetch_publications
   let order_feed = order_feed
+  let prefetch_latest = prefetch_latest
 
-  let with_core ~root ~client ~repository ~source ~known_authority ~reusable
-      ~check_authority ~manifest action =
+  let with_core ?preferred ?(observe = fun _ -> ()) ~root ~client ~repository
+      ~source ~known_authority ~reusable ~check_authority ~manifest action =
     with_package root (fun directory ->
         let project = Core.Repository_id.to_hex repository in
         let* () =
-          fetch_core ~known_authority ~reusable ~check_authority client project
-            source directory manifest
+          fetch_core ~preferred ~observe ~known_authority ~reusable
+            ~check_authority client project source directory manifest
         in
         let* prepared =
           Package.Core.prepare ~package:directory ~repository ~known_authority

@@ -3728,6 +3728,10 @@ let[@warning "-4"] metadata_inspection_survives_missing_shared_chunks_without_au
       let check_cli exit_code code =
         let open Yojson.Safe.Util in
         let status = failed_inspection_cli root "status" exit_code code in
+        List.iter
+          (fun command ->
+            failed_inspection_cli root command exit_code code |> ignore)
+          [ "integrate"; "conflicts" ];
         Alcotest.(check string)
           "exact saved position"
           (Int64.to_string (H.current before.S.history).H.id)
@@ -4513,6 +4517,105 @@ let native_private_conflicts_resume_actual_mutation_facts () =
       Native_integrate.Materialized_root;
       Native_integrate.Committed_root;
     ]
+
+let native_private_replacement_has_independent_pending_gc_roots () =
+  let module Conflicts = Service.Conflicts in
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let _, public =
+        add_incoming_revision repository capability certificate authority
+          "note.txt" "shared D\r\n"
+      in
+      write_file root "note.txt" "PRIVATE ORIGINAL E\r\n";
+      let conflict =
+        (Conflicts.inspect ~root ~plan:None |> integrate_ok).Conflicts.conflicts
+        |> List.hd
+      in
+      let path = Filename.temp_file "yeokcham-private-resolution-gc-" "" in
+      Fun.protect
+        ~finally:(fun () -> Unix.unlink path)
+        (fun () ->
+          let bytes = String.init 262199 (fun i -> Char.chr (i * 7 mod 251)) in
+          Out_channel.with_open_bin path (fun out -> output_string out bytes);
+          let result =
+            Conflicts.resolve ~root ~plan:None
+              ~conflict:conflict.Conflicts.conflict_id
+              ~choice:(Conflicts.File path) ~signer:(fun () ->
+                Alcotest.fail "private replacement must not sign")
+            |> integrate_ok
+          in
+          let plan = result.Conflicts.prepared in
+          let replacement =
+            (List.hd (I.workspace_decisions plan)).I.decision_replacement
+          in
+          let target =
+            match I.readiness plan with
+            | I.Ready outputs -> outputs.C.workspace_snapshot
+            | I.Conflicted _ | I.Decision _ ->
+                Alcotest.fail "expected a complete private choice"
+          in
+          Alcotest.(check bool)
+            "replacement is an independent root, not merely the working target"
+            false
+            (C.Object_id.equal replacement target);
+          interrupt_native root plan capability Native_integrate.Prepared_root;
+          let operation =
+            Option.get (L.pending_operation (local (load repository)))
+          in
+          Unix.unlink
+            (root ^ "/.yeokcham/integration-plans/"
+            ^ C.Plan_id.to_hex (I.id plan)
+            ^ ".plan");
+          let collected =
+            Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string
+          in
+          Yeokcham_v1_gc.purge ~root
+            ~id:
+              (Yeokcham_v1_gc.transaction_id
+                 collected.Yeokcham_v1_gc.progress_transaction)
+          |> ok Yeokcham_v1_gc.error_to_string
+          |> ignore;
+          Composition.load (S.underlying_store repository) replacement
+          |> ok Composition.error_to_string
+          |> ignore;
+          Native_integrate.resume ~root ~operation:operation.Op.token
+          |> integrate_ok |> ignore;
+          Alcotest.(check string)
+            "pending replacement survives GC and materializes exact streamed \
+             bytes"
+            bytes
+            (read_file root "note.txt");
+          let after = load repository in
+          let accepted =
+            Composition.Graph.accepted
+              (L.pool (local after))
+              (L.selected (local after)).L.basis
+            |> ok Composition.Graph.error_to_string
+          in
+          Alcotest.(check bool)
+            "GC and private choice never publish replacement bytes as D" true
+            (C.Object_id.equal accepted.C.result_snapshot public);
+          let collected =
+            Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string
+          in
+          Yeokcham_v1_gc.purge ~root
+            ~id:
+              (Yeokcham_v1_gc.transaction_id
+                 collected.Yeokcham_v1_gc.progress_transaction)
+          |> ok Yeokcham_v1_gc.error_to_string
+          |> ignore;
+          reject
+            "closed operation permanently retains unused private replacement \
+             root"
+            (Composition.load (S.underlying_store repository) replacement);
+          let closed = load repository in
+          Native_integrate.resume ~root ~operation:operation.Op.token
+          |> integrate_ok |> ignore;
+          Alcotest.(check bool)
+            "closed intent remains inspectable/retryable after private root \
+             expires"
+            true
+            (Raw.Mutable_ref.equal closed.S.head (load repository).S.head)))
 
 let native_integration_resumes_real_file_and_root_boundaries () =
   List.iter
@@ -5910,5 +6013,9 @@ let () =
           Alcotest.test_case
             "native private choices resume actual file and root facts" `Quick
             native_private_conflicts_resume_actual_mutation_facts;
+          Alcotest.test_case
+            "private replacement GC roots survive lost aliases and retire \
+             after completion"
+            `Quick native_private_replacement_has_independent_pending_gc_roots;
         ] );
     ]

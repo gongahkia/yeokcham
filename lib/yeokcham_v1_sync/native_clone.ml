@@ -118,6 +118,7 @@ type outcome = {
 }
 
 type boundary =
+  | Object_requested of Raw.Stored_object_id.t
   | Verified
   | Before_metadata_attach
   | After_metadata_attach
@@ -179,7 +180,7 @@ type dataset = {
   couriers : (Transport.publication * string) list;
 }
 
-let download source token verify_phrase stage =
+let download ~observe ~branch source token verify_phrase stage =
   let* raw_store = Raw.init ~root:stage |> raw in
   let* client =
     Http.create ~url:source.url ~token
@@ -210,6 +211,14 @@ let download source token verify_phrase stage =
               (Native_sync.Authority_error
                  "repository verification phrase does not match the signed root")
     in
+    let* prefetched =
+      Native_sync.Fetch.prefetch_latest ~root:stage ~client ~project
+        ~source:raw_store ~known_authority:None ~reusable:[]
+        ~preferred:(Some (Package.Core.Branch_name branch)) ~check_authority
+        ~observe:(fun id -> observe (Object_requested id))
+        couriers
+      |> exchange
+    in
     let* authority, records_map, objects, saved, _ =
       List.fold_left
         (fun result courier ->
@@ -239,9 +248,12 @@ let download source token verify_phrase stage =
                     ~records:(Ids.bindings records)
                   |> package
             in
-            Native_sync.Fetch.with_core ~root:stage ~client
-              ~repository:source.repository ~source:raw_store
-              ~known_authority:known ~reusable ~check_authority ~manifest
+            Native_sync.Fetch.with_core
+              ~preferred:(Package.Core.Branch_name branch)
+              ~observe:(fun id -> observe (Object_requested id))
+              ~root:stage ~client ~repository:source.repository
+              ~source:raw_store ~known_authority:known
+              ~reusable:(reusable @ prefetched) ~check_authority ~manifest
               (fun ~package:_ prepared ->
                 let* records =
                   List.fold_left
@@ -573,7 +585,7 @@ let run_with ~observe ~source ~destination ~branch ~token ~signing_capability
   let* destination = check_new_destination destination in
   with_temporary (fun fetch_root ->
       let* raw_source, dataset =
-        download source token verify_phrase fetch_root
+        download ~observe ~branch source token verify_phrase fetch_root
       in
       let* selected, accepted, snapshot = choose dataset branch in
       let* device, certificate = member dataset.authority signing_capability in

@@ -197,8 +197,9 @@ from the latest [ledger checkpoint](IMPLEMENTATION_PROGRESS.md) and actual
 confirmed recoverable integration, received-branch selection and saved-metadata
 inspection have automated checkpoint evidence. Native conflict preparation now
 has local automated named-version, private-choice and replacement-file journeys;
-the two-person TLS resolution extension and full P3 criterion/authority/error/fault
-audit remain required. Preserve the original phase
+the two-person TLS resolution extension now passes alongside requested-branch
+transfer priority and focused refusal/GC tests. The final P3 criterion audit and
+completion evidence remain required. Preserve the original phase
 remainders. P4 remains unstarted.
 The user requires one writer on main for this handoff. Future orchestration
 preferences must be reconciled separately before changing that workflow.

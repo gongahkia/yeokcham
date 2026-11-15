@@ -111,14 +111,22 @@ module Core : sig
     (Trust.authority, error) result
   (** Verified authority declarations, before fetching ordinary contents. *)
 
+  type branch_preference =
+    | Branch_id of Model.Core.Branch_id.t
+    | Branch_name of string
+
   val declared_selected_snapshots :
+    ?preferred:branch_preference ->
     Yeokcham_store.repository ->
     manifest ->
     known_authority:Trust.authority option ->
     (Model.Core.Object_id.t list, error) result
   (** Authenticated declared targets for transfer priority. This checks signed
       metadata/references only, not actual composition or available contents. It
-      is never a materialization or admission proof. *)
+      is never a materialization or admission proof. Preferred matching branch
+      heads precede the sender's declared selection. Missing/ambiguous preferred
+      names never select a winner: they fall back or prioritize every match;
+      actual selection still requires its independent complete proof. *)
 
   val public_object_ids :
     source:Yeokcham_store.repository ->

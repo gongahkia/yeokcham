@@ -212,8 +212,9 @@ and keeps its safety/target roots protected.
 
 Divergent branch histories require explicitly naming every event and accepted
 head with repeated `--reconcile ID`; `--yes` alone never selects a winner. Required
-unsupported policy refuses explicitly. The complete P3 criterion and two-person
-resolution audit remains open.
+unsupported policy refuses explicitly. Native Core required-review policy and
+adoption remain unsupported and refuse; the earlier V1 review/adoption commands
+do not authorize these Core records.
 
 ## Preparing exact conflict choices
 
@@ -247,9 +248,29 @@ worktree writer lock. If a shared proposal was recorded but its local plan alias
 could not be retained, the command reports incomplete preparation and an exact
 retry action, with no acceptance or ordinary-file change.
 
+`status` reports `resolution_proposals` with exact IDs, comparison/replacement
+snapshots and `accepted_by` references. A recorded proposal alone is not an
+acceptance or transfer acknowledgement. A paused integration blocks a new
+conflict preparation with exit 8 and the original operation/recovery actions.
+Unavailable or corrupt saved public contents refuse through the read-only
+metadata view; neither ordinary files nor history are repaired from live bytes.
+
 These native commands are distinct from the earlier V1 `resolve --decision` and
-package flows below. Local automated resolution journeys are implemented; the
-full Alice/Bob native TLS resolution loop and final P3 audit remain required.
+package flows below. Automated Alice/Bob tests now exercise verified native clone,
+concurrent updates, text/opaque decisions, deferral, preview, private E, accepted
+exchange and signer-free catch-up through actual controlled TLS. Actual relay
+closure is checked for private sentinels/plans. These tests use explicit disposable
+signers and do not establish native custody onboarding or human usability.
+
+Foreground clone/exchange first verify maximal native courier closures, fetching
+the requested/locally selected branch before other content in those closures;
+older feed receipts still follow causal order. All advertised shared branches/
+history remain included. Only complete remotely obtained, signature/scope-verified
+public closure can warm subsequent receipt; matching private cached hashes alone
+never qualify. Ambiguous names/heads are not resolved by download ordering.
+V2 404 can use the explicit V1 object path; other permission/format failures do
+not become fallback success. Empty error responses retain their HTTP status:
+access refusal is exit 7, malformed/checksum data exit 6, unavailable data exit 5.
 
 ## Recovering a pending integration
 

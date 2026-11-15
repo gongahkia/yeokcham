@@ -54,6 +54,15 @@ class RecoveryCliTests(unittest.TestCase):
     def head(self):
         return (self.root / ".yeokcham/refs/v1-project-state").read_bytes()
 
+    def test_pending_operation_blocks_new_conflicts_with_recovery_outcome(self):
+        before = self.head()
+        result = self.data(self.cli("conflicts"), 8)
+        self.assertEqual(result["error"]["code"], "integration-incomplete")
+        self.assertEqual(result["operation_id"], self.operation)
+        self.assertTrue(any("resume" in action["arguments"] for action in result["next_actions"]))
+        self.assertEqual(self.head(), before)
+        self.assertEqual((self.root / "private.txt").read_text(), "private external Y\n")
+
     def test_preview_confirmation_recovery_and_observation_copyout(self):
         before = self.head()
         choice = self.data(self.cli("operation", "recover", self.operation), 3)

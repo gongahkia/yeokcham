@@ -3667,6 +3667,734 @@ let[@warning "-4-40-42"] native_shared_branch_selection_and_nondefault_clone ()
                          (load destination_repository).Store.history))
                    (Option.get (History.workspace cloned.Store.history))))))
 
+let[@warning "-4-40-42"] native_conflicts_resolve_and_preserve_private_work_through_tls
+    () =
+  let module Core = Model.Core in
+  let module Local = Store.Local in
+  let module History = Yeokcham_v1_undo in
+  let module Outbox = Transport.Core_outbox in
+  let open Yojson.Safe.Util in
+  let load root =
+    Store.open_repository ~root
+    |> require_ok Store.error_to_string
+    |> Store.load
+    |> require_ok Store.error_to_string
+  in
+  let cli root label args =
+    let output, errors, status =
+      run_cli (args @ [ "--root"; root; "--format"; "json" ])
+    in
+    require_cli_success label (errors ^ output) status;
+    let value = Yojson.Safe.from_string output in
+    Alcotest.(check bool)
+      (label ^ " uses domain JSON")
+      true
+      (member "schema_version" value = `Int 2);
+    value
+  in
+  let write path bytes =
+    Out_channel.with_open_bin path (fun out -> output_string out bytes)
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let history root =
+    History.encode (load root).Store.history |> require_ok Fun.id
+  in
+  let same_root label before root =
+    Alcotest.(check bool)
+      label true
+      (Object_store.Mutable_ref.equal before.Store.head (load root).Store.head)
+  in
+  with_https_relay (fun client project url ->
+      with_directory "yeokcham-native-resolution-tls-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let alice, _, _, _, _, bob_signer, scope =
+                native_core_replicas parent signer_directory
+              in
+              Transport_config.add ~root:alice ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              let alice_secret = "ALICE PRIVATE SENTINEL resolution 61a2" in
+              let bob_secret = "BOB PRIVATE SENTINEL resolution 7d35" in
+              let alice_e = "ALICE LATER PRIVATE E\r\n" in
+              let bob_e = "BOB OVERLAPPING PRIVATE E\r\n" in
+              write (alice ^ "/alice-private.txt") alice_secret;
+              write (alice ^ "/main.ml") "base\r\n";
+              let original =
+                cli alice "Alice shares initial selected contents"
+                  [ "share"; "main.ml" ]
+                |> member "data"
+              in
+              let change = member "change_id" original |> to_string in
+              cli alice "Alice accepts original shared version"
+                [ "integrate"; change; "--yes" ]
+              |> ignore;
+              cli alice "Alice exchanges clone source" [ "exchange"; "team" ]
+              |> ignore;
+              let authority =
+                Option.get
+                  (Store.authority
+                     (Option.get (load alice).Store.collaboration))
+              in
+              let root_certificate =
+                Trust.certificates (Trust.authority_membership authority)
+                |> List.find (fun cert -> Trust.certificate_issuer cert = None)
+              in
+              let phrase =
+                Yeokcham_v1_recovery.verification_phrase root_certificate
+              in
+              let bob = parent ^ "/cloned-bob" in
+              let bob_id =
+                Model.Device_id.to_string (Trust.device_id (device bob_signer))
+              in
+              let output, errors, status =
+                run_cli
+                  [
+                    "clone";
+                    url ^ "/v1/repositories/" ^ project;
+                    bob;
+                    "--device";
+                    bob_id;
+                    "--verify-phrase";
+                    phrase;
+                    "--format";
+                    "json";
+                  ]
+              in
+              require_cli_success "Bob obtains a verified native clone"
+                (errors ^ output) status;
+              Alcotest.(check string)
+                "clone materializes accepted CRLF" "base\r\n"
+                (read (bob ^ "/main.ml"));
+              Alcotest.(check bool)
+                "clone excludes Alice's private sentinel" false
+                (Sys.file_exists (bob ^ "/alice-private.txt"));
+              write (bob ^ "/bob-private.txt") bob_secret;
+              write (alice ^ "/main.ml") "Alice exact shared choice\r\n";
+              let alice_revision =
+                cli alice "Alice updates the original change"
+                  [ "share"; "main.ml"; "--update"; change ]
+                |> member "data" |> member "revision_id" |> to_string
+              in
+              write (bob ^ "/main.ml") "Bob concurrent shared choice\r\n";
+              let bob_revision =
+                cli bob "Bob independently updates the same change"
+                  [ "share"; "main.ml"; "--update"; change ]
+                |> member "data" |> member "revision_id" |> to_string
+              in
+              write (alice ^ "/asset.bin") "\000Alice opaque variant\255";
+              cli alice "Alice shares an opaque variant"
+                [ "share"; "asset.bin" ]
+              |> ignore;
+              write (bob ^ "/asset.bin") "\000Bob opaque variant\254";
+              cli bob "Bob shares a distinct opaque variant"
+                [ "share"; "asset.bin" ]
+              |> ignore;
+              write (alice ^ "/main.ml") alice_e;
+              write (bob ^ "/main.ml") bob_e;
+              cli bob "Bob exchanges concurrent publications"
+                [ "exchange"; "origin" ]
+              |> ignore;
+              let alice_history = history alice in
+              cli alice "Alice receives Bob's concurrent publications"
+                [ "exchange"; "team" ]
+              |> ignore;
+              Alcotest.(check string)
+                "receipt keeps Alice's private cursor and allocation"
+                alice_history (history alice);
+              Alcotest.(check string)
+                "receipt keeps Alice's unsaved E" alice_e
+                (read (alice ^ "/main.ml"));
+              cli bob "Bob receives Alice's exact concurrent revision"
+                [ "exchange"; "origin" ]
+              |> ignore;
+              let change_id =
+                Core.Change_id.of_hex change |> require_ok Core.error_to_string
+              in
+              List.iter
+                (fun root ->
+                  let local = Option.get (load root).Store.local in
+                  Alcotest.(check int)
+                    "both causal change heads survive receipt" 2
+                    (List.length
+                       (Core.change_heads (Local.pool local) change_id)))
+                [ alice; bob ];
+              let before_resolution = load alice in
+              let inspection =
+                cli alice "Alice inspects named shared conflict versions"
+                  [ "conflicts" ]
+                |> member "data"
+              in
+              let shared =
+                inspection |> member "conflicts" |> to_list
+                |> List.find (fun row ->
+                    member "path" row |> member "display" = `String "main.ml")
+              in
+              let conflict_id = member "conflict_id" shared |> to_string in
+              let versions =
+                member "versions" shared |> to_list
+                |> List.map (fun row -> member "version_id" row |> to_string)
+              in
+              Alcotest.(check bool)
+                "named versions include Alice and Bob exactly" true
+                (List.mem ("revision:" ^ alice_revision) versions
+                && List.mem ("revision:" ^ bob_revision) versions);
+              cli alice "Alice safely defers the shared conflict"
+                [ "resolve"; conflict_id; "--defer" ]
+              |> ignore;
+              same_root
+                "inspection and deferral never move accepted/private state"
+                before_resolution alice;
+              let chosen =
+                cli alice "Alice chooses the exact shared text version"
+                  [
+                    "resolve";
+                    conflict_id;
+                    "--use";
+                    "revision:" ^ alice_revision;
+                  ]
+              in
+              let plan_id = member "plan_id" chosen |> to_string in
+              let inspection =
+                cli alice "Alice inspects the remaining opaque decision"
+                  [ "conflicts"; "--plan"; plan_id ]
+                |> member "data"
+              in
+              let opaque =
+                inspection |> member "conflicts" |> to_list
+                |> List.find (fun row ->
+                    member "path" row |> member "display" = `String "asset.bin")
+              in
+              let replacement = parent ^ "/combined.bin" in
+              let opaque_bytes =
+                String.init 16391 (fun i -> Char.chr (i * 17 mod 251))
+              in
+              write replacement opaque_bytes;
+              Unix.chmod replacement 0o700;
+              let chosen =
+                cli alice
+                  "Alice explicitly supplies exact opaque replacement contents"
+                  [
+                    "resolve";
+                    member "conflict_id" opaque |> to_string;
+                    "--file";
+                    replacement;
+                    "--plan";
+                    plan_id;
+                  ]
+              in
+              let plan_id = member "plan_id" chosen |> to_string in
+              Alcotest.(check string)
+                "resolution does not apply shared contents" alice_e
+                (read (alice ^ "/main.ml"));
+              Alcotest.(check string)
+                "opaque resolution does not replace live file"
+                "\000Alice opaque variant\255"
+                (read (alice ^ "/asset.bin"));
+              Alcotest.(check string)
+                "resolution does not allocate private history" alice_history
+                (history alice);
+              let prepared = load alice in
+              cli alice "Alice previews separate accepted/private results"
+                [ "integrate"; "--plan"; plan_id; "--preview" ]
+              |> ignore;
+              let output, _, status =
+                run_cli
+                  [
+                    "integrate";
+                    "--root";
+                    alice;
+                    "--plan";
+                    plan_id;
+                    "--format";
+                    "json";
+                  ]
+              in
+              Alcotest.(check bool)
+                "unconfirmed JSON acceptance requires an explicit choice" true
+                (status = Unix.WEXITED 3);
+              Alcotest.(check bool)
+                "choice response identifies the exact plan" true
+                (Yojson.Safe.from_string output
+                |> member "plan_id" = `String plan_id);
+              same_root
+                "preview and unconfirmed application leave state unchanged"
+                prepared alice;
+              let accepted =
+                cli alice "Alice explicitly accepts resolved shared work"
+                  [ "integrate"; "--plan"; plan_id; "--yes" ]
+              in
+              let accepted_record =
+                member "data" accepted |> member "operation"
+                |> member "accepted_record" |> to_string
+              in
+              let accepted_snapshot =
+                member "data" accepted |> member "accepted_snapshot"
+              in
+              Alcotest.(check string)
+                "Alice's private E survives accepted shared D" alice_e
+                (read (alice ^ "/main.ml"));
+              Alcotest.(check string)
+                "exact opaque choice materializes" opaque_bytes
+                (read (alice ^ "/asset.bin"));
+              Alcotest.(check bool)
+                "replacement executable distinction survives" true
+                ((Unix.stat (alice ^ "/asset.bin")).Unix.st_perm land 0o111 <> 0);
+              cli alice
+                "Alice exchanges authenticated resolution and acceptance"
+                [ "exchange"; "team" ]
+              |> ignore;
+              let batch =
+                Outbox.find
+                  (Store.transport
+                     (Option.get (load alice).Store.collaboration))
+                  ~remote:"team" ~endpoint:(Transport.sha256 url)
+                |> require_ok Transport.error_to_string
+                |> Option.get
+              in
+              let manifest =
+                Package.Core.decode_manifest ~repository:scope
+                  (Outbox.manifest batch)
+                |> require_ok Package.error_to_string
+              in
+              Package.Core.inventory
+                (Store.underlying_store
+                   (Store.open_repository ~root:alice
+                   |> require_ok Store.error_to_string))
+                manifest
+              |> require_ok Package.error_to_string
+              |> List.iter (fun (id, _) ->
+                  let bytes =
+                    Transport_http.get client ~project
+                      ~kind:Transport_http.Object
+                      ~id:(Object_store.Stored_object_id.to_hex id)
+                    |> require_ok Transport_http.error_to_string
+                  in
+                  List.iter
+                    (fun sentinel ->
+                      Alcotest.(check bool)
+                        "actual resolved relay closure excludes private bytes"
+                        false (contains bytes sentinel))
+                    [ alice_secret; bob_secret; alice_e; bob_e ];
+                  let envelope =
+                    Yeokcham_envelope.decode bytes
+                    |> require_ok Yeokcham_envelope.decode_error_to_string
+                  in
+                  Alcotest.(check bool)
+                    "private plans are absent from public relay closure" false
+                    (Yeokcham_envelope.object_type envelope
+                    = Yeokcham_envelope.Core_integration_plan));
+              let bob_history = history bob in
+              cli bob "Bob receives accepted resolved work without application"
+                [ "exchange"; "origin" ]
+              |> ignore;
+              Alcotest.(check string)
+                "resolved receipt preserves Bob's cursor and allocation"
+                bob_history (history bob);
+              Alcotest.(check string)
+                "resolved receipt preserves Bob's unsaved E" bob_e
+                (read (bob ^ "/main.ml"));
+              let known = Option.get (load bob).Store.local in
+              let known_accepted =
+                Core.records (Local.pool known)
+                |> List.filter_map (fun (id, body) ->
+                    match body.Core.payload with
+                    | Core.Accepted_version _ -> Some id
+                    | _ -> None)
+              in
+              let inspection =
+                cli bob "Bob inspects overlapping private conflict"
+                  [ "conflicts" ]
+                |> member "data"
+              in
+              let private_conflict =
+                member "conflicts" inspection
+                |> to_list
+                |> List.find (fun row ->
+                    member "private_workspace" row = `Bool true)
+              in
+              let key = Filename.concat signer_directory bob_id in
+              Unix.rename key (key ^ ".hidden");
+              Fun.protect
+                ~finally:(fun () -> Unix.rename (key ^ ".hidden") key)
+                (fun () ->
+                  let chosen =
+                    cli bob "Bob keeps private E without a signer"
+                      [
+                        "resolve";
+                        member "conflict_id" private_conflict |> to_string;
+                        "--use";
+                        "working";
+                      ]
+                  in
+                  Alcotest.(check bool)
+                    "private resolution has no public record" true
+                    (member "data" chosen |> member "public_resolution" = `Null);
+                  let plan = member "plan_id" chosen |> to_string in
+                  let ready = member "data" chosen |> member "plan" in
+                  Alcotest.(check bool)
+                    "Bob accepts Alice's exact shared result separately from E"
+                    true
+                    (member "accepted_snapshot" ready = accepted_snapshot);
+                  let caught_up =
+                    cli bob
+                      "Bob selects already accepted work without another \
+                       signature"
+                      [ "integrate"; "--plan"; plan; "--yes" ]
+                  in
+                  Alcotest.(check string)
+                    "known accepted identity reused" accepted_record
+                    (member "data" caught_up |> member "operation"
+                   |> member "accepted_record" |> to_string);
+                  let committed = load bob in
+                  cli bob
+                    "Bob retries the exact confirmed plan without a signer"
+                    [ "integrate"; "--plan"; plan; "--yes" ]
+                  |> ignore;
+                  same_root "retry adds no navigation or acceptance" committed
+                    bob);
+              let final_local = Option.get (load bob).Store.local in
+              Alcotest.(check bool)
+                "catch-up creates no additional accepted record" true
+                (known_accepted
+                = (Core.records (Local.pool final_local)
+                  |> List.filter_map (fun (id, body) ->
+                      match body.Core.payload with
+                      | Core.Accepted_version _ -> Some id
+                      | _ -> None)));
+              Alcotest.(check string)
+                "Bob retains private E after real resolved catch-up" bob_e
+                (read (bob ^ "/main.ml"));
+              Alcotest.(check string)
+                "Bob materializes exact opaque replacement" opaque_bytes
+                (read (bob ^ "/asset.bin"));
+              Alcotest.(check string)
+                "Bob retains private sentinel" bob_secret
+                (read (bob ^ "/bob-private.txt"));
+              Alcotest.(check bool)
+                "Alice sentinel was never received as a working file" false
+                (Sys.file_exists (bob ^ "/alice-private.txt"));
+              let output, errors, status =
+                run_cli [ "conflicts"; "--root"; bob ]
+              in
+              require_cli_success "plain conflict inspection after acceptance"
+                errors status;
+              expect_output_contains
+                "plain inspection exposes honest ready state" "integration plan"
+                output;
+              cli bob "Bob exchanges after resolved catch-up"
+                [ "exchange"; "origin" ]
+              |> ignore)))
+
+let[@warning "-4-40-42"] native_requested_branch_contents_precede_other_shared_data
+    () =
+  let module Core = Model.Core in
+  let module Local = Store.Local in
+  let module Clone = Yeokcham_v1_sync.Clone in
+  let module Native = Yeokcham_v1_sync.Core in
+  let module Composition = Yeokcham_v1_composition in
+  let open Yojson.Safe.Util in
+  let load root =
+    Store.open_repository ~root
+    |> require_ok Store.error_to_string
+    |> Store.load
+    |> require_ok Store.error_to_string
+  in
+  let cli root args =
+    let output, errors, status =
+      run_cli (args @ [ "--root"; root; "--format"; "json" ])
+    in
+    require_cli_success "requested-branch priority fixture CLI"
+      (errors ^ output) status;
+    Yojson.Safe.from_string output
+  in
+  let share_accept root text =
+    Out_channel.with_open_bin (root ^ "/main.ml") (fun out ->
+        output_string out text);
+    let change =
+      cli root [ "share"; "main.ml" ]
+      |> member "data" |> member "change_id" |> to_string
+    in
+    cli root [ "integrate"; change; "--yes" ] |> ignore
+  in
+  let content root name =
+    let local = Option.get (load root).Store.local in
+    let branch =
+      Local.branches local
+      |> List.find (fun row -> List.mem name row.Core.display_names)
+    in
+    let accepted =
+      Composition.Graph.accepted (Local.pool local)
+        (List.hd branch.Core.accepted_heads)
+      |> require_ok Composition.Graph.error_to_string
+    in
+    let repository =
+      Store.open_repository ~root |> require_ok Store.error_to_string
+    in
+    let tree =
+      Composition.load
+        (Store.underlying_store repository)
+        accepted.Core.result_snapshot
+      |> require_ok Composition.error_to_string
+    in
+    match List.assoc [ "main.ml" ] (Composition.entries tree) with
+    | Composition.File { content; _ } ->
+        Yeokcham_snapshot.Content.stored_object_id content
+    | Composition.Directory -> Alcotest.fail "expected requested file"
+  in
+  let before selected other requests =
+    let index id =
+      requests
+      |> List.mapi (fun n value -> (n, value))
+      |> List.find (fun (_, value) ->
+          Object_store.Stored_object_id.equal id value)
+      |> fst
+    in
+    Alcotest.(check bool)
+      "selected branch content requested before other shared content" true
+      (index selected < index other)
+  in
+  with_https_relay (fun _ project url ->
+      with_directory "yeokcham-native-branch-priority-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let alice, _, _, _, _, bob_signer, _ =
+                native_core_replicas parent signer_directory
+              in
+              Transport_config.add ~root:alice ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              share_accept alice "MAIN shared version one\r\n";
+              cli alice [ "exchange"; "team" ] |> ignore;
+              cli alice [ "branch"; "create"; "feature" ] |> ignore;
+              cli alice [ "switch"; "feature"; "--yes" ] |> ignore;
+              share_accept alice "FEATURE selected version one\r\n";
+              cli alice [ "switch"; "main"; "--yes" ] |> ignore;
+              cli alice [ "exchange"; "team" ] |> ignore;
+              let authority =
+                Option.get
+                  (Store.authority
+                     (Option.get (load alice).Store.collaboration))
+              in
+              let certificate =
+                Trust.certificates (Trust.authority_membership authority)
+                |> List.find (fun cert -> Trust.certificate_issuer cert = None)
+              in
+              let phrase =
+                Yeokcham_v1_recovery.verification_phrase certificate
+              in
+              let bob = parent ^ "/selected-feature" in
+              let requested = ref [] in
+              let source =
+                Clone.source (url ^ "/v1/repositories/" ^ project)
+                |> require_ok Clone.error_to_string
+              in
+              Clone.For_test.run ~source ~destination:bob ~branch:"feature"
+                ~token:(relay_test_token ()) ~signing_capability:bob_signer
+                ~verify_phrase:phrase ~expected_request:None ~preview:false
+                ~observe:(function
+                | Clone.Object_requested id -> requested := id :: !requested
+                | _ -> ())
+              |> require_ok Clone.error_to_string
+              |> ignore;
+              before (content alice "feature") (content alice "main")
+                (List.rev !requested);
+              Alcotest.(check string)
+                "clone materializes requested branch, not sender selection"
+                "FEATURE selected version one\r\n"
+                (In_channel.with_open_bin (bob ^ "/main.ml")
+                   In_channel.input_all);
+              share_accept alice "MAIN unselected version two\r\n";
+              cli alice [ "exchange"; "team" ] |> ignore;
+              cli alice [ "switch"; "feature"; "--yes" ] |> ignore;
+              share_accept alice "FEATURE selected version two\r\n";
+              cli alice [ "switch"; "main"; "--yes" ] |> ignore;
+              cli alice [ "exchange"; "team" ] |> ignore;
+              requested := [];
+              let saved =
+                (load bob).Store.history |> Yeokcham_v1_undo.encode
+                |> require_ok Fun.id
+              in
+              Native.For_test.run ~root:bob ~remote:"origin"
+                ~load_signing_capability:(fun _ -> Ok bob_signer)
+                ~observe:(function
+                  | Native.Object_requested id -> requested := id :: !requested
+                  | _ -> ())
+              |> require_ok Native.error_to_string
+              |> ignore;
+              before (content alice "feature") (content alice "main")
+                (List.rev !requested);
+              Alcotest.(check string)
+                "prioritized receipt keeps current files"
+                "FEATURE selected version one\r\n"
+                (In_channel.with_open_bin (bob ^ "/main.ml")
+                   In_channel.input_all);
+              Alcotest.(check string)
+                "prioritized receipt keeps private history/counter" saved
+                ((load bob).Store.history |> Yeokcham_v1_undo.encode
+               |> require_ok Fun.id);
+              let other = content bob "main" in
+              Alcotest.(check string)
+                "unvisited branch contents are also completely downloaded"
+                "MAIN unselected version two\r\n"
+                (Yeokcham_snapshot.Content.load
+                   (Store.underlying_store
+                      (Store.open_repository ~root:bob
+                      |> require_ok Store.error_to_string))
+                   (Yeokcham_snapshot.Content.of_stored_object_id other)
+                |> require_ok Yeokcham_snapshot.error_to_string))))
+
+let[@warning "-4-40-42"] native_clone_reports_corrupt_remote_contents_as_integrity_failure
+    () =
+  let module Outbox = Transport.Core_outbox in
+  let open Yojson.Safe.Util in
+  List.iter
+    (fun denied ->
+      with_directory "yeokcham-native-corrupt-clone-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let alice, _, source_repository, _, alice_signer, bob_signer, _ =
+                native_core_replicas parent signer_directory
+              in
+              let bytes = "public corruption probe\r\n" in
+              Out_channel.with_open_bin (alice ^ "/probe.txt") (fun out ->
+                  output_string out bytes);
+              Service.share_selected ~root:alice ~paths:[ [ "probe.txt" ] ]
+                ~update:None ~title:None ~dry_run:false
+                ~signing_capability:(Some alice_signer)
+              |> require_ok Service.error_to_string
+              |> ignore;
+              let id =
+                Yeokcham_snapshot.Content.store
+                  (Store.underlying_store source_repository)
+                  bytes
+                |> require_ok Yeokcham_snapshot.error_to_string
+                |> Yeokcham_snapshot.Content.stored_object_id
+                |> Object_store.Stored_object_id.to_hex
+              in
+              let outgoing =
+                Service.Core_outbound.prepare ~root:alice ~remote:"fixture"
+                  ~endpoint:(Transport.sha256 "fixture")
+                  ~signing_capability:(Some alice_signer)
+                |> require_ok Service.Core_outbound.error_to_string
+                |> Option.get
+              in
+              Fun.protect
+                ~finally:(fun () ->
+                  Package.dispose_artifact
+                    outgoing.Service.Core_outbound.artifact)
+                (fun () ->
+                  let objects = Hashtbl.create 32 in
+                  Package.iter_artifact_objects
+                    outgoing.Service.Core_outbound.artifact
+                    ~f:(fun object_id bytes ->
+                      Hashtbl.add objects
+                        (Object_store.Stored_object_id.to_hex object_id)
+                        bytes;
+                      Ok ())
+                  |> require_ok Package.error_to_string;
+                  let bad = Bytes.of_string (Hashtbl.find objects id) in
+                  Bytes.set bad 25
+                    (Char.chr (Char.code (Bytes.get bad 25) lxor 1));
+                  Hashtbl.replace objects id (Bytes.to_string bad);
+                  let batch = outgoing.Service.Core_outbound.batch in
+                  let courier = Outbox.publication batch in
+                  let courier_id = Transport.publication_id courier in
+                  let manifest = Outbox.manifest batch in
+                  let project = Trust.Repository_id.to_string (repository ()) in
+                  let base = "/v1/repositories/" ^ project in
+                  let page =
+                    Encoding.array
+                      [
+                        Encoding.array
+                          [ Encoding.text courier_id |> Result.get_ok ]
+                        |> Result.get_ok;
+                        Encoding.null;
+                      ]
+                    |> Result.get_ok |> Encoding.encode
+                  in
+                  let loaded =
+                    Store.load source_repository
+                    |> require_ok Store.error_to_string
+                  in
+                  let authority =
+                    Option.get
+                      (Store.authority (Option.get loaded.Store.collaboration))
+                  in
+                  let certificate =
+                    Trust.certificates (Trust.authority_membership authority)
+                    |> List.find (fun cert ->
+                        Trust.certificate_issuer cert = None)
+                  in
+                  let phrase =
+                    Yeokcham_v1_recovery.verification_phrase certificate
+                  in
+                  with_malicious_https_server
+                    ~respond:(fun target ->
+                      if
+                        denied
+                        && String.starts_with
+                             ~prefix:
+                               ("/v2/repositories/" ^ project ^ "/objects/")
+                             target
+                      then (401, "")
+                      else if
+                        String.starts_with ~prefix:(base ^ "/publications?")
+                          target
+                      then (200, page)
+                      else if target = base ^ "/publications/" ^ courier_id then
+                        (200, Transport.encode_publication courier)
+                      else if
+                        target
+                        = base ^ "/manifests/" ^ Transport.sha256 manifest
+                      then (200, manifest)
+                      else if
+                        String.starts_with ~prefix:(base ^ "/objects/") target
+                      then
+                        let name =
+                          String.sub target
+                            (String.length base + 9)
+                            (String.length target - String.length base - 9)
+                        in
+                        match Hashtbl.find_opt objects name with
+                        | Some bytes -> (200, bytes)
+                        | None -> (404, "")
+                      else (404, ""))
+                    (fun ~requests url ->
+                      let destination = parent ^ "/refused-clone" in
+                      let output, errors, status =
+                        run_cli
+                          [
+                            "clone";
+                            url ^ "/v1/repositories/" ^ project;
+                            destination;
+                            "--device";
+                            Model.Device_id.to_string
+                              (Trust.device_id (device bob_signer));
+                            "--verify-phrase";
+                            phrase;
+                            "--format";
+                            "json";
+                          ]
+                      in
+                      let expected = if denied then 7 else 6 in
+                      if status <> Unix.WEXITED expected then
+                        Alcotest.failf
+                          "native clone expected exit%d: %s %s; routes: %s"
+                          expected output errors
+                          (In_channel.with_open_bin requests
+                             In_channel.input_all);
+                      Alcotest.(check bool)
+                        "corruption has structured domain output" true
+                        (Yojson.Safe.from_string output
+                        |> member "schema_version" = `Int 2);
+                      Alcotest.(check string)
+                        "integrity/access refusal is distinct from missing \
+                         peer data"
+                        (if denied then "exchange-access-blocked"
+                         else "exchange-integrity-failure")
+                        (Yojson.Safe.from_string output
+                        |> member "error" |> member "code" |> to_string);
+                      Alcotest.(check bool)
+                        "refused peer cannot create a workspace" false
+                        (Sys.file_exists destination))))))
+    [ false; true ]
+
 let () =
   Alcotest.run "V1 transport"
     [
@@ -3693,6 +4421,18 @@ let () =
         ] );
       ( "relay",
         [
+          Alcotest.test_case
+            "native clone reports corrupt remote contents as integrity failure"
+            `Slow
+            native_clone_reports_corrupt_remote_contents_as_integrity_failure;
+          Alcotest.test_case
+            "clone and exchange prioritize the requested branch over sender \
+             selection"
+            `Slow native_requested_branch_contents_precede_other_shared_data;
+          Alcotest.test_case
+            "native text/opaque resolution and private catch-up work through \
+             TLS CLI"
+            `Slow native_conflicts_resolve_and_preserve_private_work_through_tls;
           Alcotest.test_case
             "received shared branches and nondefault clone work through TLS CLI"
             `Slow native_shared_branch_selection_and_nondefault_clone;

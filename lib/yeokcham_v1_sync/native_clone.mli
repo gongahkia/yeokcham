@@ -47,6 +47,7 @@ val resume : root:string -> (outcome, error) result
     signing provider is required. A recovered operation is never restarted. *)
 
 type boundary =
+  | Object_requested of Yeokcham_store.Stored_object_id.t
   | Verified
   | Before_metadata_attach
   | After_metadata_attach

@@ -33,6 +33,7 @@ type error =
   | Raw_error of Yeokcham_store.error
   | Transport_error of Yeokcham_v1_transport.error
   | Authority_error of string
+  | Integrity_error of string
   | Invalid of string
 
 val error_to_string : error -> string
@@ -51,6 +52,7 @@ val run :
     relay inventory; it cannot prove a relay disclosed every remote record. *)
 
 type boundary =
+  | Object_requested of Yeokcham_store.Stored_object_id.t
   | Object_offered of string
   | Manifest_sent of string
   | Courier_sent of string
@@ -75,6 +77,23 @@ module For_test : sig
 end
 
 module Fetch : sig
+  val prefetch_latest :
+    root:string ->
+    client:Yeokcham_v1_transport_http.client ->
+    project:string ->
+    source:Yeokcham_store.repository ->
+    known_authority:Yeokcham_v1_trust.authority option ->
+    reusable:Yeokcham_store.Stored_object_id.t list ->
+    preferred:Yeokcham_v1_package.Core.branch_preference option ->
+    check_authority:(Yeokcham_v1_trust.authority -> (unit, error) result) ->
+    observe:(Yeokcham_store.Stored_object_id.t -> unit) ->
+    Yeokcham_v1_transport.publication list ->
+    (Yeokcham_store.Stored_object_id.t list, error) result
+  (** Fetch and completely verify maximal native courier closures before older
+      feed contents. Returned IDs have remote/public proof for this run; raw
+      unadmitted references or matching private cached hashes do not qualify.
+      Actual metadata receipt still follows its causal feed order. *)
+
   val publications :
     known:string list ->
     Yeokcham_v1_transport_http.client ->
@@ -97,6 +116,8 @@ module Fetch : sig
     (Yeokcham_v1_transport.publication list, error) result
 
   val with_core :
+    ?preferred:Yeokcham_v1_package.Core.branch_preference ->
+    ?observe:(Yeokcham_store.Stored_object_id.t -> unit) ->
     root:string ->
     client:Yeokcham_v1_transport_http.client ->
     repository:Core.Repository_id.t ->

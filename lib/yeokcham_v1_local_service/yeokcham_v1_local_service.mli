@@ -781,6 +781,11 @@ type local_status = {
     (Yeokcham_v1_model.Core.Record_id.t
     * Yeokcham_v1_model.Core.shared_revision)
     list;
+  status_resolutions :
+    (Yeokcham_v1_model.Core.Record_id.t
+    * Yeokcham_v1_model.Core.resolution_revision
+    * Yeokcham_v1_model.Core.Record_id.t list)
+    list;
   status_publications : Yeokcham_v1_store.Local.publication list;
   status_transfers :
     ((Yeokcham_v1_model.Core.Record_id.t * string list) list, string) result;

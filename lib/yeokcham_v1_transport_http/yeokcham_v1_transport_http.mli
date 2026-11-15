@@ -50,6 +50,7 @@ module V2 : sig
   type error =
     | V2_unavailable
     | Http_error of string
+    | Http_status of int
     | Protocol_error of string
     | Transfer_error of Yeokcham_v1_transport.V2.error
     | Wire_error of Yeokcham_v1_transport.V2_wire.error

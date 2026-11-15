@@ -2046,5 +2046,61 @@ Fresh CLI processes exercise exact named choices, deferral, signature-free retry
 separate accepted D/private E, streamed executable replacements, stale/unknown
 choices and JSON/plain output. Native tests interrupt private decisions at real
 Prepared/file/Materialized/Committed facts and retain private E in the safety root.
-P3's two-person TLS resolution extension and full criterion/authority/error/fault
-audit remain incomplete. No native custody, human or cross-OS qualification is claimed.
+The controlled Alice/Bob TLS journey now verifies native clone, independent exact
+updates, named text and opaque choices, private E, deferral, confirmation and
+accepted-history exchange through fresh CLI processes. It checks actual remote
+objects for private sentinels/plans. Private replacement GC tests remove a proposal
+alias after durable Prepared, collect/purge unrelated objects, resume from operation
+roots, then retire the unused replacement root after completion. Closed metadata
+and exact retries remain usable after that private root expires.
+
+`Service.local_status.status_resolutions` is a list of
+`(Record_id, resolution_revision, accepted_by_record_ids)`. CLI
+`resolution_proposals` exposes these authentic facts, distinguishing
+`recorded_proposal` from `referenced_by_accepted_versions`. It makes no independent
+transfer claim. Failed content verification reports null for this verified view;
+the existing saved control metadata remains available separately. Native
+`Pending_operation of Operation_id` and `Pending_restore of string` errors preserve
+the actual pending identity and render exit 8/recovery actions. Native store failures
+reuse saved metadata inspection to distinguish missing public contents (5) from
+failed integrity (6), without authorizing application or fabricating a plan.
+
+### P3 requested-branch transfer priority and precise HTTP failures
+
+`Package.Core.branch_preference = Branch_id of Core.Branch_id.t | Branch_name of
+string` is a transfer preference, not selection authority.
+`declared_selected_snapshots ?preferred store manifest ~known_authority` verifies
+signed metadata/references, then returns matching branch heads before the sender's
+declared selection. Duplicate snapshot identities are removed while retaining
+priority. All matching ambiguous names/heads are fetched; actual branch selection
+still independently refuses ambiguity after complete proof. A not-yet-advertised
+preference falls back without inventing a head.
+
+`Sync.Core.Fetch.prefetch_latest ~root ~client ~project ~source ~known_authority
+~reusable ~preferred ~check_authority ~observe couriers` completely verifies maximal
+native courier closures before older feed contents. Their preferred branch targets
+precede remaining inventory. The returned stored IDs have actual remote bytes and
+complete public signature/scope proof for this foreground run; neither a bare
+remote reference nor a matching private local object is eligible. Receipt still
+processes its original causal feed order with fresh current authority/state and no
+working-file/history updates. Clone uses the requested branch name; exchange uses
+the local selected branch ID. `Fetch.with_core ?preferred ?observe ...` remains the
+owned temporary-package lifetime. `Object_requested of Stored_object_id` test
+boundaries in native sync/clone observe actual uncached HTTP requests, not guessed
+availability or a managed background download. Bounds remain 1 MiB pages, 8 MiB
+control/metadata windows and 1,000,000 aggregate prefetched public IDs; no parallel state
+root or private declassification store was added.
+
+`Transport_http.V2.Http_status of int` preserves statuses through parallel range
+requests and the public upload adapter. Response files are privately created before
+curl; non-200 range bodies are not parsed as compressed data. Empty 401/403 responses
+therefore remain access failures rather than temporary-file I/O errors. Native
+sync `Integrity_error of string` distinguishes malformed envelopes/identities/sizes,
+protocol/wire failures and invalid responses (CLI 6) from missing data (5) and
+authorization refusal (7). Native download may explicitly try the V1 object route
+on V2 404; a checksum/format or permission failure never takes that fallback.
+Actual controlled TLS tests verify corruption/access refusal before workspace
+creation, older-courier requested-branch priority, complete unvisited-branch bytes,
+unchanged receipt history and private-cache isolation.
+
+No native custody, human, managed scheduling or cross-OS qualification is claimed.

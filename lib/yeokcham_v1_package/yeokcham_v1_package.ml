@@ -1524,30 +1524,53 @@ module Core = struct
   let public_titles = load_titles
   let metadata_authority = load_authority
 
-  let[@warning "-4"] declared_selected_snapshots store manifest ~known_authority
-      =
+  type branch_preference = Branch_id of M.Branch_id.t | Branch_name of string
+
+  let[@warning "-4"] declared_selected_snapshots ?preferred store manifest
+      ~known_authority =
     let* authority = load_authority store manifest known_authority in
     let* records = record_rows store manifest in
     let* pool =
       verify_record_metadata store authority manifest.repository records
     in
+    let branches = M.branch_states pool in
     let* branch =
       List.find_opt
         (fun branch ->
           M.Branch_id.equal branch.M.branch_id manifest.selected_branch)
-        (M.branch_states pool)
+        branches
       |> Option.to_result
            ~none:(Invalid_package "selected public branch is unknown")
     in
-    traverse
-      (fun id ->
-        match M.find pool id with
-        | Some { M.payload = M.Accepted_version version; _ } ->
-            Ok version.M.result_snapshot
-        | _ ->
-            Error
-              (Invalid_package "selected public accepted head is unavailable"))
-      branch.M.accepted_heads
+    let prioritized =
+      match preferred with
+      | None -> []
+      | Some (Branch_id id) ->
+          List.filter (fun row -> M.Branch_id.equal row.M.branch_id id) branches
+      | Some (Branch_name name) ->
+          List.filter (fun row -> List.mem name row.M.display_names) branches
+    in
+    let* snapshots =
+      traverse
+        (fun id ->
+          match M.find pool id with
+          | Some { M.payload = M.Accepted_version version; _ } ->
+              Ok version.M.result_snapshot
+          | _ ->
+              Error
+                (Invalid_package "selected public accepted head is unavailable"))
+        (List.concat_map
+           (fun (row : M.branch_state) -> row.M.accepted_heads)
+           (prioritized @ [ branch ]))
+    in
+    let _, snapshots =
+      List.fold_left
+        (fun (seen, result) id ->
+          if List.exists (M.Object_id.equal id) seen then (seen, result)
+          else (id :: seen, id :: result))
+        ([], []) snapshots
+    in
+    Ok (List.rev snapshots)
 
   let source_objects source pool records =
     let object_snapshot id =

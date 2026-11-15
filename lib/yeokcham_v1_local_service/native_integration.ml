@@ -15,12 +15,19 @@ module Proof = Yeokcham_v1_restore_proof
 [@@@warning "-42"]
 
 type error =
+  | Pending_operation of Core.Operation_id.t
+  | Pending_restore of string
   | Plan_error of Plan.error
   | Capture_error of Snapshot.error
   | Application_error of Safe_apply.error
   | Metadata of string
 
 let error_to_string = function
+  | Pending_operation token ->
+      "integration is incomplete; inspect operation "
+      ^ Core.Operation_id.to_hex token
+  | Pending_restore operation ->
+      "resume the pending restore before integration: " ^ operation
   | Plan_error e -> Plan.error_to_string e
   | Capture_error e -> Snapshot.error_to_string e
   | Application_error e -> Safe_apply.error_to_string e
@@ -105,11 +112,7 @@ let no_restore root =
   in
   match pending with
   | None -> Ok ()
-  | Some journal ->
-      Error
-        (Metadata
-           ("resume the pending restore before integration: "
-           ^ Journal.operation_id journal))
+  | Some journal -> Error (Pending_restore (Journal.operation_id journal))
 
 let context loaded =
   let* local =
@@ -134,11 +137,7 @@ let require_idle ~root loaded =
   let* local, _, _ = context loaded in
   match Local.pending_operation local with
   | None -> Ok ()
-  | Some operation ->
-      Error
-        (Metadata
-           ("integration is incomplete; inspect operation "
-           ^ Core.Operation_id.to_hex operation.Operation.token))
+  | Some operation -> Error (Pending_operation operation.Operation.token)
 
 let snapshot identity =
   let* raw =
@@ -200,11 +199,7 @@ let prepare_with ~clone ~workspace_decisions ~resolution_ids ~root
       let* () =
         match Local.pending_operation local with
         | None -> Ok ()
-        | Some operation ->
-            Error
-              (Metadata
-                 ("integration is incomplete; resume "
-                 ^ Core.Operation_id.to_hex operation.Operation.token))
+        | Some operation -> Error (Pending_operation operation.Operation.token)
       in
       let store = Store.underlying_store repository in
       let* safety, observed, observation = observe_tree root store in

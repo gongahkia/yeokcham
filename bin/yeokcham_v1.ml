@@ -61,6 +61,14 @@ let rec legacy_share_arguments = function
       legacy_share_arguments rest
   | _ :: rest -> legacy_share_arguments rest
 
+let rec legacy_resolve_arguments = function
+  | [] | "--" :: _ -> false
+  | "--decision" :: _ -> true
+  | ("--root" | "--plan" | "--use" | "--file" | "--format" | "--color")
+    :: _ :: rest ->
+      legacy_resolve_arguments rest
+  | _ :: rest -> legacy_resolve_arguments rest
+
 let requested_format () =
   let rec loop = function
     | "--" :: _ -> Text_format
@@ -123,7 +131,7 @@ let command_name () =
 
 let native_json_command command =
   (command = "share" && not (legacy_share_arguments (raw_arguments ())))
-  || (command = "resolve" && not (List.mem "--decision" (raw_arguments ())))
+  || (command = "resolve" && not (legacy_resolve_arguments (raw_arguments ())))
   || List.mem command
        [
          "status";
@@ -179,7 +187,7 @@ let print_json bytes =
 
 let domain_command command =
   (command = "share" && not (legacy_share_arguments (raw_arguments ())))
-  || (command = "resolve" && not (List.mem "--decision" (raw_arguments ())))
+  || (command = "resolve" && not (legacy_resolve_arguments (raw_arguments ())))
   || List.mem command
        [
          "status";
@@ -452,6 +460,8 @@ let[@warning "-4"] fail_local = function
     ->
       fail_with_status 5 "identity-entropy-unavailable" message
   | Service.Trust_error _ as error ->
+      fail_with_status 7 "authority-blocked" (Service.error_to_string error)
+  | Service.Store_error (Yeokcham_v1_store.Trust_error _) as error ->
       fail_with_status 7 "authority-blocked" (Service.error_to_string error)
   | Service.Store_error
       (Yeokcham_v1_store.Store_error
@@ -4336,6 +4346,7 @@ let render_metadata_status ~root metadata =
         ("changes", `Null);
         ("local_publications", `Null);
         ("integration_operations", `Null);
+        ("resolution_proposals", `Null);
         ("recovery", `Null);
         ("pending_operations", `Null);
         ( "recovery_inspection_error",
@@ -4511,6 +4522,38 @@ let run_status arguments =
           `List
             (List.map json_integration_operation
                status.Service.status_integrations) );
+        ( "resolution_proposals",
+          `List
+            (List.map
+               (fun (id, (resolution : Core.resolution_revision), accepted_by)
+                  ->
+                 `Assoc
+                   [
+                     ("resolution_id", `String (Core.Record_id.to_hex id));
+                     ( "branch_id",
+                       `String (Core.Branch_id.to_hex resolution.Core.branch) );
+                     ("accepted_heads", json_ids resolution.Core.accepted_heads);
+                     ( "chosen_revisions",
+                       json_ids resolution.Core.chosen_revisions );
+                     ( "decision_scope_root",
+                       `String
+                         (Core.Object_id.to_hex
+                            resolution.Core.decision_scope_root) );
+                     ( "comparison_snapshot",
+                       `String
+                         (Core.Object_id.to_hex
+                            resolution.Core.comparison_snapshot) );
+                     ( "replacement_snapshot",
+                       `String
+                         (Core.Object_id.to_hex
+                            resolution.Core.replacement_snapshot) );
+                     ("accepted_by", json_ids accepted_by);
+                     ( "state",
+                       `String
+                         (if accepted_by = [] then "recorded_proposal"
+                          else "referenced_by_accepted_versions") );
+                   ])
+               status.Service.status_resolutions) );
         ("capture", capture);
         ("uncaptured", uncaptured);
         ("changes", changed_paths);
@@ -4574,6 +4617,20 @@ let run_status arguments =
     | None, (Ok _ | Error _) ->
         [ action ~root [ "history" ] "Inspect saved work and alternatives." ]
   in
+  let next_actions =
+    if
+      status.Service.status_resolutions = []
+      || status.Service.pending_local_recovery <> None
+      || List.exists Integration_op.pending status.Service.status_integrations
+    then next_actions
+    else
+      next_actions
+      @ [
+          action ~root [ "conflicts" ]
+            "Inspect exact current resolution plans and remaining \
+             shared/private conflicts.";
+        ]
+  in
   match requested_format () with
   | Json_format ->
       domain_json
@@ -4603,6 +4660,13 @@ let run_status arguments =
             (Core.Record_id.to_hex id)
             (Core.Change_id.to_hex revision.Core.change))
         status.Service.status_shared_revisions;
+      List.iter
+        (fun (id, _, accepted_by) ->
+          Printf.printf "resolution %s accepted-by:%s\n"
+            (Core.Record_id.to_hex id)
+            (if accepted_by = [] then "none (recorded proposal)"
+             else String.concat "," (List.map Core.Record_id.to_hex accepted_by)))
+        status.Service.status_resolutions;
       List.iter
         (fun p ->
           let transfer, remotes =
@@ -6296,16 +6360,21 @@ let run_package_adopt arguments =
   |> require_ok Service.error_to_string
   |> render_status
 
+let require_integration_store ~root = function
+  | Ok value -> value
+  | Error error -> (
+      match Service.inspect_saved_state ~root with
+      | Ok (Store.Metadata_only metadata) ->
+          render_metadata_status ~root metadata
+      | Ok (Store.Verified _) | Error _ ->
+          fail_local (Service.Store_error error))
+
 let integration_repository root =
   let repository =
-    Yeokcham_v1_store.open_repository ~root
-    |> Result.map_error (fun error -> Service.Store_error error)
-    |> require_local
+    Yeokcham_v1_store.open_repository ~root |> require_integration_store ~root
   in
   let loaded =
-    Yeokcham_v1_store.load repository
-    |> Result.map_error (fun error -> Service.Store_error error)
-    |> require_local
+    Yeokcham_v1_store.load repository |> require_integration_store ~root
   in
   let local =
     match loaded.Yeokcham_v1_store.local with
@@ -6379,11 +6448,49 @@ let native_failure_context root () =
             Core.Operation_id.to_hex operation.Integration_op.token)
           pending )
 
-let[@warning "-4"] require_integration = function
+let[@warning "-4"] require_integration ~root = function
   | Ok value -> value
   | Error error -> (
       let message = Native_integrate.error_to_string error in
       match error with
+      | Native_integrate.Pending_operation _ ->
+          fail_with_status 8 "integration-incomplete" message
+      | Native_integrate.Pending_restore _ ->
+          set_local_failure_context ~root;
+          fail_with_status 8 "recovery-pending" message
+      | Native_integrate.Metadata _ -> (
+          match Service.inspect_saved_state ~root with
+          | Ok (Store.Metadata_only metadata) ->
+              render_metadata_status ~root metadata
+          | Error error -> fail_local error
+          | Ok (Store.Verified loaded) when Service.Clone_state.pending loaded
+            ->
+              let valid = Result.is_ok (Yeokcham_encoding.text root) in
+              local_failure_context :=
+                Some
+                  (fun () ->
+                    ( `Assoc [ ("clone_state", `String "incomplete") ],
+                      [
+                        Cli_data.
+                          {
+                            arguments =
+                              [
+                                "yeokcham";
+                                "clone";
+                                "--resume";
+                                (if valid then root else String.escaped root);
+                              ];
+                            explanation =
+                              "Resume the same verified clone; do not capture \
+                               a partial workspace.";
+                            applicable = valid;
+                            confirmation_required = false;
+                          };
+                      ],
+                      None ));
+              fail_with_status 8 "clone-incomplete" message
+          | Ok (Store.Verified _) ->
+              fail_with_status 5 "integration-unavailable" message)
       | Native_integrate.Capture_error error ->
           fail_local (Service.Snapshot_error error)
       | Native_integrate.Plan_error (Integration.Invalid _) ->
@@ -6705,7 +6812,7 @@ let run_integrate arguments =
         Native_integrate.prepare ~root
           ~selected_revisions:(integration_selection root ~all names)
           ~reconcile_heads:(if heads = [] then None else Some heads)
-        |> require_integration
+        |> require_integration ~root
     | Some text -> (
         let id = Core.Plan_id.of_hex text |> require_ok Core.error_to_string in
         let repository, loaded, local = integration_repository root in
@@ -6714,7 +6821,7 @@ let run_integrate arguments =
         | None ->
             Integration.load ~store ~loaded id
             |> Result.map_error (fun e -> Native_integrate.Plan_error e)
-            |> require_integration
+            |> require_integration ~root
         | Some operation ->
             let envelope =
               Yeokcham_store.get
@@ -6725,7 +6832,7 @@ let run_integrate arguments =
             Integration.decode ~store ~loaded
               (Yeokcham_envelope.encode envelope)
             |> Result.map_error (fun e -> Native_integrate.Plan_error e)
-            |> require_integration)
+            |> require_integration ~root)
   in
   let plan_id = Core.Plan_id.to_hex (Integration.id plan) in
   let actions =
@@ -6819,7 +6926,7 @@ let run_integrate arguments =
       Some
         (Native_integrate.apply ~root ~plan:(Integration.id plan)
            ~signing_capability
-        |> require_integration)
+        |> require_integration ~root)
   in
   let code, message =
     if cancelled then
@@ -6964,7 +7071,9 @@ let run_conflicts arguments =
       (fun text -> Core.Plan_id.of_hex text |> require_ok Core.error_to_string)
       flags.selection_plan
   in
-  let inspected = Native_conflicts.inspect ~root ~plan |> require_integration in
+  let inspected =
+    Native_conflicts.inspect ~root ~plan |> require_integration ~root
+  in
   let actions =
     List.concat_map
       (fun conflict ->
@@ -7080,7 +7189,7 @@ let run_native_resolve arguments =
   in
   let result =
     Native_conflicts.resolve ~root ~plan ~conflict ~choice ~signer
-    |> require_integration
+    |> require_integration ~root
   in
   let plan_id =
     Core.Plan_id.to_hex (Integration.id result.Native_conflicts.prepared)
@@ -7161,7 +7270,9 @@ let run_native_resolve arguments =
   else (
     print_endline message;
     render_integration_plan ~root result.Native_conflicts.prepared);
-  if not result.Native_conflicts.retained then exit 8
+  if not result.Native_conflicts.retained then (
+    flush_domain_output ();
+    exit 8)
 
 let run_native_operation ~resume arguments =
   let flags, remaining = parse_local_selection_flags arguments in
@@ -7193,7 +7304,8 @@ let run_native_operation ~resume arguments =
   in
   let operation =
     if resume then
-      Native_integrate.resume ~root ~operation:token |> require_integration
+      Native_integrate.resume ~root ~operation:token
+      |> require_integration ~root
       |> fun outcome -> Option.get outcome.Native_integrate.operation
     else operation
   in
@@ -7329,7 +7441,7 @@ let run_operation_recover ~forget arguments =
       if flags.selection_preview || cancelled then operation
       else
         Native_integrate.forget_recovery_roots ~root ~operation:token
-        |> require_integration
+        |> require_integration ~root
     in
     if requested_format () = Json_format then
       domain_json ~operation_id:token_text
@@ -7355,7 +7467,7 @@ let run_operation_recover ~forget arguments =
     let preview =
       Native_integrate.recover ~root ~operation:token ~dry_run:true ~mode
         ~replan ~expected_plan:expected
-      |> require_integration
+      |> require_integration ~root
     in
     let plan_id = Core.Digest.to_hex preview.Native_integrate.recovery_plan in
     let target = preview.Native_integrate.recovery_target in
@@ -7455,7 +7567,7 @@ let run_operation_recover ~forget arguments =
       else
         Native_integrate.recover ~root ~operation:token ~dry_run:false ~mode
           ~replan ~expected_plan:(Some preview.Native_integrate.recovery_plan)
-        |> require_integration
+        |> require_integration ~root
     in
     let message =
       if cancelled then
@@ -8373,6 +8485,11 @@ let[@warning "-4"] fail_exchange error =
         (7, "exchange-authority-blocked")
     | Native.Http_error (Transport_http.Unexpected_status (401 | 403)) ->
         (7, "exchange-access-blocked")
+    | Native.Integrity_error _
+    | Native.Http_error
+        (Transport_http.Invalid_response _ | Transport_http.Response_too_large)
+      ->
+        (6, "exchange-integrity-failure")
     | Native.Http_error _ | Native.Invalid _ | Native.Store_error _
     | Native.Raw_error _ ->
         (5, "exchange-unavailable")
@@ -8868,7 +8985,7 @@ let dispatch () =
       observe_after_success [ "withdraw" ] arguments (fun () ->
           run_withdraw arguments)
   | _ :: "resolve" :: arguments ->
-      if List.mem "--decision" arguments then
+      if legacy_resolve_arguments arguments then
         observe_after_success [ "resolve" ] arguments (fun () ->
             run_resolve arguments)
       else run_native_resolve arguments

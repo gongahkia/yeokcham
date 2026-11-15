@@ -5110,6 +5110,11 @@ type local_status = {
   status_basis : Model.Core.Record_id.t option;
   status_shared_revisions :
     (Model.Core.Record_id.t * Model.Core.shared_revision) list;
+  status_resolutions :
+    (Model.Core.Record_id.t
+    * Model.Core.resolution_revision
+    * Model.Core.Record_id.t list)
+    list;
   status_publications : Store.Local.publication list;
   status_transfers :
     ((Model.Core.Record_id.t * string list) list, string) result;
@@ -5422,6 +5427,35 @@ let[@warning "-4"] inspect_local_status ~root =
               (match loaded.Store.local with
               | None -> []
               | Some local -> Store.Local.publications local);
+            status_resolutions =
+              (match loaded.Store.local with
+              | None -> []
+              | Some local ->
+                  let records = Model.Core.records (Store.Local.pool local) in
+                  records
+                  |> List.filter_map (fun (id, body) ->
+                      match body.Model.Core.payload with
+                      | Model.Core.Resolution_revision resolution ->
+                          let accepted_by =
+                            records
+                            |> List.filter_map (fun (accepted, body) ->
+                                match body.Model.Core.payload with
+                                | Model.Core.Accepted_version version
+                                  when List.exists
+                                         (Model.Core.Record_id.equal id)
+                                         version.Model.Core.resolutions ->
+                                    Some accepted
+                                | Model.Core.Accepted_version _
+                                | Model.Core.Shared_revision _
+                                | Model.Core.Branch_event _
+                                | Model.Core.Resolution_revision _ ->
+                                    None)
+                          in
+                          Some (id, resolution, accepted_by)
+                      | Model.Core.Shared_revision _
+                      | Model.Core.Accepted_version _
+                      | Model.Core.Branch_event _ ->
+                          None));
             status_transfers =
               (match loaded.Store.local with
               | None -> Ok []
