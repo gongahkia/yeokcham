@@ -26,6 +26,18 @@ let error_to_string = function
   | Application_error e -> Safe_apply.error_to_string e
   | Metadata s -> s
 
+let release_completed_plan loaded store identity =
+  let module Clone = Yeokcham_v1_transport.Core_clone in
+  if
+    Clone_guard.pending loaded
+    && Option.exists
+         (fun intent -> Clone.plan intent = Some identity)
+         (Clone_guard.intent loaded)
+  then Ok ()
+  else
+    Plan.forget ~store identity
+    |> Result.map_error (fun error -> Plan_error error)
+
 let ( let* ) = Result.bind
 let metadata r = Result.map_error (fun s -> Metadata s) r
 let plan_error r = Result.map_error (fun e -> Plan_error e) r
@@ -158,9 +170,12 @@ let prepare_with ~clone ~root ~selected_revisions ~reconcile_heads =
   with_writer ~root (fun repository ->
       let* () = no_restore root in
       let* loaded = Store.load repository |> store_error in
-      let* () = (match clone with
-        | None -> Clone_guard.require_normal loaded
-        | Some request -> Clone_guard.check_preparation loaded request) |> metadata in
+      let* () =
+        (match clone with
+          | None -> Clone_guard.require_normal loaded
+          | Some request -> Clone_guard.check_preparation loaded request)
+        |> metadata
+      in
       let* local, _, _ = context loaded in
       let* () =
         match Local.pending_operation local with
@@ -190,7 +205,10 @@ let prepare_with ~clone ~root ~selected_revisions ~reconcile_heads =
       Ok plan)
 
 let prepare = prepare_with ~clone:None
-let prepare_clone ~root ~request = prepare_with ~clone:(Some request) ~root ~selected_revisions:[] ~reconcile_heads:None
+
+let prepare_clone ~root ~request =
+  prepare_with ~clone:(Some request) ~root ~selected_revisions:[]
+    ~reconcile_heads:None
 
 let save ~observe repository loaded ~local ~project ~history =
   let* _, collaboration, _ = context loaded in
@@ -828,7 +846,9 @@ let perform ~observe ~root repository token ~resumed =
     else
       match operation.Operation.phase with
       | Operation.Completed ->
-          let* () = Plan.forget ~store operation.Operation.plan |> plan_error in
+          let* () =
+            release_completed_plan loaded store operation.Operation.plan
+          in
           Ok (outcome operation)
       | Operation.Committed ->
           let* () = ensure_proof ~root store operation in
@@ -837,7 +857,9 @@ let perform ~observe ~root repository token ~resumed =
               Operation.Completed
           in
           observe Completed_root;
-          let* () = Plan.forget ~store operation.Operation.plan |> plan_error in
+          let* () =
+            release_completed_plan loaded store operation.Operation.plan
+          in
           Ok (outcome operation)
       | Operation.Paused (stage, _) ->
           let phase =
@@ -998,7 +1020,7 @@ let apply_with ~random_bytes ~observe ~root ~plan:identity ~signing_capability =
               in
               match operation with
               | None ->
-                  let* () = Plan.forget ~store identity |> plan_error in
+                  let* () = release_completed_plan loaded store identity in
                   Ok
                     {
                       plan = identity;

@@ -72,6 +72,11 @@ def main():
     vectors["courier-state.hex"] = encode([3, [remote],
         [["origin", endpoint, b"manifest", courier, True]],
         [["origin", endpoint, b"manifest", courier]]])
+    clone = [1, "https://relay.invalid", b"a" * 32, b"r" * 32, "device-clone",
+             b"b" * 16, b"v" * 32, [b"e" * 32], None, False]
+    vectors["clone-state.hex"] = encode([4, [], [], [], clone])
+    vectors["clone-request-id.hex"] = hashlib.sha256(
+        b"yeokcham/clone-intent/v1\0" + encode(clone)).digest()
     for name, value in vectors.items():
         path = directory / name
         expected = value.hex() + "\n"
@@ -80,7 +85,7 @@ def main():
             path.write_text(expected)
         elif path.read_text() != expected:
             raise SystemExit("Core public-package fixture differs: " + name)
-    print("independent Core public-package/hash/courier vectors verified (5)")
+    print(f"independent Core public-package/hash/courier vectors verified ({len(vectors)})")
 
 
 if __name__ == "__main__":

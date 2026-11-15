@@ -224,6 +224,197 @@ let[@warning "-4"] core_outbox_canonical_and_monotonic () =
   let lost_evidence = Transport.remove_remote later ~name:"origin" in
   reject (Outbox.validate_update ~previous:acked lost_evidence)
 
+let[@warning "-4"] clone_controls_are_canonical_and_frozen () =
+  let module Core = Model.Core in
+  let module Clone = Transport.Core_clone in
+  let identifier parse byte length =
+    parse (String.make length byte) |> require_ok Core.error_to_string
+  in
+  let repository = identifier Core.Repository_id.of_raw 'a' 32
+  and root = identifier Core.Digest.of_raw 'r' 32
+  and branch = identifier Core.Branch_id.of_raw 'b' 16
+  and accepted = identifier Core.Record_id.of_raw 'v' 32
+  and event = identifier Core.Record_id.of_raw 'e' 32 in
+  let device =
+    Model.Device_id.of_string "device-clone" |> require_ok Model.error_to_string
+  in
+  let create ~url ~events =
+    Clone.create ~url ~repository ~root ~device ~branch ~accepted ~events
+  in
+  let intent =
+    create ~url:"https://relay.invalid" ~events:[ event ]
+    |> require_ok Transport.error_to_string
+  in
+  let state =
+    Clone.initialize Transport.empty_local_state intent
+    |> require_ok Transport.error_to_string
+  in
+  let bytes =
+    Transport.encode_local_state state |> require_ok Transport.error_to_string
+  in
+  let hex bytes =
+    String.init
+      (String.length bytes * 2)
+      (fun i ->
+        let b = Char.code bytes.[i / 2] in
+        "0123456789abcdef".[if i mod 2 = 0 then b lsr 4 else b land 15])
+  in
+  let vector name =
+    In_channel.with_open_bin
+      (golden_path ("core-package/" ^ name))
+      In_channel.input_all
+    |> String.trim
+  in
+  Alcotest.(check string)
+    "independent clone schema 4" (vector "clone-state.hex") (hex bytes);
+  Alcotest.(check string)
+    "independent request domain"
+    (vector "clone-request-id.hex")
+    (Clone.id intent |> require_ok Transport.error_to_string);
+  let decoded =
+    Transport.decode_local_state bytes |> require_ok Transport.error_to_string
+  in
+  Alcotest.(check string)
+    "clone state canonical round trip" bytes
+    (Transport.encode_local_state decoded
+    |> require_ok Transport.error_to_string);
+  let reject = function
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "invalid clone control accepted"
+  in
+  reject (create ~url:"http://relay.invalid" ~events:[ event ]);
+  reject (create ~url:"https://secret@relay.invalid" ~events:[ event ]);
+  reject (create ~url:"https://relay.invalid" ~events:[]);
+  reject (create ~url:"https://relay.invalid" ~events:[ event; event ]);
+  reject (Clone.finish state);
+  reject
+    (Clone.validate_update
+       ~plan_started:(fun _ -> false)
+       ~previous:Transport.empty_local_state state);
+  reject
+    (Clone.validate_update
+       ~plan_started:(fun _ -> false)
+       ~previous:state Transport.empty_local_state);
+  let plan = identifier Core.Plan_id.of_raw 'p' 32
+  and later = identifier Core.Plan_id.of_raw 'q' 32 in
+  let bound =
+    Clone.bind_plan state ~plan |> require_ok Transport.error_to_string
+  in
+  Clone.validate_update ~plan_started:(fun _ -> false) ~previous:state bound
+  |> require_ok Transport.error_to_string;
+  let replaced =
+    Clone.bind_plan bound ~plan:later |> require_ok Transport.error_to_string
+  in
+  Clone.validate_update ~plan_started:(fun _ -> false) ~previous:bound replaced
+  |> require_ok Transport.error_to_string;
+  reject
+    (Clone.validate_update
+       ~plan_started:(fun _ -> true)
+       ~previous:bound replaced);
+  reject
+    (Clone.validate_update ~plan_started:(fun _ -> false) ~previous:bound state);
+  let completed = Clone.finish bound |> require_ok Transport.error_to_string in
+  Clone.validate_update ~plan_started:(fun _ -> true) ~previous:bound completed
+  |> require_ok Transport.error_to_string;
+  reject
+    (Clone.validate_update
+       ~plan_started:(fun _ -> true)
+       ~previous:completed bound);
+  Alcotest.(check string)
+    "plan/completion do not retarget request"
+    (Clone.id intent |> require_ok Transport.error_to_string)
+    (Clone.id (Option.get (Clone.find completed))
+    |> require_ok Transport.error_to_string);
+  let value =
+    Encoding.decode bytes |> require_ok Encoding.decode_error_to_string
+  in
+  (match value with
+  | Encoding.Array
+      [ version; remotes; outgoing; incoming; Encoding.Array fields ] ->
+      List.iter
+        (fun (position, replacement) ->
+          let clone =
+            Encoding.array
+              (List.mapi
+                 (fun i old -> if i = position then replacement else old)
+                 fields)
+            |> require_ok Encoding.construction_error_to_string
+          in
+          let bad =
+            Encoding.array [ version; remotes; outgoing; incoming; clone ]
+            |> require_ok Encoding.construction_error_to_string
+            |> Encoding.encode
+          in
+          reject (Transport.decode_local_state bad))
+        [
+          (0, Encoding.integer 2L);
+          (2, Encoding.bytes "short");
+          (5, Encoding.bytes (String.make 32 'b'));
+          ( 7,
+            Encoding.array []
+            |> require_ok Encoding.construction_error_to_string );
+          (9, Encoding.bool true);
+        ]
+  | _ -> Alcotest.fail "unexpected clone schema");
+  let module Credential = Yeokcham_v1_transport_credential in
+  let scope url repo =
+    Credential.native_scope ~url ~repository:repo
+    |> require_ok Credential.error_to_string
+  in
+  let repo = Core.Repository_id.to_hex repository in
+  Alcotest.(check bool)
+    "credential realm binds endpoint" false
+    (scope "https://alice.invalid" repo = scope "https://bob.invalid" repo);
+  Alcotest.(check bool)
+    "credential realm binds repository" false
+    (scope "https://alice.invalid" repo
+    = scope "https://alice.invalid" (String.make 64 'b'))
+
+let bounded_courier_batches_stop_before_accumulating_the_inventory () =
+  let module Native = Yeokcham_v1_sync.Core in
+  let repository, capability, publisher, certificate, _ = authority () in
+  let rows =
+    List.init 4 (fun i ->
+        Transport.create_publication ~repository ~publisher
+          ~certificate:(Trust.certificate_id certificate)
+          ~parents:[]
+          ~manifest:(Transport.sha256 (string_of_int i))
+          ~signing_capability:capability
+        |> require_ok Transport.error_to_string)
+  in
+  let ids = List.map Transport.publication_id rows in
+  let fetched = ref [] in
+  let fetch id =
+    fetched := id :: !fetched;
+    Ok (List.find (fun row -> Transport.publication_id row = id) rows)
+  in
+  let limit =
+    rows
+    |> List.filteri (fun i _ -> i < 2)
+    |> List.fold_left
+         (fun sum row -> sum + String.length (Transport.encode_publication row))
+         0
+  in
+  let result =
+    Native.For_test.collect_publications ~max_bytes:limit ~fetch ~known:[] ids
+  in
+  Alcotest.(check bool)
+    "aggregate overflow refuses incomplete inventory" true
+    (Result.is_error result);
+  Alcotest.(check int)
+    "overflow stops fetch before later inventory" 3 (List.length !fetched);
+  fetched := [];
+  let selected =
+    Native.For_test.collect_publications ~max_bytes:limit ~fetch
+      ~known:(List.filteri (fun i _ -> i >= 2) ids)
+      ids
+    |> require_ok Native.error_to_string
+  in
+  Alcotest.(check int)
+    "exact bound accepts two couriers" 2 (List.length selected);
+  Alcotest.(check int)
+    "known inventory is not fetched or charged" 2 (List.length !fetched)
+
 let feed_rejects_missing_parent () =
   let repository, capability, publisher, certificate, _ = authority () in
   let parent = Transport.sha256 "missing parent" in
@@ -2832,6 +3023,423 @@ let[@warning "-4-40-42"] native_missing_remote_objects_cannot_publish_private_ca
                 true
                 (remote = Error (Transport_http.Unexpected_status 404)))))
 
+let[@warning "-4-40-42"] native_clone_verifies_materializes_and_resumes () =
+  let module Core = Model.Core in
+  let module Local = Store.Local in
+  let module Clone = Yeokcham_v1_sync.Clone in
+  let module History = Yeokcham_v1_undo in
+  let module Integrate = Service.Integrate in
+  let load root =
+    Store.open_repository ~root
+    |> require_ok Store.error_to_string
+    |> Store.load
+    |> require_ok Store.error_to_string
+  in
+  let write path bytes =
+    Out_channel.with_open_bin path (fun out -> output_string out bytes)
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let cli name arguments =
+    let output, errors, status = run_cli arguments in
+    require_cli_success name (errors ^ output) status;
+    output
+  in
+  with_https_relay (fun _ project url ->
+      with_directory "yeokcham-native-clone-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let source_root, _, _, _, _, bob, scope =
+                native_core_replicas parent signer_directory
+              in
+              Transport_config.add ~root:source_root ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              write (source_root ^ "/main.ml") "let cloned = 2\r\n";
+              let binary =
+                String.init 300731 (fun i -> Char.chr (i * 11 mod 251))
+              in
+              write (source_root ^ "/asset.bin") binary;
+              write (source_root ^ "/run.sh") "#!/bin/sh\nexit 0\n";
+              Unix.chmod (source_root ^ "/run.sh") 0o700;
+              Unix.symlink "main.ml" (source_root ^ "/link");
+              Unix.mkdir (source_root ^ "/empty") 0o700;
+              write (source_root ^ "/secret.txt") "UNSELECTED CLONE SENTINEL";
+              let shared =
+                cli "clone source share"
+                  [
+                    "share";
+                    "--root";
+                    source_root;
+                    "main.ml";
+                    "asset.bin";
+                    "run.sh";
+                    "link";
+                    "empty";
+                    "--format";
+                    "json";
+                  ]
+              in
+              let change_id =
+                Yojson.Safe.Util.(
+                  Yojson.Safe.from_string shared
+                  |> member "data" |> member "change_id" |> to_string)
+              in
+              cli "clone source accepts D privately retaining E"
+                [ "integrate"; "--root"; source_root; "--all"; "--yes" ]
+              |> ignore;
+              cli "clone source real HTTPS publication"
+                [ "exchange"; "--root"; source_root; "team" ]
+              |> ignore;
+              let source_loaded = load source_root in
+              let source_local = Option.get source_loaded.Store.local in
+              let authority =
+                Option.get
+                  (Store.authority
+                     (Option.get source_loaded.Store.collaboration))
+              in
+              let certificate =
+                Trust.certificates (Trust.authority_membership authority)
+                |> List.find (fun cert -> Trust.certificate_issuer cert = None)
+              in
+              let phrase =
+                Yeokcham_v1_recovery.verification_phrase certificate
+              in
+              let device_id =
+                Model.Device_id.to_string (Trust.device_id (device bob))
+              in
+              let clone_url = url ^ "/v1/repositories/" ^ project in
+              let clone_source =
+                Clone.source clone_url |> require_ok Clone.error_to_string
+              in
+              Alcotest.(check string)
+                "URL pins exact repository"
+                (Core.Repository_id.to_hex scope)
+                (Core.Repository_id.to_hex clone_source.Clone.repository);
+              let destination = parent ^ "/cloned" in
+              let args destination phrase =
+                [
+                  "clone";
+                  clone_url;
+                  destination;
+                  "--device";
+                  device_id;
+                  "--verify-phrase";
+                  phrase;
+                  "--format";
+                  "json";
+                ]
+              in
+              let _, _, status = run_cli (args destination "wrong phrase") in
+              Alcotest.(check bool)
+                "wrong root is blocked" true (status = Unix.WEXITED 7);
+              Alcotest.(check bool)
+                "wrong root creates no destination" false
+                (Sys.file_exists destination);
+              let outsider = capability 'z' in
+              store_test_signer signer_directory outsider;
+              let blocked =
+                Clone.run ~source:clone_source ~destination ~branch:"main"
+                  ~token:(relay_test_token ()) ~signing_capability:outsider
+                  ~verify_phrase:phrase ~expected_request:None ~preview:false
+              in
+              Alcotest.(check bool)
+                "bearer cannot enroll an unknown signer" true
+                (match blocked with
+                | Error (Clone.Blocked _) -> true
+                | _ -> false);
+              Alcotest.(check bool)
+                "unenrolled clone creates no destination" false
+                (Sys.file_exists destination);
+              let open Yojson.Safe.Util in
+              let preview =
+                cli "verified clone preview"
+                  (args destination phrase @ [ "--preview" ])
+                |> Yojson.Safe.from_string |> member "data"
+              in
+              Alcotest.(check bool)
+                "preview is read-only" false
+                (Sys.file_exists destination);
+              let request = preview |> member "request_id" |> to_string in
+              let stale =
+                Core.Digest.of_hex (String.make 64 '0')
+                |> require_ok Core.error_to_string
+              in
+              Alcotest.(check bool)
+                "different request cannot apply" true
+                (match
+                   Clone.run ~source:clone_source ~destination ~branch:"main"
+                     ~token:(relay_test_token ()) ~signing_capability:bob
+                     ~verify_phrase:phrase ~expected_request:(Some stale)
+                     ~preview:false
+                 with
+                | Error (Clone.Choice _) -> true
+                | _ -> false);
+              let result =
+                cli "native CLI clone"
+                  (args destination phrase @ [ "--request"; request ])
+                |> Yojson.Safe.from_string |> member "data"
+              in
+              Alcotest.(check bool)
+                "clone reports verified closure" true
+                (result |> member "coverage" |> member "verified_complete"
+               = `Bool true);
+              let verify_files root =
+                Alcotest.(check string)
+                  "CRLF clone" "let cloned = 2\r\n"
+                  (read (root ^ "/main.ml"));
+                Alcotest.(check string)
+                  "streamed binary clone" binary
+                  (read (root ^ "/asset.bin"));
+                Alcotest.(check bool)
+                  "executable clone" true
+                  ((Unix.stat (root ^ "/run.sh")).Unix.st_perm land 0o111 <> 0);
+                Alcotest.(check string)
+                  "symlink clone" "main.ml"
+                  (Unix.readlink (root ^ "/link"));
+                Alcotest.(check bool)
+                  "empty directory clone" true
+                  ((Unix.lstat (root ^ "/empty")).Unix.st_kind = Unix.S_DIR);
+                Alcotest.(check bool)
+                  "source private sentinel absent" false
+                  (Sys.file_exists (root ^ "/secret.txt"))
+              in
+              verify_files destination;
+              let cloned = load destination in
+              let local = Option.get cloned.Store.local in
+              Alcotest.(check bool)
+                "same accepted version, no new acceptance" true
+                (Core.Record_id.equal (Local.selected source_local).Local.basis
+                   (Local.selected local).Local.basis);
+              Alcotest.(check bool)
+                "public record map is exact" true
+                (Local.record_objects source_local = Local.record_objects local);
+              Alcotest.(check int)
+                "one navigation after private empty genesis" 2
+                (List.length (History.nodes cloned.Store.history));
+              Alcotest.(check bool)
+                "fresh workspace namespace" false
+                (History.identity source_loaded.Store.history
+                   (History.current source_loaded.Store.history)
+                = History.identity cloned.Store.history
+                    (History.current cloned.Store.history));
+              let before =
+                History.encode cloned.Store.history |> require_ok Fun.id
+              in
+              cli "completed clone resume" [ "clone"; "--resume"; destination ]
+              |> ignore;
+              Alcotest.(check string)
+                "completed retry does not navigate" before
+                (History.encode (load destination).Store.history
+                |> require_ok Fun.id);
+              cli "cloned origin exchange"
+                [ "exchange"; "--root"; destination; "origin" ]
+              |> ignore;
+              let fault_points =
+                [
+                  ( "metadata",
+                    (function Clone.After_metadata_attach -> true | _ -> false),
+                    false );
+                  ( "plan-before",
+                    (function Clone.Before_plan_bind -> true | _ -> false),
+                    false );
+                  ( "plan-after",
+                    (function Clone.After_plan_bind -> true | _ -> false),
+                    false );
+                  ( "prepared",
+                    (function
+                    | Clone.Application Integrate.Prepared_root -> true
+                    | _ -> false),
+                    false );
+                  ( "applying",
+                    (function
+                    | Clone.Application Integrate.Applying_root -> true
+                    | _ -> false),
+                    false );
+                  ( "file",
+                    (function
+                    | Clone.Application
+                        (Integrate.Mutation
+                           (Service.Safe_apply.After_mutation, _)) ->
+                        true
+                    | _ -> false),
+                    false );
+                  ( "materialized",
+                    (function
+                    | Clone.Application Integrate.Materialized_root -> true
+                    | _ -> false),
+                    true );
+                  ( "committed",
+                    (function
+                    | Clone.Application Integrate.Committed_root -> true
+                    | _ -> false),
+                    false );
+                  ( "completed",
+                    (function
+                    | Clone.Application Integrate.Completed_root -> true
+                    | _ -> false),
+                    false );
+                  ( "intent-before",
+                    (function Clone.Before_complete -> true | _ -> false),
+                    false );
+                  ( "intent-after",
+                    (function Clone.After_complete -> true | _ -> false),
+                    false );
+                ]
+              in
+              List.iter
+                (fun (label, stop, late_edit) ->
+                  let target = parent ^ "/fault-" ^ label in
+                  let child = Unix.fork () in
+                  if child = 0 then (
+                    let result =
+                      Clone.For_test.run ~source:clone_source
+                        ~destination:target ~branch:"main"
+                        ~token:(relay_test_token ()) ~signing_capability:bob
+                        ~verify_phrase:phrase ~expected_request:None
+                        ~preview:false ~observe:(fun boundary ->
+                          if stop boundary then Unix._exit 73)
+                    in
+                    (match result with
+                    | Error error -> prerr_endline (Clone.error_to_string error)
+                    | Ok _ -> ());
+                    Unix._exit 74);
+                  let _, status = Unix.waitpid [] child in
+                  Alcotest.(check bool)
+                    (label ^ " hits actual boundary")
+                    true (status = Unix.WEXITED 73);
+                  let partial = load target in
+                  let partial_local = Option.get partial.Store.local in
+                  let operations = Local.operations partial_local in
+                  if label = "metadata" then (
+                    let _, _, blocked =
+                      run_cli [ "save"; "--root"; target; "--format"; "json" ]
+                    in
+                    Alcotest.(check bool)
+                      "ordinary save cannot capture an incomplete clone" true
+                      (blocked = Unix.WEXITED 8);
+                    Alcotest.(check string)
+                      "blocked save preserves partial history"
+                      (History.encode partial.Store.history |> require_ok Fun.id)
+                      (History.encode (load target).Store.history
+                      |> require_ok Fun.id));
+                  let key = Filename.concat signer_directory device_id in
+                  Unix.rename key (key ^ ".hidden");
+                  if late_edit then
+                    write (target ^ "/main.ml")
+                      "external edit after materialization\n";
+                  Fun.protect
+                    ~finally:(fun () -> Unix.rename (key ^ ".hidden") key)
+                    (fun () ->
+                      cli
+                        (label ^ " resumes in fresh CLI without signer")
+                        [ "clone"; "--resume"; target; "--format"; "json" ]
+                      |> ignore);
+                  let final = load target in
+                  let final_local = Option.get final.Store.local in
+                  Alcotest.(check int)
+                    (label ^ " one operation") 1
+                    (List.length (Local.operations final_local));
+                  List.iter
+                    (fun prior ->
+                      Alcotest.(check bool)
+                        (label ^ " same operation token")
+                        true
+                        (List.exists
+                           (fun current ->
+                             Core.Operation_id.equal prior.Local.Operation.token
+                               current.Local.Operation.token)
+                           (Local.operations final_local)))
+                    operations;
+                  Alcotest.(check int)
+                    (label ^ " no partial capture/duplicate navigation")
+                    2
+                    (List.length (History.nodes final.Store.history));
+                  Alcotest.(check bool)
+                    (label ^ " no duplicate public history")
+                    true
+                    (Local.record_objects source_local
+                    = Local.record_objects final_local);
+                  if late_edit then
+                    Alcotest.(check string)
+                      "late external edit preserved"
+                      "external edit after materialization\n"
+                      (read (target ^ "/main.ml"))
+                  else verify_files target;
+                  let history =
+                    History.encode final.Store.history |> require_ok Fun.id
+                  in
+                  cli
+                    (label ^ " repeated resume")
+                    [ "clone"; "--resume"; target ]
+                  |> ignore;
+                  Alcotest.(check string)
+                    (label ^ " exact repeat") history
+                    (History.encode (load target).Store.history
+                    |> require_ok Fun.id))
+                fault_points;
+              write
+                (destination ^ "/bob-private.txt")
+                "Bob's compatible private E";
+              write (source_root ^ "/main.ml") "let cloned = 3\r\n";
+              cli "Alice updates exact shared change"
+                [
+                  "share";
+                  "--root";
+                  source_root;
+                  "main.ml";
+                  "--update";
+                  change_id;
+                ]
+              |> ignore;
+              cli "Alice exchanges new immutable revision"
+                [ "exchange"; "--root"; source_root; "team" ]
+              |> ignore;
+              let before_receipt =
+                History.encode (load destination).Store.history
+                |> require_ok Fun.id
+              in
+              cli "cloned Bob receives update"
+                [
+                  "exchange";
+                  "--root";
+                  destination;
+                  "origin";
+                  "--format";
+                  "json";
+                ]
+              |> ignore;
+              Alcotest.(check string)
+                "receipt preserves cloned private history" before_receipt
+                (History.encode (load destination).Store.history
+                |> require_ok Fun.id);
+              Alcotest.(check string)
+                "receipt leaves cloned working files" "let cloned = 2\r\n"
+                (read (destination ^ "/main.ml"));
+              cli "cloned Bob previews update"
+                [
+                  "integrate";
+                  "--root";
+                  destination;
+                  "--all";
+                  "--preview";
+                  "--format";
+                  "json";
+                ]
+              |> ignore;
+              Alcotest.(check string)
+                "preview leaves working files" "let cloned = 2\r\n"
+                (read (destination ^ "/main.ml"));
+              cli "cloned Bob accepts update"
+                [ "integrate"; "--root"; destination; "--all"; "--yes" ]
+              |> ignore;
+              Alcotest.(check string)
+                "updated CRLF contents" "let cloned = 3\r\n"
+                (read (destination ^ "/main.ml"));
+              Alcotest.(check string)
+                "later E remains private" "Bob's compatible private E"
+                (read (destination ^ "/bob-private.txt"));
+              cli "cloned Bob exchanges accepted update"
+                [ "exchange"; "--root"; destination; "origin" ]
+              |> ignore)))
+
 let () =
   Alcotest.run "V1 transport"
     [
@@ -2848,9 +3456,20 @@ let () =
           Alcotest.test_case
             "Core outbound controls are canonical and monotonic" `Quick
             core_outbox_canonical_and_monotonic;
+          Alcotest.test_case
+            "clone controls and credential realms are canonical and frozen"
+            `Quick clone_controls_are_canonical_and_frozen;
+          Alcotest.test_case
+            "foreground courier inventory has an aggregate metadata bound"
+            `Quick
+            bounded_courier_batches_stop_before_accumulating_the_inventory;
         ] );
       ( "relay",
         [
+          Alcotest.test_case
+            "native clone verifies contents and resumes real application \
+             boundaries"
+            `Slow native_clone_verifies_materializes_and_resumes;
           Alcotest.test_case
             "native Core exchange preserves privacy and exact retry through TLS"
             `Slow native_core_exchange_uses_enrolled_replicas_and_exact_retry;

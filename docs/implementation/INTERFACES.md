@@ -1631,8 +1631,8 @@ is the clone bootstrap prerequisite: current admission and full composition
 verification, one event/accepted head and a unique empty accepted ancestor. It
 creates only a private empty position, signs no second shared genesis and leaves
 other branches known-only. The caller must initialize matching empty history and
-use verified integration for materialization. The automated peer fixture uses
-this API; ordinary clone remains unimplemented.
+use verified integration for materialization. `Sync.Clone` now supplies the native
+consumer described below; the earlier exchange fixture still uses library bootstrap.
 
 `Native_sync.report` contains received records/branches/publications, legacy
 receipt count, known shared-record count and actual selected branch/basis/cursor.
@@ -1654,5 +1654,109 @@ accepted-history exchange. It checks actual relay object bytes for both private
 sentinels. Signers are disposable explicit test capabilities. Bob is initialized
 through the library, so this is native exchange evidence, not clone, native
 custody onboarding, human usability, broad performance qualification or complete
-P3 acceptance. Native clone, first selection of known-only branches, resolutions,
+P3 acceptance. First selection of known-only branches, resolutions,
 missing-content inspection and the full criterion/fault audit remain required.
+
+### P3 verified native clone (in progress)
+
+`Yeokcham_v1_sync.Clone` aliases `Native_clone`. `source : string -> (source,error)
+result` parses `https://RELAY/v1/repositories/REPOSITORY_ID` into credential-free
+HTTPS endpoint and typed repository ID. `default_directory` derives a useful
+name; `check_new_destination` requires a new/empty nonsymlink directory and an
+existing real parent. `run ~source ~destination ~branch ~token ~signing_capability
+~verify_phrase ~expected_request ~preview` returns exact request/repository/branch/
+accepted/snapshot IDs, counts, preview/resume facts and optional private cursor/
+operation/uncaptured-work facts. Errors distinguish invalid input, blocked
+authority, choice, exchange, store and application failures.
+
+The consumer uses `Native_sync.Fetch.inventory/publication/order_feed/with_core`.
+`Fetch.publications ~known` bounds accumulated canonical courier bytes by the same
+`Transport.max_local_state_bytes` (16 MiB) used for durable control, stops at the
+first excess, and skips known IDs. Clone checks its growing courier/manifest
+catalogue with `Core_inbox.receive` before fetching each package's content. Thus
+an unpersistable aggregate refuses during download, before destination creation;
+individual packet/count limits are not the only accumulated-memory bound.
+`with_core` owns the temporary package and calls an authority check before content
+fetch. `Package.Core.metadata_authority` loads canonical metadata authority;
+`verify_public_records` performs full historical signature/reference/composition
+verification for the combined public map. Actual clone also requires current
+courier authority, an enrolled active local device, a reconciled authority head
+and a unique branch name/accepted/event head. The independent public root phrase
+must match each verified authority root. A relay bearer cannot enroll a member.
+Record/object unions are bounded at 100000/1000000; existing transport/page/control
+bounds still apply. The reusable raw cache consists only of verified public closure.
+
+`Safe_apply.check_target ~store ~target` verifies full materialization closure,
+bounded symlink representation and reserved paths before workspace initialization.
+Actual destination representation, observations and obstructions are still checked
+by safe application. Clone copies only verified artifact IDs, not raw-store listing.
+`Store.init_local_collaborative_with` generates a fresh workspace/history namespace;
+`Local.initialize_received` imports the public graph with an empty private position,
+without signing a second genesis. It generates a private member name/draft and
+configures `origin`. A fully initialized sibling staging directory supplies metadata
+through an exclusive native rename; parent/destination directories are fsynced.
+An existing empty mount on another filesystem may refuse the rename; there is no
+replacement or cross-filesystem copy fallback. Pre-attachment interruption leaves
+no activated workspace and requires rerunning the original command. Staging is
+outside the working root, so it cannot become a normal captured tree.
+
+Private transport schema 4 is used exactly when a clone intent exists:
+
+```text
+[4, legacy_remote_rows, frozen_core_rows, verified_courier_rows, clone_intent]
+clone_intent = [1, endpoint_url, repository_bytes32, root_certificate_bytes32,
+                device_id_text, branch_bytes16, accepted_bytes32,
+                [branch_event_bytes32], integration_plan_bytes32_or_null,
+                complete_bool]
+```
+
+`Transport.Core_clone.create/find/id/initialize/bind_plan/finish/validate_update`
+owns that control. Request identity is SHA-256 of `yeokcham/clone-intent/v1\0`
+plus canonical intent bytes with null plan and false completion. The immutable
+source selection binds endpoint, repository, root, device, branch, accepted head
+and its one event head. Actual canonical integration plan 46 separately binds
+workspace/cursor/observation and both output snapshots. No envelope code is added.
+URLs are at most 4096 bytes and must be HTTPS without credentials/query/fragment
+or control/whitespace characters. Typed IDs enforce lengths. Completion requires
+a plan. Unknown versions, malformed fields and noncanonical state refuse.
+Schemas 1/2/3 keep their previous canonical bytes when no clone intent exists.
+Independent Python vectors cover schema 4 and the request digest.
+
+The existing root writer rejects introduction of clone intent after initialization,
+erasure, request retargeting, completion reversal and retargeting a started plan.
+Only an unstarted plan may be refreshed. `Local_service.Clone_state` exposes the
+intent/pending/recovered guards. Ordinary capture refuses pending clone; only its
+bound application may run. `Integrate.prepare_clone ~root ~request` checks frozen
+heads and prepares the existing integration plan. Plan retention precedes binding,
+binding precedes the first application operation, and a pending clone owns the plan
+until completion or explicit recovery. Integration completion skips early clone
+plan release; clone marks completion under the root before releasing it. Resume
+also retries that cleanup after an interrupted completion acknowledgement.
+
+`Clone.resume ~root` uses only retained local objects and the recorded plan/operation;
+no network or signing provider is needed. The integration engine reuses the known
+accepted version with no new signed records. Private navigation occurs once when
+needed. Prepared/Applying/Materialized/Committed/Completed facts, protected safety
+roots and external-edit handling remain the ordinary integration protocol. A
+recovered operation is closed and clone resume refuses to restart it. A completed
+repeat reports current private observation truthfully instead of rewriting files.
+`For_test.run/resume` expose verified, before/after metadata attachment, before/after
+plan binding, actual integration application and before/after completion boundaries.
+
+`Transport_credential.native_scope ~url ~repository` derives `native:` plus SHA-256
+of `yeokcham/native-relay-credential/v1\0`, exact endpoint, NUL, and repository hex.
+`load_for_repository/save_for_repository` use that realm through the existing
+credential adapter. Native exchange no longer falls back to a remote-name-only
+credential. Remote login saves both legacy and scoped realms. Clone prompts only
+in interactive text mode or reads one bounded line with explicit `--token-stdin`.
+Preview neither saves credentials nor initializes a destination. Actual clone
+requires successful scoped credential persistence first. Test bypass remains
+explicitly gated and is not native custody qualification.
+
+Ordinary CLI `clone` emits schema-2 domain JSON or readable text, generated names,
+exact source request ID, local closure and foreground coverage. `--request` refuses
+a changed source selection after preview. `--resume DIRECTORY` is exclusive of
+new-clone options. Failure data identifies whether metadata is attached and offers
+an applicable local resume action only after attachment. Clone runs no project hooks.
+Native branch switching, conflict resolution, missing-content inspection and the
+remaining authority/error/fault matrix are still P3 work.

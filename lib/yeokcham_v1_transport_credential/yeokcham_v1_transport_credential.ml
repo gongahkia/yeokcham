@@ -128,13 +128,23 @@ let save ~remote ~token =
         | Error error -> Error error)
 
 let native_scope ~url ~repository =
-  if not (Yeokcham_v1_transport.valid_digest repository)
-     || String.length url > 4096 || not (String.starts_with ~prefix:"https://" url)
-     || String.length url <= 8 || String.exists (function
-       | '\000' | '\r' | '\n' | ' ' | '\t' | '@' | '?' | '#' -> true | _ -> false) url then
-    Error Invalid
-  else Ok ("native:" ^ Yeokcham_v1_transport.sha256
-      ("yeokcham/native-relay-credential/v1\000" ^ url ^ "\000" ^ repository))
+  if
+    (not (Yeokcham_v1_transport.valid_digest repository))
+    || String.length url > 4096
+    || (not (String.starts_with ~prefix:"https://" url))
+    || String.length url <= 8
+    || String.exists
+         (function
+           | '\000' | '\r' | '\n' | ' ' | '\t' | '@' | '?' | '#' -> true
+           | _ -> false)
+         url
+  then Error Invalid
+  else
+    Ok
+      ("native:"
+      ^ Yeokcham_v1_transport.sha256
+          ("yeokcham/native-relay-credential/v1\000" ^ url ^ "\000" ^ repository)
+      )
 
 let load_for_repository ~url ~repository =
   match native_scope ~url ~repository with

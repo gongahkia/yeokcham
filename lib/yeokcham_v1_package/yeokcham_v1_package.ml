@@ -1612,8 +1612,12 @@ module Core = struct
       (Object_set.elements objects)
 
   let verify_public_records ~source ~authority ~records =
-    let* repository = M.Repository_id.of_hex
-        (Trust.repository (Trust.authority_membership authority) |> Trust.Repository_id.to_string) |> model in
+    let* repository =
+      M.Repository_id.of_hex
+        (Trust.repository (Trust.authority_membership authority)
+        |> Trust.Repository_id.to_string)
+      |> model
+    in
     verify_records source authority repository records
 
   let create ~source ~destination ~authority ~records ~selected_branch ~titles =

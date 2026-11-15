@@ -295,6 +295,17 @@ let commands =
     command [ "semantic"; "server"; "remove" ];
     command [ "sync" ];
     command [ "exchange" ];
+    command [ "clone" ]
+      ~options:
+        [
+          path "--resume";
+          identifier "--device";
+          option "--verify-phrase" Free_argument;
+          option "--branch" Free_argument;
+          identifier "--request";
+          flag "--preview";
+          flag "--token-stdin";
+        ];
     command [ "relay"; "serve" ]
       ~options:
         [ path "--config"; path "--storage"; option "--listen" Free_argument ];

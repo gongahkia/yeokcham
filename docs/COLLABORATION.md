@@ -1,8 +1,8 @@
 # Collaboration and relay operations
 
 This guide is for a small trusted team using V1's explicit authority and
-transfer boundaries. It is not a Git migration, a general clone recipe, or an
-online membership workflow. Start with the local recovery tutorial before
+transfer boundaries. Native clone requires prior enrollment; it does not perform
+online membership enrollment or Git migration. Start with the local recovery tutorial before
 adding another person.
 
 ## Selected native publication (P3 in progress)
@@ -35,7 +35,7 @@ publication receipts separately from accepted heads. Transfer remains pending
 until an exact native courier is acknowledged by a configured relay. Status lists
 the acknowledging remotes and preserves those facts when newer work is pending.
 The legacy package journeys below carry the earlier V1 record family. Native
-clone and complete conflict journeys remain required before P3 is complete.
+conflict journeys remain required before P3 is complete. Native clone is described below.
 
 ## Foreground native exchange (P3 in progress)
 
@@ -49,7 +49,10 @@ yeokcham exchange team --format json
 yeokcham exchange team
 ```
 
-Remote login uses the existing credential adapter. A relay bearer token grants
+Remote login uses the existing credential adapter and binds native credentials
+to the exact endpoint and repository. An old alias-only credential needs another
+login before native exchange; credentials from another workspace's equal alias
+are not a fallback. A relay bearer token grants
 byte-storage access; membership still requires the verified repository authority.
 The sender signs a courier with its enrolled local device. A pending frozen
 courier can resume without another signature. The repository identity and known
@@ -75,10 +78,68 @@ record. No managed background downloads or backup success is claimed. The client
 rescans the bounded relay inventory because its hash-order cursor is not an
 arrival high-water mark.
 
-Ordinary clone is still unfinished. Automated TLS tests create Bob's empty,
-already enrolled replica through the library, then run fresh CLI sharing,
-exchange and integration processes. That setup is not a supported clone command,
-native custody onboarding, or human-usability evidence.
+## Verified native clone (P3 in progress)
+
+Obtain a repository URL, independently compare the public root-verification
+phrase, and enroll the local device through the existing membership ceremony
+before cloning. Relay access alone cannot enroll a device. HTTPS trust and the
+local signing provider must already work. Use the device ID printed by that
+ceremony; workspace, draft, branch selection and history identities are generated.
+
+```sh
+yeokcham clone https://YOUR_RELAY/v1/repositories/REPOSITORY_ID my-project \
+  --device DEVICE_ID --verify-phrase "PUBLIC ROOT WORDS" --preview
+yeokcham clone https://YOUR_RELAY/v1/repositories/REPOSITORY_ID my-project \
+  --device DEVICE_ID --verify-phrase "PUBLIC ROOT WORDS" --request REQUEST_ID
+yeokcham status --root my-project
+yeokcham exchange --root my-project origin
+```
+
+The default directory is `yeokcham-` plus the repository ID's first twelve hex
+digits. The default branch is `main`; `--branch NAME` selects an unambiguous
+shared name. Incomparable heads require reconciliation by an existing member.
+Clone does not choose a divergent head. It selects the branch's unique accepted
+version; pending shared revisions remain available for later explicit integration.
+
+Tokens come from the endpoint/repository credential scope or a text-mode terminal
+prompt. Noninteractive callers can pass `--token-stdin` and supply one secret line
+through standard input. Never put a bearer in URL/arguments. Actual clone stores
+the scoped credential before workspace initialization; unavailable custody blocks
+it. Preview does not save credentials or create a destination, history or operation.
+Its request ID binds the verified source selection; a changed selection refuses
+`--request` and needs another preview.
+
+Clone downloads and verifies complete advertised native closure, authority and
+root identity before initializing a new/empty destination. It copies only that
+verified public closure, creates fresh private empty history, and materializes the
+selected accepted version with the existing safe integration engine. It signs no
+new shared genesis/acceptance and copies no source private history, files or keys.
+Other received branches remain known-only until supported local selection.
+
+```sh
+yeokcham clone --resume my-project
+yeokcham operation show --root my-project OPERATION_ID
+```
+
+After workspace metadata is attached, resume uses the frozen local selection and
+closure without network access or another signer. Ordinary save/capture is blocked
+until completion or explicit operation recovery. File replacement uses the same
+identity checks, protected safety contents and interrupted-operation protocol as
+integration. Changes made after materialization remain private disk edits. A
+recovered clone operation is closed and cannot be restarted by clone resume.
+
+Before metadata attachment, an interruption may leave an empty destination and an
+orphaned sibling staging directory. Rerun the original URL/directory command; no
+workspace was activated. Attachment uses an exclusive native rename and refuses
+replacement. A destination on a filesystem different from its parent may refuse
+that rename before ordinary-file application; no cross-filesystem copy fallback
+is provided. Preserve unexpected staging contents for inspection.
+
+All transfers run in the foreground. Reported closure covers verified locally
+known shared work, not proof that a relay disclosed every remote record. Automated
+TLS tests use disposable explicit signing capabilities; they do not qualify native
+custody onboarding or human usability. Known-only branch switching, complete
+conflict resolution and the remaining P3 audit are still outstanding.
 
 ## Local shared acceptance (P3 in progress)
 

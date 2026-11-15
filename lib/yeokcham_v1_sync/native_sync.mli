@@ -57,6 +57,13 @@ type boundary =
   | Acknowledgement_recorded of string
 
 module For_test : sig
+  val collect_publications :
+    max_bytes:int ->
+    fetch:(string -> (Yeokcham_v1_transport.publication, error) result) ->
+    known:string list ->
+    string list ->
+    (Yeokcham_v1_transport.publication list, error) result
+
   val run :
     observe:(boundary -> unit) ->
     root:string ->
@@ -68,17 +75,39 @@ module For_test : sig
 end
 
 module Fetch : sig
-  val inventory : Yeokcham_v1_transport_http.client -> string -> (string list, error) result
-  val publication : Yeokcham_v1_transport_http.client -> string -> string ->
+  val publications :
+    known:string list ->
+    Yeokcham_v1_transport_http.client ->
+    string ->
+    string list ->
+    (Yeokcham_v1_transport.publication list, error) result
+
+  val inventory :
+    Yeokcham_v1_transport_http.client -> string -> (string list, error) result
+
+  val publication :
+    Yeokcham_v1_transport_http.client ->
+    string ->
+    string ->
     (Yeokcham_v1_transport.publication, error) result
-  val order_feed : known:Yeokcham_v1_transport.publication_reference list ->
-    Yeokcham_v1_transport.publication list -> (Yeokcham_v1_transport.publication list, error) result
+
+  val order_feed :
+    known:Yeokcham_v1_transport.publication_reference list ->
+    Yeokcham_v1_transport.publication list ->
+    (Yeokcham_v1_transport.publication list, error) result
+
   val with_core :
-    root:string -> client:Yeokcham_v1_transport_http.client -> repository:Core.Repository_id.t ->
-    source:Yeokcham_store.repository -> known_authority:Yeokcham_v1_trust.authority option ->
+    root:string ->
+    client:Yeokcham_v1_transport_http.client ->
+    repository:Core.Repository_id.t ->
+    source:Yeokcham_store.repository ->
+    known_authority:Yeokcham_v1_trust.authority option ->
     reusable:Yeokcham_store.Stored_object_id.t list ->
-    check_authority:(Yeokcham_v1_trust.authority -> (unit, error) result) -> manifest:string ->
-    (package:string -> Yeokcham_v1_package.Core.prepared -> ('a, error) result) -> ('a, error) result
+    check_authority:(Yeokcham_v1_trust.authority -> (unit, error) result) ->
+    manifest:string ->
+    (package:string -> Yeokcham_v1_package.Core.prepared -> ('a, error) result) ->
+    ('a, error) result
   (** Owned temporary package lifetime. Only already verified public IDs may be
-      supplied as reusable. No workspace, history, mutable head or files move. *)
+      supplied as reusable. No workspace, history, mutable head or files move.
+  *)
 end

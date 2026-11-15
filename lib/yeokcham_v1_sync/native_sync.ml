@@ -151,6 +151,36 @@ let fetch_publication client project id =
   else
     Error (Invalid "relay courier route does not match its canonical identity")
 
+let collect_publications ~max_bytes ~fetch ~known ids =
+  if max_bytes < 0 || max_bytes > Transport.max_local_state_bytes then
+    Error (Invalid "invalid foreground metadata bound")
+  else
+    let* _, rows =
+      List.fold_left
+        (fun result id ->
+          let* bytes, rows = result in
+          if List.mem id known then Ok (bytes, rows)
+          else
+            let* publication = fetch id in
+            let size =
+              String.length (Transport.encode_publication publication)
+            in
+            if size > max_bytes - bytes then
+              Error
+                (Invalid
+                   "relay courier metadata exceeds the foreground batch bound; \
+                    coverage is incomplete")
+            else Ok (bytes + size, publication :: rows))
+        (Ok (0, []))
+        ids
+    in
+    Ok (List.rev rows)
+
+let fetch_publications ~known client project ids =
+  collect_publications ~max_bytes:Transport.max_local_state_bytes
+    ~fetch:(fetch_publication client project)
+    ~known ids
+
 let order_feed ~known publications =
   let* () = Transport.validate_feed ~known publications |> transport in
   let rec order reversed pending =
@@ -210,8 +240,8 @@ module Id_map = Map.Make (struct
   let compare = Raw.Stored_object_id.compare
 end)
 
-let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client project source directory
-    manifest_bytes =
+let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
+    project source directory manifest_bytes =
   let* scope =
     Core.Repository_id.of_hex project
     |> Result.map_error Core.error_to_string
@@ -319,7 +349,9 @@ let[@warning "-4"] fetch_core ~known_authority ~reusable ~check_authority client
       (fun (namespace, id) -> metadata namespace 0 id)
       (Package.Core.metadata_roots manifest)
   in
-  let* authority = Package.Core.metadata_authority source manifest known_authority |> package in
+  let* authority =
+    Package.Core.metadata_authority source manifest known_authority |> package
+  in
   let* () = check_authority authority in
   let* objects = Package.Core.inventory source manifest |> package in
   let sizes =
@@ -432,11 +464,19 @@ let[@warning "-4"] receive client project root remote endpoint repository
         | Yeokcham_encoding.Array (Yeokcham_encoding.Integer 2L :: _) ->
             let* loaded = Store.load repository |> store in
             let* local, _, authority = context loaded in
-            let* reusable = Package.Core.public_object_ids ~source:(Store.underlying_store repository)
-                ~authority ~records:(Store.Local.record_objects local) |> package in
+            let* reusable =
+              Package.Core.public_object_ids
+                ~source:(Store.underlying_store repository)
+                ~authority
+                ~records:(Store.Local.record_objects local)
+              |> package
+            in
             let* () =
-              fetch_core ~known_authority:(Some authority) ~reusable ~check_authority:(fun _ -> Ok ())
-                client project (Store.underlying_store repository) directory manifest
+              fetch_core ~known_authority:(Some authority) ~reusable
+                ~check_authority:(fun _ -> Ok ())
+                client project
+                (Store.underlying_store repository)
+                directory manifest
             in
             let* received =
               Service.Core_receive.receive_publication ~root ~remote ~endpoint
@@ -548,7 +588,9 @@ let run_with ~observe ~root ~remote ~load_signing_capability =
   in
   let* token =
     Credential.load_for_repository ~url:config.Config.url
-      ~repository:(Core.Repository_id.to_hex (Core.pool_repository (Store.Local.pool local)))
+      ~repository:
+        (Core.Repository_id.to_hex
+           (Core.pool_repository (Store.Local.pool local)))
     |> Result.map_error Credential.error_to_string
     |> invalid
   in
@@ -561,17 +603,8 @@ let run_with ~observe ~root ~remote ~load_signing_capability =
       (Transport.find_remote (Store.transport collaboration) ~name:remote)
   in
   let known_ids = List.map Transport.reference_id known in
-  let* publications =
-    List.fold_left
-      (fun result id ->
-        let* publications = result in
-        if List.mem id known_ids then Ok publications
-        else
-          let* publication = fetch_publication client project id in
-          Ok (publication :: publications))
-      (Ok []) ids
-  in
-  let* publications = order_feed ~known (List.rev publications) in
+  let* publications = fetch_publications ~known:known_ids client project ids in
+  let* publications = order_feed ~known publications in
   let* records, branches, legacy =
     List.fold_left
       (fun result publication ->
@@ -617,18 +650,26 @@ let run = run_with ~observe:(fun _ -> ())
 
 module For_test = struct
   let run = run_with
+  let collect_publications = collect_publications
 end
 
 module Fetch = struct
   let inventory = inventory
   let publication = fetch_publication
+  let publications = fetch_publications
   let order_feed = order_feed
 
   let with_core ~root ~client ~repository ~source ~known_authority ~reusable
       ~check_authority ~manifest action =
     with_package root (fun directory ->
         let project = Core.Repository_id.to_hex repository in
-        let* () = fetch_core ~known_authority ~reusable ~check_authority client project source directory manifest in
-        let* prepared = Package.Core.prepare ~package:directory ~repository ~known_authority |> package in
+        let* () =
+          fetch_core ~known_authority ~reusable ~check_authority client project
+            source directory manifest
+        in
+        let* prepared =
+          Package.Core.prepare ~package:directory ~repository ~known_authority
+          |> package
+        in
         action ~package:directory prepared)
 end

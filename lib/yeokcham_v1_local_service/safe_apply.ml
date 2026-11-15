@@ -785,12 +785,18 @@ let check_target ~store ~target =
   guard (fun () ->
       let snapshot = S.Snapshot.load store target |> require_snapshot in
       let actions = S.Materialize.plan store snapshot |> require_target_plan in
-      List.iter (fun action ->
-          let path = match action with
+      List.iter
+        (fun action ->
+          let path =
+            match action with
             | S.Materialize.Create_directory path
             | S.Materialize.Write_file { path; _ }
-            | S.Materialize.Create_symlink { path; _ } -> path in
-          if not (valid_path path) then refuse "target contains a mandatory metadata path") actions)
+            | S.Materialize.Create_symlink { path; _ } ->
+                path
+          in
+          if not (valid_path path) then
+            refuse "target contains a mandatory metadata path")
+        actions)
 
 let destination t =
   match (t.destination_parent, t.actions) with

@@ -126,6 +126,7 @@ let native_json_command command =
        [
          "status";
          "exchange";
+         "clone";
          "integrate";
          "operation";
          "operation-show";
@@ -179,6 +180,7 @@ let domain_command command =
        [
          "status";
          "exchange";
+         "clone";
          "integrate";
          "operation";
          "operation-show";
@@ -589,6 +591,9 @@ let usage_text =
   \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
   \  yeokcham sync [--root PATH] NAME\n\
   \  yeokcham exchange [--root PATH] NAME [--format text|json]\n\
+  \  yeokcham clone URL [DIRECTORY] --device ID --verify-phrase WORDS \
+   [--branch NAME] [--preview] [--request ID] [--token-stdin]\n\
+  \  yeokcham clone --resume DIRECTORY [--format text|json]\n\
   \  yeokcham relay serve --config PATH\n\
   \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
   \  yeokcham relay access issue --storage PATH --repository ID --scope \
@@ -626,8 +631,9 @@ let help_for = function
        ^ "checkpoints, explicit shared revisions, unresolved decisions, and "
        ^ "deliveries distinct.\n\n"
        ^ "Start with a source build, then read docs/GETTING_STARTED.md. "
-       ^ "This checkout is development source. Git interchange and general "
-       ^ "clone are not supported.\n\n"
+       ^ "This checkout is development source. Native HTTPS clone requires an "
+       ^ "enrolled local device and independent root verification. Git \
+          interchange " ^ "is not supported.\n\n"
        ^ "Use `yeokcham help COMMAND` or `yeokcham COMMAND --help` for one "
        ^ "supported command. Invalid invocations exit with an error.\n\n"
        ^ usage_text)
@@ -986,6 +992,22 @@ let help_for = function
          history. Transfers run in the foreground; retry this command after \
          interruption. Local acceptance and relay acknowledgement are separate \
          facts."
+  | [ "clone" ] ->
+      Some
+        "usage: yeokcham clone https://RELAY/v1/repositories/REPOSITORY \
+         [DIRECTORY] --device DEVICE --verify-phrase \"PUBLIC WORDS\" \
+         [--branch NAME] [--preview] [--request ID] [--token-stdin] [--format \
+         text|json]\n\
+        \       yeokcham clone --resume DIRECTORY [--format text|json]\n\n\
+         Verify shared records and complete contents before creating a \
+         workspace in a new/empty directory. Requires an already enrolled \
+         local signing device, independent public root phrase, HTTPS trust and \
+         a relay bearer. A bearer does not enroll a member. Default branch: \
+         main. Preview creates no destination and returns an exact request ID. \
+         Tokens come from scoped custody or an interactive prompt; \
+         --token-stdin reads one bounded secret line without echo. Resume an \
+         attached clone locally without network or a signing provider. Clone \
+         never executes project hooks."
   | [ "relay" ] ->
       Some
         "usage: yeokcham relay serve|access issue|rotate|revoke|list ...\n\n\
@@ -7151,7 +7173,8 @@ let run_remote_login arguments =
   Transport_credential.save ~remote:name ~token
   |> require_ok Transport_credential.error_to_string;
   Transport_credential.save_for_repository ~url:remote.Transport_config.url
-    ~repository:(Trust.Repository_id.to_string identity.Service.repository) ~token
+    ~repository:(Trust.Repository_id.to_string identity.Service.repository)
+    ~token
   |> require_ok Transport_credential.error_to_string;
   Printf.printf "credential saved for remote %s\n" name
 
@@ -7729,6 +7752,266 @@ let[@warning "-4"] fail_exchange error =
   in
   fail_with_status status code (Native.error_to_string error)
 
+let fail_clone = function
+  | Sync.Clone.Exchange_error error -> fail_exchange error
+  | Sync.Clone.Blocked message ->
+      fail_with_status 7 "clone-authority-blocked" message
+  | Sync.Clone.Choice message -> fail_with_status 3 "clone-needs-choice" message
+  | Sync.Clone.Invalid message -> fail_with_status 6 "clone-invalid" message
+  | Sync.Clone.Store_error error ->
+      fail_with_status 5 "clone-store-unavailable"
+        (Yeokcham_v1_store.error_to_string error)
+  | Sync.Clone.Integration_error error ->
+      fail_with_status 8 "clone-application-incomplete"
+        (Service.Integrate.error_to_string error)
+
+let read_token_stdin () =
+  let buffer = Buffer.create 128 in
+  let rec loop () =
+    match input_char stdin with
+    | '\n' -> ()
+    | '\000' | '\r' ->
+        fail_with_status 7 "clone-credential-invalid"
+          "relay token contains an invalid character"
+    | character ->
+        if Buffer.length buffer >= 4096 then
+          fail_with_status 7 "clone-credential-invalid"
+            "relay token exceeds 4096 bytes";
+        Buffer.add_char buffer character;
+        loop ()
+    | exception End_of_file -> ()
+  in
+  loop ();
+  if Buffer.length buffer = 0 then
+    fail_with_status 7 "clone-credential-missing" "no relay token was provided";
+  Buffer.contents buffer
+
+let run_clone arguments =
+  let module Clone = Sync.Clone in
+  let failure_context root =
+    local_failure_context :=
+      Some
+        (fun () ->
+          let attached = Sys.file_exists (Filename.concat root ".yeokcham") in
+          let representable = Result.is_ok (Yeokcham_encoding.text root) in
+          ( `Assoc
+              [
+                ("root", json_byte_path root);
+                ("workspace_attached", `Bool attached);
+              ],
+            [
+              Cli_data.
+                {
+                  arguments =
+                    [
+                      "yeokcham";
+                      "clone";
+                      "--resume";
+                      (if representable then root else String.escaped root);
+                    ];
+                  explanation =
+                    (if attached then
+                       "Resume the frozen local clone without another signer \
+                        or network request."
+                     else
+                       "No workspace is attached; rerun the original clone \
+                        command after correcting the reported problem.");
+                  applicable = attached && representable;
+                  confirmation_required = false;
+                };
+            ],
+            None ))
+  in
+  let resume = ref None
+  and device = ref None
+  and phrase = ref None
+  and branch = ref None
+  and request = ref None
+  and preview = ref false
+  and token_stdin = ref false in
+  let assign field value =
+    if Option.is_some !field then usage () else field := Some value
+  in
+  let rec parse positional = function
+    | [] -> List.rev positional
+    | "--resume" :: value :: rest ->
+        assign resume value;
+        parse positional rest
+    | "--device" :: value :: rest ->
+        assign device value;
+        parse positional rest
+    | "--verify-phrase" :: value :: rest ->
+        assign phrase value;
+        parse positional rest
+    | "--branch" :: value :: rest ->
+        assign branch value;
+        parse positional rest
+    | "--request" :: value :: rest ->
+        assign request value;
+        parse positional rest
+    | "--preview" :: rest when not !preview ->
+        preview := true;
+        parse positional rest
+    | "--token-stdin" :: rest when not !token_stdin ->
+        token_stdin := true;
+        parse positional rest
+    | value :: rest when not (String.starts_with ~prefix:"-" value) ->
+        parse (value :: positional) rest
+    | _ -> usage ()
+  in
+  let positional = parse [] arguments in
+  let outcome =
+    match !resume with
+    | Some root ->
+        if
+          positional <> [] || !device <> None || !phrase <> None
+          || !branch <> None || !request <> None || !preview || !token_stdin
+        then usage ();
+        failure_context root;
+        Clone.resume ~root
+    | None ->
+        let url, destination =
+          match positional with
+          | [ url ] -> (url, None)
+          | [ url; path ] -> (url, Some path)
+          | _ -> usage ()
+        in
+        let source =
+          match Clone.source url with
+          | Ok source -> source
+          | Error error -> fail_clone error
+        in
+        let destination =
+          Option.value destination ~default:(Clone.default_directory source)
+        in
+        failure_context destination;
+        (match Clone.check_new_destination destination with
+        | Ok _ -> ()
+        | Error error -> fail_clone error);
+        let device =
+          match !device with Some device -> device | None -> usage ()
+        in
+        let verify_phrase =
+          match !phrase with Some phrase -> phrase | None -> usage ()
+        in
+        let device =
+          parse_identifier "invalid device identifier" Model.Device_id.of_string
+            device
+        in
+        let signing_capability =
+          match V1_signer.load_native device with
+          | Ok capability -> capability
+          | Error error ->
+              fail_with_status 7 "clone-device-unavailable"
+                (V1_signer.error_to_string error)
+        in
+        let actual_device =
+          Trust.device_of_public_key
+            (Trust.signing_public_key signing_capability)
+          |> require_ok Trust.error_to_string
+          |> Trust.device_id
+        in
+        if not (Model.Device_id.equal actual_device device) then
+          fail_with_status 7 "clone-device-mismatch"
+            "signing capability does not match the requested device";
+        let token =
+          if !token_stdin then read_token_stdin ()
+          else
+            match
+              Transport_credential.load_for_repository ~url:source.Clone.url
+                ~repository:(Core.Repository_id.to_hex source.Clone.repository)
+            with
+            | Ok token -> token
+            | Error _
+              when requested_format () = Text_format && Unix.isatty Unix.stdin
+              ->
+                read_bearer_token ()
+            | Error error ->
+                fail_with_status 7 "clone-credential-unavailable"
+                  (Transport_credential.error_to_string error
+                  ^ "; use --token-stdin or provision the scoped credential")
+        in
+        let expected_request =
+          Option.map
+            (fun value ->
+              Core.Digest.of_hex value |> require_ok Core.error_to_string)
+            !request
+        in
+        Clone.run ~source ~destination
+          ~branch:(Option.value !branch ~default:"main")
+          ~token ~signing_capability ~verify_phrase ~expected_request
+          ~preview:!preview
+  in
+  let report =
+    match outcome with Ok report -> report | Error error -> fail_clone error
+  in
+  let data =
+    `Assoc
+      [
+        ("root", json_byte_path report.Clone.root);
+        ("request_id", `String report.Clone.request);
+        ( "repository",
+          `String (Core.Repository_id.to_hex report.Clone.repository) );
+        ("branch", `String (Core.Branch_id.to_hex report.Clone.branch));
+        ("accepted", `String (Core.Record_id.to_hex report.Clone.accepted));
+        ("snapshot", `String (Core.Object_id.to_hex report.Clone.snapshot));
+        ("records", `Int report.Clone.records);
+        ("branches", `Int report.Clone.branches);
+        ("preview", `Bool report.Clone.preview);
+        ("resumed", `Bool report.Clone.resumed);
+        ( "cursor",
+          match report.Clone.cursor with
+          | None -> `Null
+          | Some cursor -> json_history_identity cursor );
+        ( "operation",
+          match report.Clone.operation with
+          | None -> `Null
+          | Some op -> `String (Core.Operation_id.to_hex op) );
+        ( "uncaptured_work",
+          match report.Clone.uncaptured with
+          | None -> `Null
+          | Some changed -> `Bool changed );
+        ( "coverage",
+          `Assoc
+            [
+              ("scope", `String "locally_known_shared_closure");
+              ("verified_complete", `Bool true);
+              ("remote_disclosure_proven", `Bool false);
+              ("managed_downloads", `Bool false);
+            ] );
+      ]
+  in
+  match requested_format () with
+  | Json_format ->
+      domain_json
+        ~outcome:(if report.Clone.preview then `Unchanged else `Completed)
+        ~code:
+          (if report.Clone.preview then "clone-preview" else "workspace-cloned")
+        ~message:
+          (if report.Clone.preview then
+             "Verified source; destination unchanged."
+           else "Verified shared workspace selected.")
+        ~data
+        ~next_actions:
+          (if report.Clone.preview then []
+           else
+             [
+               action ~root:report.Clone.root [ "status" ]
+                 "Inspect local work and shared coverage.";
+             ])
+        ()
+  | Text_format -> (
+      Printf.printf "%s %s\nrepository %s\nbranch %s\naccepted %s\nrequest %s\n"
+        (if report.Clone.preview then "clone preview" else "cloned")
+        (Output.display_value report.Clone.root)
+        (Core.Repository_id.to_hex report.Clone.repository)
+        (Core.Branch_id.to_hex report.Clone.branch)
+        (Core.Record_id.to_hex report.Clone.accepted)
+        report.Clone.request;
+      match report.Clone.uncaptured with
+      | Some true -> print_endline "private disk edits remain uncaptured"
+      | _ -> ())
+
 let run_exchange arguments =
   let module Native = Sync.Core in
   let root, remote = parse_remote_name arguments in
@@ -7979,6 +8262,7 @@ let dispatch () =
   | _ :: "semantic" :: "server" :: arguments -> run_semantic_server arguments
   | _ :: "sync" :: arguments -> run_sync arguments
   | _ :: "exchange" :: arguments -> run_exchange arguments
+  | _ :: "clone" :: arguments -> run_clone arguments
   | _ :: "relay" :: "access" :: "issue" :: arguments ->
       run_relay_access_issue arguments
   | _ :: "relay" :: "access" :: "rotate" :: arguments ->

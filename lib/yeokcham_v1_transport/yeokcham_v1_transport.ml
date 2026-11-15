@@ -1197,7 +1197,12 @@ let remote_state ~name ~cursor ~known ~announced_manifests ~announced_revisions
     }
 
 let empty_local_state =
-  { local_remotes = []; local_core_outbound = []; local_core_incoming = []; local_core_clone = None }
+  {
+    local_remotes = [];
+    local_core_outbound = [];
+    local_core_incoming = [];
+    local_core_clone = None;
+  }
 
 let remote_name remote = remote.remote_name_value
 let remote_cursor remote = remote.remote_cursor_value
@@ -1384,14 +1389,27 @@ let encode_core_incoming row =
 let encode_core_clone intent =
   let* url = text intent.clone_url in
   let* device = text (Model.Device_id.to_string intent.clone_device) in
-  let* events = array (List.map (fun id -> Encoding.bytes (Core.Record_id.to_raw id)) intent.clone_events) in
-  array [ Encoding.integer 1L; url;
-          Encoding.bytes (Core.Repository_id.to_raw intent.clone_repository);
-          Encoding.bytes (Core.Digest.to_raw intent.clone_root); device;
-          Encoding.bytes (Core.Branch_id.to_raw intent.clone_branch);
-          Encoding.bytes (Core.Record_id.to_raw intent.clone_accepted); events;
-          Option.fold ~none:Encoding.null ~some:(fun id -> Encoding.bytes (Core.Plan_id.to_raw id)) intent.clone_plan;
-          Encoding.bool intent.clone_complete ]
+  let* events =
+    array
+      (List.map
+         (fun id -> Encoding.bytes (Core.Record_id.to_raw id))
+         intent.clone_events)
+  in
+  array
+    [
+      Encoding.integer 1L;
+      url;
+      Encoding.bytes (Core.Repository_id.to_raw intent.clone_repository);
+      Encoding.bytes (Core.Digest.to_raw intent.clone_root);
+      device;
+      Encoding.bytes (Core.Branch_id.to_raw intent.clone_branch);
+      Encoding.bytes (Core.Record_id.to_raw intent.clone_accepted);
+      events;
+      Option.fold ~none:Encoding.null
+        ~some:(fun id -> Encoding.bytes (Core.Plan_id.to_raw id))
+        intent.clone_plan;
+      Encoding.bool intent.clone_complete;
+    ]
 
 let encode_local_state state =
   let* () =
@@ -1458,14 +1476,27 @@ let encode_local_state state =
         let* incoming = array (List.rev incoming) in
         array [ Encoding.integer 3L; remotes; rows; incoming ]
   in
-  let* value = match state.local_core_clone with
+  let* value =
+    match state.local_core_clone with
     | None -> Ok value
     | Some intent ->
         let* clone = encode_core_clone intent in
-        let* outgoing = List.fold_left (fun result row -> let* rows = result in
-            let* row = encode_core_outbound row in Ok (row :: rows)) (Ok []) state.local_core_outbound in
-        let* incoming = List.fold_left (fun result row -> let* rows = result in
-            let* row = encode_core_incoming row in Ok (row :: rows)) (Ok []) state.local_core_incoming in
+        let* outgoing =
+          List.fold_left
+            (fun result row ->
+              let* rows = result in
+              let* row = encode_core_outbound row in
+              Ok (row :: rows))
+            (Ok []) state.local_core_outbound
+        in
+        let* incoming =
+          List.fold_left
+            (fun result row ->
+              let* rows = result in
+              let* row = encode_core_incoming row in
+              Ok (row :: rows))
+            (Ok []) state.local_core_incoming
+        in
         let* outgoing = array (List.rev outgoing) in
         let* incoming = array (List.rev incoming) in
         array [ Encoding.integer 4L; remotes; outgoing; incoming; clone ]
@@ -1596,28 +1627,63 @@ let decode_core_incoming value =
     }
 
 let validate_clone_url url =
-  if String.length url > 4096 || not (String.starts_with ~prefix:"https://" url)
-     || String.length url <= 8 || String.exists (function
-       | '\000' | '\r' | '\n' | ' ' | '\t' | '@' | '?' | '#' -> true | _ -> false) url then
-    Error (Invalid_publication "clone requires a bounded credential-free HTTPS URL")
+  if
+    String.length url > 4096
+    || (not (String.starts_with ~prefix:"https://" url))
+    || String.length url <= 8
+    || String.exists
+         (function
+           | '\000' | '\r' | '\n' | ' ' | '\t' | '@' | '?' | '#' -> true
+           | _ -> false)
+         url
+  then
+    Error
+      (Invalid_publication "clone requires a bounded credential-free HTTPS URL")
   else Ok ()
 
-let core_identifier result = Result.map_error (fun error -> Invalid_publication (Core.error_to_string error)) result
+let core_identifier result =
+  Result.map_error
+    (fun error -> Invalid_publication (Core.error_to_string error))
+    result
 
 let make_core_clone ~url ~repository ~root ~device ~branch ~accepted ~events =
   let* () = validate_clone_url url in
-  if List.length events <> 1 then Error (Invalid_publication "clone requires one exact branch-event head")
-  else Ok { clone_url = url; clone_repository = repository; clone_root = root;
-            clone_device = device; clone_branch = branch; clone_accepted = accepted;
-            clone_events = events; clone_plan = None; clone_complete = false }
+  if List.length events <> 1 then
+    Error (Invalid_publication "clone requires one exact branch-event head")
+  else
+    Ok
+      {
+        clone_url = url;
+        clone_repository = repository;
+        clone_root = root;
+        clone_device = device;
+        clone_branch = branch;
+        clone_accepted = accepted;
+        clone_events = events;
+        clone_plan = None;
+        clone_complete = false;
+      }
 
 let[@warning "-4"] decode_core_clone value =
   let* fields = exact_array "Core clone intent" 10 value in
   match fields with
-  | [ Encoding.Integer 1L; url; repository; root; device; branch; accepted; events; plan; Encoding.Bool complete ] ->
+  | [
+   Encoding.Integer 1L;
+   url;
+   repository;
+   root;
+   device;
+   branch;
+   accepted;
+   events;
+   plan;
+   Encoding.Bool complete;
+  ] ->
       let* url = text_field "clone URL" url in
       let* repository = bytes_field "clone repository" repository in
-      let* repository = Core.Repository_id.of_raw repository |> core_identifier in
+      let* repository =
+        Core.Repository_id.of_raw repository |> core_identifier
+      in
       let* root = bytes_field "clone root" root in
       let* root = Core.Digest.of_raw root |> core_identifier in
       let* device = text_field "clone device" device in
@@ -1627,17 +1693,31 @@ let[@warning "-4"] decode_core_clone value =
       let* accepted = bytes_field "clone accepted version" accepted in
       let* accepted = Core.Record_id.of_raw accepted |> core_identifier in
       let* events = array_values "clone event heads" events in
-      let* events = List.fold_left (fun result event -> let* events = result in
-          let* raw = bytes_field "clone event" event in
-          let* event = Core.Record_id.of_raw raw |> core_identifier in Ok (event :: events)) (Ok []) events in
-      let* intent = make_core_clone ~url ~repository ~root ~device ~branch ~accepted ~events:(List.rev events) in
-      let* plan = match plan with
+      let* events =
+        List.fold_left
+          (fun result event ->
+            let* events = result in
+            let* raw = bytes_field "clone event" event in
+            let* event = Core.Record_id.of_raw raw |> core_identifier in
+            Ok (event :: events))
+          (Ok []) events
+      in
+      let* intent =
+        make_core_clone ~url ~repository ~root ~device ~branch ~accepted
+          ~events:(List.rev events)
+      in
+      let* plan =
+        match plan with
         | Encoding.Null -> Ok None
-        | Encoding.Bytes raw -> Core.Plan_id.of_raw raw |> core_identifier |> Result.map Option.some
-        | _ -> Error (Invalid_publication "invalid clone plan identity") in
-      if complete && plan = None then Error (Invalid_publication "completed clone lacks its exact plan")
+        | Encoding.Bytes raw ->
+            Core.Plan_id.of_raw raw |> core_identifier |> Result.map Option.some
+        | _ -> Error (Invalid_publication "invalid clone plan identity")
+      in
+      if complete && plan = None then
+        Error (Invalid_publication "completed clone lacks its exact plan")
       else Ok { intent with clone_plan = plan; clone_complete = complete }
-  | _ -> Error (Invalid_publication "unsupported Core clone intent version/fields")
+  | _ ->
+      Error (Invalid_publication "unsupported Core clone intent version/fields")
 
 let[@warning "-4"] decode_local_state bytes =
   let* () =
@@ -1648,10 +1728,14 @@ let[@warning "-4"] decode_local_state bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
   in
-  let* value, core_clone = match value with
-    | Encoding.Array [ Encoding.Integer 4L; remotes; outgoing; incoming; clone ] ->
+  let* value, core_clone =
+    match value with
+    | Encoding.Array [ Encoding.Integer 4L; remotes; outgoing; incoming; clone ]
+      ->
         let* intent = decode_core_clone clone in
-        let* value = array [ Encoding.integer 3L; remotes; outgoing; incoming ] in
+        let* value =
+          array [ Encoding.integer 3L; remotes; outgoing; incoming ]
+        in
         Ok (value, Some intent)
     | value -> Ok (value, None)
   in
@@ -1993,43 +2077,72 @@ module Core_clone = struct
   let complete intent = intent.clone_complete
 
   let id intent =
-    let* value = encode_core_clone { intent with clone_plan = None; clone_complete = false } in
+    let* value =
+      encode_core_clone
+        { intent with clone_plan = None; clone_complete = false }
+    in
     Ok (sha256 ("yeokcham/clone-intent/v1\000" ^ Encoding.encode value))
 
   let initialize state intent =
     match state.local_core_clone with
     | None when intent.clone_plan <> None || intent.clone_complete ->
-        Error (Invalid_publication "initial clone intent must be pending without a plan")
+        Error
+          (Invalid_publication
+             "initial clone intent must be pending without a plan")
     | None -> Ok { state with local_core_clone = Some intent }
     | Some previous when previous = intent -> Ok state
-    | Some _ -> Error (Invalid_publication "cannot replace the workspace clone intent")
+    | Some _ ->
+        Error (Invalid_publication "cannot replace the workspace clone intent")
 
   let bind_plan state ~plan =
     match state.local_core_clone with
     | None -> Error (Invalid_publication "workspace has no clone intent")
     | Some intent when intent.clone_complete ->
         Error (Invalid_publication "clone is already complete")
-    | Some intent -> Ok { state with local_core_clone = Some { intent with clone_plan = Some plan } }
+    | Some intent ->
+        Ok
+          {
+            state with
+            local_core_clone = Some { intent with clone_plan = Some plan };
+          }
 
   let finish state =
     match state.local_core_clone with
     | None -> Error (Invalid_publication "workspace has no clone intent")
-    | Some { clone_plan = None; _ } -> Error (Invalid_publication "clone lacks its exact application plan")
-    | Some intent -> Ok { state with local_core_clone = Some { intent with clone_complete = true } }
+    | Some { clone_plan = None; _ } ->
+        Error (Invalid_publication "clone lacks its exact application plan")
+    | Some intent ->
+        Ok
+          {
+            state with
+            local_core_clone = Some { intent with clone_complete = true };
+          }
 
   let validate_update ~plan_started ~previous state =
-    match previous.local_core_clone, state.local_core_clone with
+    match (previous.local_core_clone, state.local_core_clone) with
     | None, None -> Ok ()
-    | None, Some _ -> Error (Invalid_publication "clone intent belongs to repository initialization")
-    | Some _, None -> Error (Invalid_publication "cannot erase the workspace clone intent")
+    | None, Some _ ->
+        Error
+          (Invalid_publication
+             "clone intent belongs to repository initialization")
+    | Some _, None ->
+        Error (Invalid_publication "cannot erase the workspace clone intent")
     | Some old, Some next ->
         let* old_id = id old in
         let* next_id = id next in
-        if old_id <> next_id then Error (Invalid_publication "cannot retarget the workspace clone intent")
+        if old_id <> next_id then
+          Error
+            (Invalid_publication "cannot retarget the workspace clone intent")
         else if old.clone_complete && not next.clone_complete then
           Error (Invalid_publication "cannot undo clone completion")
-        else if old.clone_plan <> next.clone_plan
-                && (old.clone_complete || Option.exists plan_started old.clone_plan || next.clone_plan = None) then
-          Error (Invalid_publication "cannot retarget an already started clone operation")
+        else if
+          old.clone_plan <> next.clone_plan
+          && (old.clone_complete
+             || Option.exists plan_started old.clone_plan
+             || next.clone_plan = None)
+        then
+          Error
+            (Invalid_publication
+               "cannot retarget an already started clone operation")
         else Ok ()
 end

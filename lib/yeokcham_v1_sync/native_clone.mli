@@ -1,6 +1,7 @@
 module Core = Yeokcham_v1_model.Core
 
 type source = private { url : string; repository : Core.Repository_id.t }
+
 type error =
   | Invalid of string
   | Blocked of string
@@ -31,9 +32,15 @@ type outcome = {
 }
 
 val run :
-  source:source -> destination:string -> branch:string -> token:string ->
-  signing_capability:Yeokcham_v1_trust.signing_capability -> verify_phrase:string ->
-  expected_request:Core.Digest.t option -> preview:bool -> (outcome, error) result
+  source:source ->
+  destination:string ->
+  branch:string ->
+  token:string ->
+  signing_capability:Yeokcham_v1_trust.signing_capability ->
+  verify_phrase:string ->
+  expected_request:Core.Digest.t option ->
+  preview:bool ->
+  (outcome, error) result
 
 val resume : root:string -> (outcome, error) result
 (** Uses the already verified local closure and recorded intent; no network or
@@ -43,15 +50,25 @@ type boundary =
   | Verified
   | Before_metadata_attach
   | After_metadata_attach
-  | Plan_bound
+  | Before_plan_bind
+  | After_plan_bind
   | Application of Yeokcham_v1_local_service.Integrate.boundary
   | Before_complete
   | After_complete
 
 module For_test : sig
   val run :
-    observe:(boundary -> unit) -> source:source -> destination:string -> branch:string -> token:string ->
-    signing_capability:Yeokcham_v1_trust.signing_capability -> verify_phrase:string ->
-    expected_request:Core.Digest.t option -> preview:bool -> (outcome, error) result
-  val resume : observe:(boundary -> unit) -> root:string -> (outcome, error) result
+    observe:(boundary -> unit) ->
+    source:source ->
+    destination:string ->
+    branch:string ->
+    token:string ->
+    signing_capability:Yeokcham_v1_trust.signing_capability ->
+    verify_phrase:string ->
+    expected_request:Core.Digest.t option ->
+    preview:bool ->
+    (outcome, error) result
+
+  val resume :
+    observe:(boundary -> unit) -> root:string -> (outcome, error) result
 end

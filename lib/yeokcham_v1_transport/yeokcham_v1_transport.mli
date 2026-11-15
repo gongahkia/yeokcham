@@ -12,6 +12,10 @@ type publication_reference
 type remote_state
 type local_state
 
+val max_local_state_bytes : int
+(** Shared 16 MiB bound for durable transport control and foreground metadata
+    batches. *)
+
 type error =
   | Invalid_digest of string
   | Invalid_remote_name of string
@@ -165,9 +169,15 @@ module Core_clone : sig
   type intent
 
   val create :
-    url:string -> repository:Model.Core.Repository_id.t -> root:Model.Core.Digest.t ->
-    device:Model.Device_id.t -> branch:Model.Core.Branch_id.t -> accepted:Model.Core.Record_id.t ->
-    events:Model.Core.Record_id.t list -> (intent, error) result
+    url:string ->
+    repository:Model.Core.Repository_id.t ->
+    root:Model.Core.Digest.t ->
+    device:Model.Device_id.t ->
+    branch:Model.Core.Branch_id.t ->
+    accepted:Model.Core.Record_id.t ->
+    events:Model.Core.Record_id.t list ->
+    (intent, error) result
+
   val find : local_state -> intent option
   val id : intent -> (string, error) result
   val url : intent -> string
@@ -180,12 +190,20 @@ module Core_clone : sig
   val plan : intent -> Model.Core.Plan_id.t option
   val complete : intent -> bool
   val initialize : local_state -> intent -> (local_state, error) result
-  val bind_plan : local_state -> plan:Model.Core.Plan_id.t -> (local_state, error) result
+
+  val bind_plan :
+    local_state -> plan:Model.Core.Plan_id.t -> (local_state, error) result
+
   val finish : local_state -> (local_state, error) result
+
   val validate_update :
-    plan_started:(Model.Core.Plan_id.t -> bool) -> previous:local_state -> local_state -> (unit, error) result
+    plan_started:(Model.Core.Plan_id.t -> bool) ->
+    previous:local_state ->
+    local_state ->
+    (unit, error) result
   (** Immutable clone request and exact plan under the owning root. Only an
-      unstarted plan may be replaced; existing operations are never retargeted. *)
+      unstarted plan may be replaced; existing operations are never retargeted.
+  *)
 end
 
 module V2 : sig
