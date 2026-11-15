@@ -72,13 +72,13 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export and atomic metadata receipt; checkpoints below | Native relay/clone/exchange consumers, availability/coverage, acknowledgement and full phase criteria remain |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export, receipt and native HTTPS exchange; checkpoints below | Ordinary clone, availability/coverage, complete fault qualification and full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
 | [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | Partial P3 local integration/recovery; checkpoints below | Native outbound acknowledgement, conflict/policy integration, complete fault matrix and formal phase acceptance remain |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/local integration/recovery | Verified Core clone/exchange, native resolution, archive/preferences and complete multi-person journeys remain |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 plus P3 selected share/integration/recovery/native exchange | Verified Core clone, native resolution, archive/preferences and complete multi-person journeys remain |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -101,6 +101,13 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
 ## Current-phase checkpoints
+
+- P3 latest checkpoint: native `exchange NAME` now passes a real controlled TLS
+  Alice/Bob CLI journey, exact lost-acknowledgement retry and a private-cache
+  provenance regression. Implementation is `10210f528ea424dd0393f3b1d6755df4817de979`.
+  Build/lint/default CI passed; details below. Ordinary clone, first selection of
+  known-only branches, native resolution, missing-content inspection and the full
+  acceptance/fault audit remain. P3 is incomplete; next work stays inside P3.
 
 - P3 current checkpoint: public Core export and atomic metadata receipt are
   committed. `9f79f9dd6d0043eea3b696f429998117fe9444e4` preserves exact private
@@ -1395,3 +1402,88 @@ current recovery data when changing binaries. Source rollback cannot remove a
 relay acknowledgement, restore files or undo accepted history; older transport
 readers refuse Core-bearing state. Native transfer/resolution remains the next
 P3 work, not P4 or a new original full phase. P3 stays active and incomplete.
+
+P3 native Core HTTPS exchange checkpoint:
+`f6dd1e4a882fb4f9c38688e28ccf92870f7e360c` and
+`b78afa53278eef9b206c5b5133450c61039ea62c` appeared as external `newthings`
+snapshots during implementation. Their paths contain this continuation's owned
+inbox/metadata/HTTP and exchange/CLI/test work. Inspected/preserved without reset
+or amend, including the then-unverified code. Final verified source is
+`10210f528ea424dd0393f3b1d6755df4817de979`; it includes formatting, completed
+courier retention/status, independent vectors and the public-provenance guard.
+
+`exchange NAME` now runs actual native Core receipt and outgoing transfer through
+the HTTPS relay. It rescans a bounded hash-ordered inventory, validates feed
+causality and metadata, prioritizes declared selected contents, fetches remaining
+closure, then performs isolated full package proof/current admission. Receipt
+preserves files/private history. Native uploads consume the frozen batch and
+persist actual courier acknowledgement. Legacy manifest-1 receipt stays explicit;
+`sync` remains the older family command. Structured schema-2 JSON reports domain
+IDs, received records/branches, local verified closure and outgoing facts; it
+separates checked relay inventory from unknown remote disclosure and foreground
+execution. A post-receive outgoing failure is incomplete/exit 5 with retry action.
+
+Private transport schema 3 retains a verified courier/manifest catalogue with
+remote/endpoint provenance under the same root. It includes incoming couriers and
+locally issued couriers once acknowledged. Earlier coverage survives preparing a
+new batch. Inbox/outbox guards refuse dropped evidence, endpoint changes and
+pending-batch replacement. Current schema 1/2 data retains supported decoding;
+older acknowledged schema-2 manifests are retained when preparing newer work.
+Canonical catalogue/acknowledgement bytes have an independent Python vector.
+Courier labels retain provenance and forward only when unambiguous. Status now
+derives exact acknowledging remotes instead of always printing pending; known
+acceptance reuse with no new staged records reports transfer not_required.
+
+Code inspection found that unrestricted raw-cache reuse could satisfy a newly
+advertised missing public hash with private local contents. The native consumer
+now derives reusable contents only from the already admitted public record map.
+New data must be supplied by the relay; private raw presence is insufficient.
+A controlled TLS regression advertises an omitted blob that exists in Bob's
+private capture and verifies unavailable receipt, unchanged root/history/files and
+continued relay absence of those bytes. No pre-fix exploit run was performed;
+the regression directly exercises the identified cache-match condition. Metadata
+pages retain separate scoped verification. Unadmitted data may be fetched again
+after interruption rather than claiming durable public provenance from raw cache.
+
+The main TLS case uses separately enrolled Alice/Bob devices, fresh CLI JSON/plain
+share/exchange/integrate processes, CRLF text, 300731-byte binary data, executable,
+symlink and empty directory. Actual relay object bytes exclude both Alice's
+unselected sentinel and Bob's later private E. Receipt changes neither files nor
+private history/counter; Bob accepts D while retaining E and exchanges accepted
+history back. A fork stops after the real HTTPS courier PUT before local ack;
+a fresh CLI without its signer retries the same courier ID. `Local.initialize_received`
+provides Bob's verified empty private basis without signing another genesis.
+This fixture is library bootstrap, not ordinary clone evidence. Signers remain
+disposable explicit test capabilities, not native custody onboarding.
+
+Core-package15, full transport23 (including the two native TLS cases), signed
+local-core69, store8, snapshot-materialization3, transfer8, GC11 and branch CLI17/
+share CLI8/integration CLI8 passed. The independent generator verifies five
+manifest/hash/courier vectors. `make build`, `make lint` and default `make ci`
+exited 0 on parent `b78afa5` with the exact pending files committed as `10210f5`;
+CI took 54.376 seconds and reused matching unchanged Dune actions where applicable.
+Exact commands, exits, durations and file hashes are in
+`core-native-exchange-checkpoint-checks.json` under the P3 external log directory.
+Earlier focused filters intentionally skipped other cases; full 15/23-case runs
+and CI executed all those cases. Initial strict-warning/fixture-scope failures,
+an independent-generator assertion and formatter promotions (exit 2) were
+corrected before complete passing verification. README, P2 report/receipt and
+accepted G01 hashes match the start receipt; original P3 prerequisite ancestry
+was rechecked. No accepted measurements were rerun.
+
+This adds partial G02 private-schema, G03 enrolled-member boundary, G08 real native
+exchange/provenance, G13 real acknowledgement and G14 ordinary exchange coverage.
+No whole original phase is complete. Native clone with pinned identity and
+recoverable first materialization, switching known-only branches, native conflict
+resolution, read-only missing-content inspection, broader native failure/authority/
+coverage checks and the full P3 criterion audit remain required. Error-category
+mapping also needs its final malformed/signature/authority matrix. Local decoding
+still requires complete public composition contents; do not turn an unverified
+metadata declaration or local flag into an accepted-result proof. Preserve all
+current operation/recovery roots while implementing those consumers.
+
+Rollback must preserve schema-3 transport/schema-4 local data and public catalogue
+pages; old binaries cannot decode new catalogue-bearing state. Source rollback
+cannot retract relay bytes/acknowledgements, restore working files or undo accepted
+history. No push/release/deployment, P4 work, native human/performance qualification
+or P03 completion report/receipt is claimed. P3 remains active and incomplete.
