@@ -50,6 +50,8 @@ let executable () =
   | None -> Alcotest.fail "cannot locate the yeokcham-v1 executable"
 
 let run arguments =
+  (* these fixtures inspect full identities; compact journeys have separate coverage *)
+  let arguments = "--details" :: arguments in
   let command =
     executable () :: arguments |> List.map Filename.quote |> String.concat " "
   in

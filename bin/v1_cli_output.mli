@@ -13,10 +13,11 @@ val print_error : string -> unit
 val print_warning : string -> unit
 val print_raw_string : string -> unit
 val print_raw_endline : string -> unit
-
 val paint : tone -> string -> string
+
 val line : ?tone:tone -> string -> unit
-(** Explicit semantic styling for human summaries, without automatic token colors. *)
+(** Explicit semantic styling for human summaries, without automatic token
+    colors. *)
 
 val symbol : ascii:string -> unicode:string -> string
 val terminal_width : unit -> int

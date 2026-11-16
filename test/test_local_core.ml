@@ -3767,7 +3767,7 @@ let[@warning "-4"] metadata_inspection_survives_missing_shared_chunks_without_au
           (current |> member "changed_paths" = `Null);
         List.iter
           (fun command ->
-            let result, output, errors = cli root [ command ] in
+            let result, output, errors = cli root [ command; "--details" ] in
             Alcotest.(check bool)
               (command ^ " plain inspection exit: " ^ errors)
               true

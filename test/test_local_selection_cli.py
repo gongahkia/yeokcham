@@ -134,7 +134,7 @@ class LocalSelectionCliTests(unittest.TestCase):
         self.assertIn("4", [row["sequence"] for row in history["entries"]])
         plain = self.run_cli("restore", "4", "--yes")
         self.assertEqual(plain.returncode, 0, plain.stderr)
-        self.assertIn("current node 4", plain.stdout)
+        self.assertIn("Restored saved version #4", plain.stdout)
         self.assertEqual((self.root / "notes").read_bytes(), b"E unsaved\n")
 
     def test_dirty_redo_refuses_with_conflict_and_invalid_scope_is_argument_error(self):

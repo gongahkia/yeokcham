@@ -51,7 +51,7 @@ printf '%s\n' 'let relay_bootstrap = 1' > "$source_root/main.ml"
 printf '%s\n' 'untouched target ordinary file' > "$target_root/keep.txt"
 export YEOKCHAM_V1_TEST_SIGNER_DIRECTORY="$signer_directory"
 
-source_init=$("$client" init --root "$source_root" --username alice \
+source_init=$("$client" init --details --root "$source_root" --username alice \
   --draft relay-source --title relay-bootstrap-source)
 source_device=$(printf '%s\n' "$source_init" | sed -n 's/^device //p' | sed -n '1p')
 phrase=$(printf '%s\n' "$source_init" \

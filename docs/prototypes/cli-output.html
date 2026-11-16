@@ -34,11 +34,12 @@ let scene='status',details=false,color=true,narrow=false;
 const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 const span=(tone,text)=>`<span class="${tone}">${escape(text)}</span>`;
 const prompt=cmd=>span('prompt','$ ')+span('command','yeokcham '+cmd)+'\n';
+const recoveryRows=()=>{const count=narrow||innerWidth<600?3:6;return Array.from({length:Math.ceil(24/count)},(_,row)=>'  '+Array.from({length:count},(_,column)=>'word'+String(row*count+column+1).padStart(2,'0')).join(' ')).join('\n')};
 const show={
-init:()=>prompt('init')+span('good','✓ Project ready')+'\n  first-project / main\n'+span('muted','  Existing files saved privately on this device.')+'\n\n'+span('warn','Recovery words - shown once')+'\n  word01 word02 word03 word04 word05 word06\n  word07 word08 word09 word10 word11 word12\n  word13 word14 word15 word16 word17 word18\n  word19 word20 word21 word22 word23 word24\n'+span('muted','  Record offline. Keep private.')+'\n\nNext  edit your files, then run yeokcham save\n'+span('muted','Capture is manual; private backup is not configured.'),
-status:()=>prompt('status')+span('accent','main / saved #0')+'\n1 path to save\n  '+span('warn','M')+' note.txt\n\nNext  yeokcham diff / yeokcham save\n'+span('muted','Capture: manual / Backup: not configured'),
+init:()=>prompt('init')+span('good','✓ Project ready')+'\n  first-project / main\n'+span('muted','  Existing files saved privately on this device.')+'\n\n'+span('warn','Recovery words - shown once')+'\n'+recoveryRows()+'\n'+span('muted','  Record offline. Keep private.')+'\n\nNext  edit your files, then run yeokcham save\n'+span('muted','Capture is manual; private backup is not configured.'),
+status:()=>prompt('status')+span('accent','main / saved #0')+'\n1 path to save\n  '+span('warn','M')+' note.txt\n\nNext  yeokcham diff / yeokcham save\n'+span('muted','Private backup: not configured'),
 diff:()=>prompt('diff')+span('muted','#0 -> working files')+'\n'+span('accent','note.txt')+'\n'+span('muted','@@ -1,1 +1,1 @@')+'\n'+span('bad','-First version')+'\n'+span('good','+Second version'),
-save:()=>prompt('save')+span('good','✓ Saved #1 on this device')+'\n\n'+prompt('diff')+span('good','No differences'),
+save:()=>prompt('save')+span('good','✓ Saved on this device')+'\n\n'+prompt('diff')+span('good','No differences'),
 history:()=>prompt('history')+span('accent','Local history')+'\n'+span('accent','* #1  note.txt  21:25')+'\no #0  Initial capture',
 undo:()=>prompt('undo --preview')+span('accent','Preview / select saved version #0')+'\n  '+span('warn','M')+' note.txt\n'+span('muted','Preview only. Rerun with --yes to apply.')+'\n\n'+prompt('undo --yes')+span('good','✓ Restored saved version #0')+'\n  '+span('warn','M')+' note.txt\n\n'+prompt('redo --yes')+span('good','✓ Restored saved version #1')+'\n  '+span('warn','M')+' note.txt'
 };
@@ -55,6 +56,7 @@ document.querySelectorAll('[data-scene]').forEach(b=>b.addEventListener('click',
 document.getElementById('details').addEventListener('click',()=>{details=!details;render()});
 document.getElementById('color').addEventListener('click',()=>{color=!color;render()});
 document.getElementById('width').addEventListener('click',()=>{narrow=!narrow;render()});
+window.addEventListener('resize',render);
 render();
 </script>
 </body>

@@ -100,9 +100,10 @@ clone, and automatic remote discovery are not V1 features.
 `--version` should identify an unreleased V1 source build and `--help` should
 list only implemented commands. Before `init`, use a disposable empty directory
 and make sure the platform signer is usable. `init` deliberately creates local
-device custody and prints a 12-word public root-verification phrase plus a
-24-word recovery mnemonic. The phrase is for independent comparison during a
-join; the mnemonic decrypts recovery material and must be recorded offline.
+device custody and prints a 24-word recovery mnemonic once, grouped into readable
+rows. Record it offline. `device show` displays the public root-verification
+phrase for independent comparison during a join. `init --details` includes the
+full initialization diagnostics and both phrases. The mnemonic decrypts recovery material.
 Neither is a username or password.
 
 If the command cannot access the native signer, do not work around that by

@@ -100,6 +100,12 @@
    %{dep:test_local_inspection_cli.py}
    %{dep:../bin/yeokcham_v1.exe})))
 
+(rule
+ (alias runtest)
+ (deps test_cli_presentation.py ../bin/yeokcham_v1.exe)
+ (action
+  (run python3 %{dep:test_cli_presentation.py} %{dep:../bin/yeokcham_v1.exe})))
+
 (test
  (name test_cli_domain_data)
  (modules test_cli_domain_data)

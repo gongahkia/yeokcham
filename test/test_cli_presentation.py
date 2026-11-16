@@ -1,0 +1,223 @@
+"""Human first-use output, truthful refusal states and the structured-data boundary."""
+import json
+import os
+import pty
+from pathlib import Path
+import re
+import select
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+BINARY = str(Path(sys.argv.pop(1)).resolve())
+
+
+class PresentationTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="yeokcham-presentation-")
+        self.addCleanup(temporary.cleanup)
+        self.parent = Path(temporary.name)
+        self.root = self.parent / "project"
+        self.root.mkdir()
+        self.keys = self.parent / "signers"
+        self.keys.mkdir(mode=0o700)
+        self.env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(self.keys),
+                        NO_COLOR="1", TERM="dumb", LC_ALL="C", COLUMNS="40")
+        (self.root / "note.txt").write_text("First version\n")
+        self.initial = self.run_cli("init").stdout
+
+    def run_cli(self, *arguments, code=0, env=None):
+        result = subprocess.run([BINARY, *map(str, arguments), "--root", str(self.root)],
+                                capture_output=True, text=True, env=env or self.env, timeout=20)
+        self.assertEqual(result.returncode, code, result.stderr)
+        return result
+
+    def data(self, *arguments):
+        return json.loads(self.run_cli(*arguments, "--format", "json").stdout)["data"]
+
+    def head(self):
+        return (self.root / ".yeokcham/refs/v1-project-state").read_bytes()
+
+    def compact(self, text, lines):
+        self.assertNotRegex(text, r"\b[0-9a-f]{32,}\b")
+        self.assertNotIn("\x1b", text)
+        self.assertLessEqual(len(text.splitlines()), lines)
+
+    def test_real_first_use_journey_is_compact_and_recoverable(self):
+        self.compact(self.initial, 20)
+        self.assertIn("Project ready", self.initial)
+        self.assertNotIn("root-verification-phrase", self.initial)
+        words = self.initial.split("Recovery words - shown once\n", 1)[1].split("  Record offline", 1)[0].split()
+        self.assertEqual(len(words), 24)
+        self.assertTrue(all(re.fullmatch("[a-z]+", word) for word in words))
+        (self.root / "note.txt").write_text("Second version\n")
+        before = self.head()
+        status = self.run_cli("status").stdout
+        self.compact(status, 8)
+        self.assertIn("main / saved #0", status)
+        self.assertIn("M note.txt", status)
+        self.assertIn("1 path to save", status)
+        diff = self.run_cli("diff").stdout
+        self.compact(diff, 7)
+        self.assertIn("-First version", diff)
+        self.assertIn("+Second version", diff)
+        self.assertEqual(self.head(), before)
+        saved = self.run_cli("save").stdout
+        self.compact(saved, 1)
+        self.assertIn("Saved on this device", saved)
+        history = self.run_cli("history").stdout
+        self.compact(history, 4)
+        self.assertIn("* #1", history)
+        self.assertIn("o #0", history)
+        self.assertIn("No differences", self.run_cli("diff").stdout)
+        for command, expected, number in [("undo", "First version\n", 0), ("redo", "Second version\n", 1)]:
+            before = self.head()
+            preview = self.run_cli(command, "--preview").stdout
+            self.compact(preview, 4)
+            self.assertIn("Preview only", preview)
+            self.assertEqual(self.head(), before)
+            result = self.run_cli(command, "--yes").stdout
+            self.compact(result, 3)
+            self.assertIn(f"Restored saved version #{number}", result)
+            self.assertEqual((self.root / "note.txt").read_text(), expected)
+
+    def test_details_and_json_keep_exact_identities_without_resaving(self):
+        before = self.head()
+        data = self.data("status")
+        detailed = self.run_cli("status", "--details").stdout
+        self.assertIn(data["saved"]["snapshot_id"], detailed)
+        self.assertIn("working-basis", detailed)
+        self.assertIn("watcher state not inspected", detailed)
+        basic = json.loads(self.run_cli("status", "--format", "json").stdout)
+        verbose = json.loads(self.run_cli("status", "--details", "--format", "json").stdout)
+        self.assertEqual(basic, verbose)
+        self.assertEqual(self.head(), before)
+        self.assertNotIn("Recovery words", detailed)
+        self.assertIn("root-verification-phrase", self.run_cli("device", "show").stdout)
+
+    def test_incomplete_capture_is_never_rendered_as_clean(self):
+        (self.root / ".yeokchamignore").write_text("[bad\n")
+        before = self.head()
+        output = self.run_cli("status").stdout
+        self.assertIn("Changes unknown", output)
+        self.assertIn("capture incomplete", output)
+        self.assertNotIn("Working files match", output)
+        self.assertEqual(self.head(), before)
+
+    def test_alternatives_keep_their_parent_and_short_selectable_numbers(self):
+        for value in ["B\n", "C\n"]:
+            (self.root / "note.txt").write_text(value)
+            self.run_cli("save")
+        self.run_cli("undo", "--yes")
+        (self.root / "note.txt").write_text("D\n")
+        self.run_cli("save")
+        output = self.run_cli("history").stdout
+        self.assertIn("* #3", output)
+        self.assertIn("from #1", output)
+        self.assertIn("alternatives #2, #3", output)
+        self.assertNotRegex(output, r"\b[0-9a-f]{32,}\b")
+        self.run_cli("restore", "2", "--yes")
+        self.assertEqual((self.root / "note.txt").read_text(), "C\n")
+
+    def test_mixed_paths_keep_type_mode_and_opaque_information(self):
+        (self.root / "note.txt").chmod(0o755)
+        (self.root / "asset.bin").write_bytes(b"\x00binary\xff")
+        (self.root / "empty").mkdir()
+        (self.root / "link").symlink_to("note.txt")
+        output = self.run_cli("status").stdout
+        self.assertIn("A asset.bin", output)
+        self.assertIn("empty (directory)", output)
+        self.assertIn("link (symlink)", output)
+        self.assertIn("file -> executable file", output)
+        diff = self.run_cli("diff").stdout
+        self.assertNotIn("\x00", diff)
+        self.assertIn("Text preview unavailable", diff)
+        self.run_cli("save")
+        (self.root / "link").unlink()
+        (self.root / "link").symlink_to("missing-target")
+        self.assertIn("Symlink target changed", self.run_cli("diff").stdout)
+
+    def test_terminal_controls_are_escaped_and_json_has_no_styling(self):
+        (self.root / "unsafe\x1b[31m.txt").write_text("literal filename\n")
+        plain = self.run_cli("status", "--color", "never").stdout
+        self.assertNotIn("\x1b", plain)
+        colored = self.run_cli("status", "--color", "always").stdout
+        self.assertIn("\x1b[", colored)
+        self.assertNotIn("unsafe\x1b", colored)
+        machine = self.run_cli("status", "--color", "always", "--format", "json").stdout
+        self.assertNotIn("\x1b", machine)
+        self.assertEqual(json.loads(machine)["schema_version"], 2)
+
+    def test_details_option_does_not_consume_literal_values(self):
+        root = self.parent / "--details"
+        root.mkdir()
+        result = subprocess.run([BINARY, "init", "--root", str(root), "--title", "--details"],
+                                env=self.env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Project ready", result.stdout)
+        self.assertNotIn("root-verification-phrase", result.stdout)
+        duplicate = self.run_cli("status", "--details", "--details", code=2)
+        self.assertIn("only once", duplicate.stderr)
+
+    def test_unavailable_history_stays_visible_in_compact_output(self):
+        (self.root / "note.txt").write_text("B\n")
+        self.run_cli("save")
+        saved = self.data("history")["entries"][0]["snapshot_id"]
+        (self.root / "note.txt").write_text("C\n")
+        self.run_cli("save")
+        (self.root / ".yeokcham/objects" / saved[:2] / saved[2:4] / saved[4:]).unlink()
+        before = self.head()
+        output = self.run_cli("history").stdout
+        self.assertIn("Contents unavailable", output)
+        self.assertIn("* #2", output)
+        self.assertEqual(self.head(), before)
+        self.assertEqual((self.root / "note.txt").read_text(), "C\n")
+
+    def test_real_terminal_color_and_glyph_fallbacks(self):
+        def terminal(environment):
+            master, slave = pty.openpty()
+            process = subprocess.Popen([BINARY, "status", "--root", str(self.root)],
+                                       env=environment, stdin=subprocess.DEVNULL,
+                                       stdout=slave, stderr=subprocess.PIPE)
+            os.close(slave)
+            result = bytearray()
+            try:
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([master], [], [], 0.1)
+                    if ready:
+                        try:
+                            chunk = os.read(master, 65536)
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        result.extend(chunk)
+                    elif process.poll() is not None:
+                        break
+                self.assertEqual(process.wait(timeout=2), 0)
+                return result.decode()
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                process.stderr.close()
+                os.close(master)
+
+        native = dict(self.env, LC_ALL="C.UTF-8", TERM="xterm-256color")
+        native.pop("NO_COLOR", None)
+        colored = terminal(native)
+        self.assertIn("\x1b[", colored)
+        self.assertIn("✓", colored)
+        plain = terminal(dict(native, NO_COLOR="1"))
+        self.assertNotIn("\x1b", plain)
+        self.assertIn("✓", plain)
+        ascii_only = terminal(dict(native, TERM="dumb", LC_ALL="C"))
+        self.assertNotIn("\x1b", ascii_only)
+        self.assertNotIn("✓", ascii_only)
+
+
+if __name__ == "__main__":
+    unittest.main()

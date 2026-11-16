@@ -31,11 +31,11 @@ printf '%s\n' 'first note' >"$DEMO_ROOT/work/note.txt"
   --username alice --draft first-task --title "first task"
 ```
 
-The command prints status, a public 12-word root-verification phrase, a local
-recovery-package path, and a unique 24-word recovery mnemonic. This guide does
-not show, invent, or store a mnemonic. Record the mnemonic offline before
-continuing; it is shown only in the ceremony. The root phrase is public but
-must be independently compared with another device owner during `join`.
+The command reports that the project is ready and shows unique 24-word recovery
+words once. Record them offline before continuing. This guide does not show or
+store a mnemonic. `device show` displays the public root-verification phrase
+when you are ready to join another device. `--details` adds initialization
+identities and the recovery-package path; do not publish its recovery words.
 
 ## 3. Inspect, save, and inspect again
 

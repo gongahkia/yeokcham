@@ -39,9 +39,10 @@ class LocalBranchCliTests(unittest.TestCase):
         (self.root / "opaque.bin").write_bytes(bytes(range(256)))
         result = self.run_cli("init", self.root)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("initial files remain private", result.stdout)
-        self.assertIn("automatic-capture not configured", result.stdout)
-        self.assertIn("private-backup not configured", result.stdout)
+        self.assertIn("Project ready", result.stdout)
+        self.assertIn("saved privately on this device", result.stdout)
+        self.assertIn("Capture is manual", result.stdout)
+        self.assertIn("private backup is not configured", result.stdout)
         return result
 
     def branches(self):

@@ -6,6 +6,17 @@ selected under the user's subsequent delegation to settle remaining design
 choices. They describe the target CLI, not commands already implemented. Exact
 prose can improve through usability checks while preserving the stated behavior.
 
+The November 16 dogfooding follow-up implements compact ordinary local output:
+`init`, `save`, `status`, `changes`, `diff`, `history` and in-place local navigation.
+It leads with the outcome, local version number and affected paths. `--details`
+reveals full identities, object hashes and recovery diagnostics; domain JSON
+keeps its existing fields. Color follows TTY/NO_COLOR/--color rules, with ASCII
+fallbacks and explicit warning text. Recovery words still appear once during
+initialization; the public verification phrase is available through `device show`.
+The [interactive terminal prototype](prototypes/cli-output.html) illustrates the
+default views. [Presentation notes](implementation/cli-presentation.md) record the
+scope and verification. Later feature families below remain target behavior.
+
 ## Purpose
 
 Someone unfamiliar with version control should be able to read an issue or

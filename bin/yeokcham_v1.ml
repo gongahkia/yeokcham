@@ -55,15 +55,18 @@ let raw_arguments () = Array.to_list Sys.argv
 
 let detail_arguments () =
   let takes_value name =
-    Cli_spec.option_specs () |> List.exists (fun option ->
-        option.Cli_spec.option_name = name && option.Cli_spec.option_value <> Cli_spec.Flag)
+    Cli_spec.option_specs ()
+    |> List.exists (fun option ->
+        option.Cli_spec.option_name = name
+        && option.Cli_spec.option_value <> Cli_spec.Flag)
   in
   let rec scan count reversed = function
-    | "--" :: rest -> (List.rev_append reversed ("--" :: rest),count)
+    | "--" :: rest -> (List.rev_append reversed ("--" :: rest), count)
     | "--details" :: rest -> scan (count + 1) reversed rest
-    | name :: value :: rest when takes_value name -> scan count (value :: name :: reversed) rest
+    | name :: value :: rest when takes_value name ->
+        scan count (value :: name :: reversed) rest
     | value :: rest -> scan count (value :: reversed) rest
-    | [] -> (List.rev reversed,count)
+    | [] -> (List.rev reversed, count)
   in
   scan 0 [] (raw_arguments ())
 
@@ -530,7 +533,7 @@ let run_generic_json command action =
     raise error
 
 let usage_text =
-  "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]\n\n\
+  "usage: yeokcham [--color auto|always|never] [--details] COMMAND [OPTIONS]\n\n\
    commands:\n\
   \  yeokcham undo-tree [--root PATH]\n\
   \  yeokcham undo [--root PATH] [--to NODE] [--preview|--yes] [--plan ID]\n\
@@ -679,10 +682,11 @@ let help_for = function
         "usage: yeokcham init [PATH] [--root PATH] [--username NAME] [--draft \
          ID] [--title TITLE]\n\n\
          Capture existing files privately in a new local repository. \
-         Workspace, branch and draft identities are generated. It prints one \
-         public root-verification phrase and one recovery mnemonic; record the \
-         mnemonic offline. This ceremony requires --format text; JSON requests \
-         are refused before creating custody or repository state."
+         Workspace, branch and draft identities are generated. It prints \
+         recovery words once; record them offline. Use device show for the \
+         public root verification phrase, or --details for initialization \
+         diagnostics. This ceremony requires --format text; JSON requests are \
+         refused before creating custody or repository state."
   | [ "join" ] ->
       Some
         "usage: yeokcham join [--root PATH] --username NAME --draft ID --title \
@@ -1282,7 +1286,12 @@ let help_for = function
 
 let print_help path =
   match help_for path with
-  | Some text -> print_endline text
+  | Some text ->
+      print_endline text;
+      print_endline
+        "\n\
+         Output: --details for full diagnostics; --format json for structured \
+         data."
   | None ->
       fail
         ("unknown help topic: " ^ String.concat " " path ^ "\n\n" ^ usage_text)
@@ -2077,32 +2086,51 @@ let run_init arguments =
   if requested_details () then (
     render_status status;
     print_endline "branch main (initial files remain private)";
-    print_endline "automatic-capture not configured; run save or foreground watch";
+    print_endline
+      "automatic-capture not configured; run save or foreground watch";
     print_endline "private-backup not configured";
     print_endline "root-verification-phrase (compare during device join)";
     Printf.printf "%s\n" (Recovery.verification_phrase root_certificate);
-    Printf.printf "recovery-package %s\n" (Output.display_value (Service.recovery_package_path root));
+    Printf.printf "recovery-package %s\n"
+      (Output.display_value (Service.recovery_package_path root));
     print_endline "recovery-mnemonic (record offline; it is shown only now)";
     Printf.printf "%s\n" ceremony.Yeokcham_v1_recovery.mnemonic)
   else (
-    Output.line ~tone:Output.Good (Output.symbol ~ascii:"+" ~unicode:"✓" ^ " Project ready");
-    Output.line ("  " ^ Output.display_value (Filename.basename (Unix.realpath root)) ^ " / main");
-    Output.line ~tone:Output.Muted "  Existing files saved privately on this device.";
+    Output.line ~tone:Output.Good
+      (Output.symbol ~ascii:"+" ~unicode:"✓" ^ " Project ready");
+    Output.line
+      ("  "
+      ^ Output.display_value (Filename.basename (Unix.realpath root))
+      ^ " / main");
+    Output.line ~tone:Output.Muted
+      "  Existing files saved privately on this device.";
     Output.line "";
     Output.line ~tone:Output.Caution "Recovery words - shown once";
-    let words = String.split_on_char ' ' ceremony.Yeokcham_v1_recovery.mnemonic in
+    let words =
+      String.split_on_char ' ' ceremony.Yeokcham_v1_recovery.mnemonic
+    in
     let rec rows = function
       | [] -> ()
       | words ->
-          let count = if Output.terminal_width () < 60 then 3 else 6 in
-          let rec take n acc rest = if n = 0 then (List.rev acc,rest) else match rest with [] -> (List.rev acc,[]) | word :: rest -> take (n - 1) (word :: acc) rest in
-          let row,rest = take count [] words in
-          Output.line ("  " ^ String.concat " " row); rows rest
-    in rows words;
+          let width = Output.terminal_width () in
+          let count = if width < 30 then 2 else if width < 60 then 3 else 6 in
+          let rec take n acc rest =
+            if n = 0 then (List.rev acc, rest)
+            else
+              match rest with
+              | [] -> (List.rev acc, [])
+              | word :: rest -> take (n - 1) (word :: acc) rest
+          in
+          let row, rest = take count [] words in
+          Output.line ("  " ^ String.concat " " row);
+          rows rest
+    in
+    rows words;
     Output.line ~tone:Output.Muted "  Record offline. Keep private.";
     Output.line "";
     Output.line "Next  edit your files, then run yeokcham save";
-    Output.line ~tone:Output.Muted "Capture is manual; private backup is not configured.")
+    Output.line ~tone:Output.Muted
+      "Capture is manual; private backup is not configured.")
 
 let parse_join arguments =
   let rec loop root username draft title device package phrase = function
@@ -2267,12 +2295,11 @@ let run_save arguments =
       if requested_details () then (
         print_endline (if changed then "save recorded" else "save unchanged");
         render_status status)
-      else Output.line ~tone:Output.Good
-          (let history = Service.local_history ~root |> require_local in
-           let sequence = (History.current history.Service.undo_tree).History.id in
-           (if changed then Output.symbol ~ascii:"+" ~unicode:"✓" ^ " Saved #"
-            else Output.symbol ~ascii:"=" ~unicode:"✓" ^ " Already saved #")
-           ^ Int64.to_string sequence ^ " on this device"));
+      else
+        Output.line ~tone:Output.Good
+          ((if changed then Output.symbol ~ascii:"+" ~unicode:"✓" ^ " Saved"
+            else Output.symbol ~ascii:"=" ~unicode:"✓" ^ " Already saved")
+          ^ " on this device"));
   changed
 
 let[@warning "-4"] run_ignore_explain arguments =
@@ -2504,14 +2531,20 @@ let run_device_show arguments =
     (match identity.Service.role with
     | Trust.Member -> "member"
     | Trust.Administrator -> "administrator");
-  if requested_format () = Text_format then (
-    let state = Service.inspection_state ~root |> require_ok Service.error_to_string in
-    Option.iter (fun authority ->
+  if requested_format () = Text_format then
+    let state =
+      Service.inspection_state ~root |> require_ok Service.error_to_string
+    in
+    Option.iter
+      (fun authority ->
         Trust.certificates (Trust.authority_membership authority)
-        |> List.find_opt (fun certificate -> Trust.certificate_issuer certificate = None)
+        |> List.find_opt (fun certificate ->
+            Trust.certificate_issuer certificate = None)
         |> Option.iter (fun certificate ->
-            print_endline "root-verification-phrase (compare during device join)";
-            print_endline (Recovery.verification_phrase certificate))) state.Service.inspection_authority)
+            print_endline
+              "root-verification-phrase (compare during device join)";
+            print_endline (Recovery.verification_phrase certificate)))
+      state.Service.inspection_authority
 
 let parse_device_attach arguments =
   let rec loop root provider public_key module_path token_label key_id =
@@ -4188,62 +4221,127 @@ let display_line value =
 
 let compact_entry = function
   | None -> "missing"
-  | Some entry -> match entry.Service.kind,entry.Service.mode with
-      | Service.Directory,_ -> "directory"
-      | Service.File,Some Yeokcham_snapshot.Executable -> "executable file"
-      | Service.File,Some Yeokcham_snapshot.Symlink -> "symlink"
-      | Service.File,(None | Some Yeokcham_snapshot.Regular) -> "file"
+  | Some entry -> (
+      match (entry.Service.kind, entry.Service.mode) with
+      | Service.Directory, _ -> "directory"
+      | Service.File, Some Yeokcham_snapshot.Executable -> "executable file"
+      | Service.File, Some Yeokcham_snapshot.Symlink -> "symlink"
+      | Service.File, (None | Some Yeokcham_snapshot.Regular) -> "file")
 
 let compact_change difference =
-  match difference.Service.before,difference.Service.after with
-  | None,Some _ -> ("A",Output.Good,"added")
-  | Some _,None -> ("D",Output.Bad,"deleted")
-  | Some before,Some after when before.Service.kind <> after.Service.kind -> ("T",Output.Caution,"type changed")
-  | Some before,Some after when before.Service.mode <> after.Service.mode -> ("M",Output.Caution,"mode changed")
-  | Some _,Some _ | None,None -> ("M",Output.Caution,"modified")
+  match (difference.Service.before, difference.Service.after) with
+  | None, Some _ -> ("A", Output.Good, "added")
+  | Some _, None -> ("D", Output.Bad, "deleted")
+  | Some before, Some after when before.Service.kind <> after.Service.kind ->
+      ("T", Output.Caution, "type changed")
+  | Some before, Some after when before.Service.mode <> after.Service.mode ->
+      ("M", Output.Caution, "mode changed")
+  | Some _, Some _ | None, None -> ("M", Output.Caution, "modified")
 
 let render_compact_path difference =
-  let code,tone,_ = compact_change difference in
-  let mode = match difference.Service.before,difference.Service.after with
-    | Some before,Some after when before.Service.mode <> after.Service.mode || before.Service.kind <> after.Service.kind ->
-        " (" ^ compact_entry (Some before) ^ " -> " ^ compact_entry (Some after) ^ ")"
-    | None,Some after when after.Service.kind = Service.Directory || after.Service.mode = Some Yeokcham_snapshot.Symlink ->
+  let code, tone, _ = compact_change difference in
+  let mode =
+    match (difference.Service.before, difference.Service.after) with
+    | Some before, Some after
+      when before.Service.mode <> after.Service.mode
+           || before.Service.kind <> after.Service.kind ->
+        " ("
+        ^ compact_entry (Some before)
+        ^ " -> " ^ compact_entry (Some after) ^ ")"
+    | None, Some after
+      when after.Service.kind = Service.Directory
+           || after.Service.mode = Some Yeokcham_snapshot.Symlink ->
         " (" ^ compact_entry (Some after) ^ ")"
-    | None,Some _ | Some _,None | Some _,Some _ | None,None -> ""
+    | None, Some _ | Some _, None | Some _, Some _ | None, None -> ""
   in
-  Output.line ("  " ^ Output.paint tone code ^ " " ^ Output.display_value (Model.Path.to_string difference.Service.path) ^ mode)
+  Output.line
+    ("  " ^ Output.paint tone code ^ " "
+    ^ Output.display_value (Model.Path.to_string difference.Service.path)
+    ^ mode)
 
 let render_display_difference difference =
   let entry = difference.Service.entry_difference in
-  if requested_details () then (
-    Printf.printf "diff %s\n" (Output.display_value (Model.Path.to_string entry.Service.path));
-    Printf.printf "  before %s\n  after  %s\n" (render_snapshot_entry entry.Service.before) (render_snapshot_entry entry.Service.after))
-  else (
-    let _,_,description = compact_change entry in
-    Output.line ~tone:Output.Accent (Output.display_value (Model.Path.to_string entry.Service.path));
-    if entry.Service.before = None || entry.Service.after = None then
-      Output.line ~tone:Output.Muted ("  " ^ description ^ " / " ^ compact_entry (if entry.Service.after = None then entry.Service.before else entry.Service.after));
-    if Option.map (fun e -> e.Service.mode,e.Service.kind) entry.Service.before <> Option.map (fun e -> e.Service.mode,e.Service.kind) entry.Service.after
-       && entry.Service.before <> None && entry.Service.after <> None then
-      Output.line ~tone:Output.Muted ("  " ^ compact_entry entry.Service.before ^ " -> " ^ compact_entry entry.Service.after));
+  (if requested_details () then (
+     Printf.printf "diff %s\n"
+       (Output.display_value (Model.Path.to_string entry.Service.path));
+     Printf.printf "  before %s\n  after  %s\n"
+       (render_snapshot_entry entry.Service.before)
+       (render_snapshot_entry entry.Service.after))
+   else
+     let _, _, description = compact_change entry in
+     Output.line ~tone:Output.Accent
+       (Output.display_value (Model.Path.to_string entry.Service.path));
+     if entry.Service.before = None || entry.Service.after = None then
+       Output.line ~tone:Output.Muted
+         ("  " ^ description ^ " / "
+         ^ compact_entry
+             (if entry.Service.after = None then entry.Service.before
+              else entry.Service.after));
+     if
+       Option.map
+         (fun e -> (e.Service.mode, e.Service.kind))
+         entry.Service.before
+       <> Option.map
+            (fun e -> (e.Service.mode, e.Service.kind))
+            entry.Service.after
+       && entry.Service.before <> None
+       && entry.Service.after <> None
+     then
+       Output.line ~tone:Output.Muted
+         ("  "
+         ^ compact_entry entry.Service.before
+         ^ " -> "
+         ^ compact_entry entry.Service.after));
   match difference.Service.text_difference with
-  | None -> ()
-  | Some (Text_diff.Opaque reason) -> Output.line ~tone:Output.Muted ("  " ^ display_line reason)
+  | None -> (
+      if not (requested_details ()) then
+        match (entry.Service.before, entry.Service.after) with
+        | Some before, Some after
+          when before.Service.content <> after.Service.content ->
+            Output.line ~tone:Output.Muted
+              (if after.Service.mode = Some Yeokcham_snapshot.Symlink then
+                 "  Symlink target changed"
+               else "  Contents changed")
+        | None, _ | _, None | Some _, Some _ -> ())
+  | Some (Text_diff.Opaque reason) ->
+      let message =
+        if requested_details () then display_line reason
+        else
+          let has predicate =
+            List.exists
+              (Option.fold ~none:false ~some:predicate)
+              [ entry.Service.before; entry.Service.after ]
+          in
+          if
+            has (fun value ->
+                value.Service.mode = Some Yeokcham_snapshot.Symlink)
+          then "Symlink target changed"
+          else if has (fun value -> value.Service.kind = Service.Directory) then
+            "Directory structure changed"
+          else "Text preview unavailable (binary or display limit)."
+      in
+      Output.line ~tone:Output.Muted ("  " ^ message)
   | Some (Text_diff.Text hunks) ->
       List.iter
         (fun hunk ->
-          Output.line ~tone:Output.Muted (Standard_printf.sprintf "@@ -%d,%d +%d,%d @@" hunk.Text_diff.old_start
-            hunk.Text_diff.old_count hunk.Text_diff.new_start
-            hunk.Text_diff.new_count);
+          Output.line ~tone:Output.Muted
+            (Standard_printf.sprintf "@@ -%d,%d +%d,%d @@"
+               hunk.Text_diff.old_start hunk.Text_diff.old_count
+               hunk.Text_diff.new_start hunk.Text_diff.new_count);
           List.iter
             (fun line ->
-              Output.line ~tone:(match line.Text_diff.kind with Text_diff.Added -> Output.Good | Text_diff.Removed -> Output.Bad | Text_diff.Context -> Output.Plain)
+              Output.line
+                ~tone:
+                  (match line.Text_diff.kind with
+                  | Text_diff.Added -> Output.Good
+                  | Text_diff.Removed -> Output.Bad
+                  | Text_diff.Context -> Output.Plain)
                 (Standard_printf.sprintf "%s%s"
-                (match line.Text_diff.kind with
-                | Text_diff.Context -> " "
-                | Text_diff.Removed -> "-"
-                | Text_diff.Added -> "+")
-                (display_line line.Text_diff.text));
+                   (match line.Text_diff.kind with
+                   | Text_diff.Context -> " "
+                   | Text_diff.Removed -> "-"
+                   | Text_diff.Added -> "+")
+                   (display_line line.Text_diff.text));
               if not line.Text_diff.newline then
                 Output.line ~tone:Output.Muted "\\ No newline at end of file")
             hunk.Text_diff.lines)
@@ -4481,52 +4579,153 @@ let compact_state (state : Service.state_view) =
   match state.Service.history_identity with
   | Some identity -> "#" ^ Int64.to_string (Core.History_id.sequence identity)
   | None when state.Service.state_name = "working" -> "working files"
-  | None -> "snapshot " ^ String.sub (Model.Snapshot_id.to_string state.Service.state_snapshot) 0 8
+  | None ->
+      "snapshot "
+      ^ String.sub
+          (Model.Snapshot_id.to_string state.Service.state_snapshot)
+          0 8
 
 let render_compact_status ~next_actions status =
-  let branch = Option.bind status.Service.status_branch (fun listing ->
-      List.find_opt (fun row -> Core.Branch_id.equal row.Core.branch_id listing.Service.selected_branch)
-        listing.Service.shared_branches) in
-  let branch_name = Option.fold ~none:"Local work" ~some:(fun row ->
-      match row.Core.display_names with
-      | [name] -> Output.display_value name
-      | [] -> "Unnamed branch"
-      | names -> String.concat ", " (List.map Output.display_value names)) branch in
-  Output.line ~tone:Output.Accent (branch_name ^ " / saved " ^ compact_state status.Service.status_cursor);
+  let branch =
+    Option.bind status.Service.status_branch (fun listing ->
+        List.find_opt
+          (fun row ->
+            Core.Branch_id.equal row.Core.branch_id
+              listing.Service.selected_branch)
+          listing.Service.shared_branches)
+  in
+  let branch_name =
+    Option.fold ~none:"Local work"
+      ~some:(fun row ->
+        match row.Core.display_names with
+        | [ name ] -> Output.display_value name
+        | [] -> "Unnamed branch"
+        | names -> String.concat ", " (List.map Output.display_value names))
+      branch
+  in
+  Output.line ~tone:Output.Accent
+    (branch_name ^ " / saved " ^ compact_state status.Service.status_cursor);
   (match status.Service.capture_observation with
-   | Error message ->
-       Output.line ~tone:Output.Caution "! Changes unknown - capture incomplete";
-       Output.line ("  " ^ display_line (public_error_message message))
-   | Ok comparison ->
-       let count = List.length comparison.Service.differences in
-       if count = 0 then Output.line ~tone:Output.Good (Output.symbol ~ascii:"=" ~unicode:"✓" ^ " Working files match the saved version")
-       else (
-         Output.line (Standard_printf.sprintf "%d %s to save" count (if count = 1 then "path" else "paths"));
-         List.iter render_compact_path comparison.Service.differences));
-  let diverged = Option.fold ~none:false ~some:(fun row -> List.length row.Core.event_heads <> 1 || List.length row.Core.accepted_heads <> 1 || List.length row.Core.display_names <> 1) branch in
-  if diverged then Output.line ~tone:Output.Caution "! Branch needs reconciliation; run yeokcham branch list";
-  let incoming = Option.fold ~none:false ~some:(fun (row : Core.branch_state) ->
-      Option.fold ~none:false ~some:(fun basis -> not (List.exists (Core.Record_id.equal basis) row.Core.accepted_heads)) status.Service.status_basis) branch in
-  if incoming && not diverged then Output.line "Incoming accepted work / yeokcham integrate --preview";
-  let pending_publications = List.filter (fun publication -> fst (publication_transfer_state status publication.Local.revision) = "pending") status.Service.status_publications |> List.length in
-  if pending_publications > 0 then Output.line (Standard_printf.sprintf "Sharing  %d local publication%s awaiting exchange" pending_publications (if pending_publications = 1 then "" else "s"));
-  let pending_acceptances = List.filter (fun operation -> Integration_op.committed operation && not operation.Integration_op.acknowledged) status.Service.status_integrations |> List.length in
-  if pending_acceptances > 0 then Output.line (Standard_printf.sprintf "Accepted  %d local integration%s awaiting exchange" pending_acceptances (if pending_acceptances = 1 then "" else "s"));
-  List.iter (fun operation ->
+  | Error message ->
+      Output.line ~tone:Output.Caution "! Changes unknown - capture incomplete";
+      Output.line ("  " ^ display_line (public_error_message message))
+  | Ok comparison ->
+      let count = List.length comparison.Service.differences in
+      if count = 0 then
+        Output.line ~tone:Output.Good
+          (Output.symbol ~ascii:"=" ~unicode:"✓"
+          ^ " Working files match the saved version")
+      else (
+        Output.line
+          (Standard_printf.sprintf "%d %s to save" count
+             (if count = 1 then "path" else "paths"));
+        List.iter render_compact_path comparison.Service.differences));
+  let diverged =
+    Option.fold ~none:false
+      ~some:(fun row ->
+        List.length row.Core.event_heads <> 1
+        || List.length row.Core.accepted_heads <> 1
+        || List.length row.Core.display_names <> 1)
+      branch
+  in
+  if diverged then
+    Output.line ~tone:Output.Caution
+      "! Branch needs reconciliation; run yeokcham branch list";
+  let incoming =
+    Option.fold ~none:false
+      ~some:(fun (row : Core.branch_state) ->
+        Option.fold ~none:false
+          ~some:(fun basis ->
+            not
+              (List.exists (Core.Record_id.equal basis) row.Core.accepted_heads))
+          status.Service.status_basis)
+      branch
+  in
+  if incoming && not diverged then
+    Output.line "Incoming accepted work / yeokcham integrate --preview";
+  let pending_publications =
+    List.filter
+      (fun publication ->
+        fst (publication_transfer_state status publication.Local.revision)
+        = "pending")
+      status.Service.status_publications
+    |> List.length
+  in
+  if pending_publications > 0 then
+    Output.line
+      (Standard_printf.sprintf
+         "Sharing  %d local publication%s awaiting exchange"
+         pending_publications
+         (if pending_publications = 1 then "" else "s"));
+  let pending_acceptances =
+    List.filter
+      (fun operation -> integration_transfer_state operation = "pending")
+      status.Service.status_integrations
+    |> List.length
+  in
+  if pending_acceptances > 0 then
+    Output.line
+      (Standard_printf.sprintf
+         "Accepted  %d local integration%s awaiting exchange"
+         pending_acceptances
+         (if pending_acceptances = 1 then "" else "s"));
+  List.iter
+    (fun operation ->
       if Integration_op.pending operation then (
-        Output.line ~tone:Output.Caution ("! Integration " ^ phase_name operation.Integration_op.phase);
-        Output.line ("  yeokcham operation show " ^ Core.Operation_id.to_hex operation.Integration_op.token))) status.Service.status_integrations;
-  if status.Service.pending_local_recovery <> None || status.Service.pending_recovery_journals <> [] then (
-    Output.line ~tone:Output.Caution "! Interrupted local selection needs recovery";
-    List.iter (fun action -> Output.line ("  " ^ String.concat " " (List.map Filename.quote action.Cli_data.arguments))) next_actions);
-  Option.iter (fun message -> Output.line ~tone:Output.Caution ("! Recovery state unknown: " ^ display_line (public_error_message message))) status.Service.recovery_inspection_error;
-  (match status.Service.status_transfers with Error message -> Output.line ~tone:Output.Caution ("! Transfer state unknown: " ^ display_line (public_error_message message)) | Ok _ -> ());
-  if status.Service.status_resolutions <> [] then Output.line "Resolution proposals available / yeokcham conflicts";
+        Output.line ~tone:Output.Caution
+          ("! Integration " ^ phase_name operation.Integration_op.phase);
+        Output.line
+          ("  yeokcham operation show "
+          ^ Core.Operation_id.to_hex operation.Integration_op.token)))
+    status.Service.status_integrations;
+  if
+    status.Service.pending_local_recovery <> None
+    || status.Service.pending_recovery_journals <> []
+  then (
+    Output.line ~tone:Output.Caution
+      "! Interrupted local selection needs recovery";
+    List.iter
+      (fun action ->
+        Output.line
+          ("  "
+          ^ String.concat " "
+              (List.map Filename.quote action.Cli_data.arguments)))
+      next_actions);
+  Option.iter
+    (fun message ->
+      Output.line ~tone:Output.Caution
+        ("! Recovery state unknown: "
+        ^ display_line (public_error_message message)))
+    status.Service.recovery_inspection_error;
+  (match status.Service.status_transfers with
+  | Error message ->
+      Output.line ~tone:Output.Caution
+        ("! Transfer state unknown: "
+        ^ display_line (public_error_message message))
+  | Ok _ -> ());
+  let shared_count = List.length status.Service.status_shared_revisions in
+  if shared_count > 0 then
+    Output.line
+      (Standard_printf.sprintf "Shared history  %d revision%s on this device"
+         shared_count
+         (if shared_count = 1 then "" else "s"));
+  let legacy_decisions =
+    List.length status.Service.saved_metadata.Service.open_decisions
+  in
+  if legacy_decisions > 0 then
+    Output.line ~tone:Output.Caution
+      (Standard_printf.sprintf
+         "! %d earlier-workflow decision%s / yeokcham status --details"
+         legacy_decisions
+         (if legacy_decisions = 1 then "" else "s"));
+  if status.Service.status_resolutions <> [] then
+    Output.line "Resolution proposals available / yeokcham conflicts";
   Output.line "";
   (match status.Service.capture_observation with
-   | Ok comparison when comparison.Service.differences <> [] -> Output.line "Next  yeokcham diff / yeokcham save"
-   | Error _ | Ok _ -> ());
-  Output.line ~tone:Output.Muted "Capture: manual / Backup: not configured"
+  | Ok comparison when comparison.Service.differences <> [] ->
+      Output.line "Next  yeokcham diff / yeokcham save"
+  | Error _ | Ok _ -> ());
+  Output.line ~tone:Output.Muted "Private backup: not configured"
 
 let run_status arguments =
   let root = parse_root arguments in
@@ -4781,7 +4980,8 @@ let run_status arguments =
              "Local workspace inspected."
            else "Capture is incomplete; saved metadata remains available.")
         ~data ~next_actions ()
-  | Text_format when not (requested_details ()) -> render_compact_status ~next_actions status
+  | Text_format when not (requested_details ()) ->
+      render_compact_status ~next_actions status
   | Text_format ->
       render_status
         ~uncaptured_known:(Result.is_ok status.Service.capture_observation)
@@ -5000,14 +5200,19 @@ let run_diff arguments =
              ])
         ~next_actions:[] ()
   | Text_format ->
-      if requested_details () then Printf.printf "before %s snapshot %s\nafter %s snapshot %s\n"
-        comparison.Service.before_state.Service.state_name
-        (Model.Snapshot_id.to_string
-           comparison.Service.before_state.Service.state_snapshot)
-        comparison.Service.after_state.Service.state_name
-        (Model.Snapshot_id.to_string
-           comparison.Service.after_state.Service.state_snapshot)
-      else if changed then Output.line ~tone:Output.Muted (compact_state comparison.Service.before_state ^ " -> " ^ compact_state comparison.Service.after_state);
+      if requested_details () then
+        Printf.printf "before %s snapshot %s\nafter %s snapshot %s\n"
+          comparison.Service.before_state.Service.state_name
+          (Model.Snapshot_id.to_string
+             comparison.Service.before_state.Service.state_snapshot)
+          comparison.Service.after_state.Service.state_name
+          (Model.Snapshot_id.to_string
+             comparison.Service.after_state.Service.state_snapshot)
+      else if changed then
+        Output.line ~tone:Output.Muted
+          (compact_state comparison.Service.before_state
+          ^ " -> "
+          ^ compact_state comparison.Service.after_state);
       if not changed then Output.line ~tone:Output.Good "No differences"
       else
         List.iter render_display_difference
@@ -5042,7 +5247,8 @@ let run_changes arguments =
           [ action ~root [ "diff" ] "Inspect readable text differences." ]
         ()
   | Text_format when not (requested_details ()) ->
-      if differences = [] then Output.line ~tone:Output.Good "No changes to save"
+      if differences = [] then
+        Output.line ~tone:Output.Good "No changes to save"
       else List.iter render_compact_path differences
   | Text_format -> (
       Printf.printf "saved %s\nobserved %s\n"
@@ -5073,41 +5279,85 @@ let display_capture_time timestamp =
     with Unix.Unix_error _ | Invalid_argument _ -> "capture time unavailable"
 
 let compact_capture_time timestamp =
-  if timestamp = 0L then "" else
-  try
-    let time = Unix.localtime (Int64.to_float timestamp) in
-    let today = Unix.localtime (Unix.gettimeofday ()) in
-    if time.Unix.tm_year = today.Unix.tm_year && time.Unix.tm_yday = today.Unix.tm_yday then
-      Standard_printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
-    else Standard_printf.sprintf "%04d-%02d-%02d" (time.Unix.tm_year + 1900) (time.Unix.tm_mon + 1) time.Unix.tm_mday
-  with Unix.Unix_error _ | Invalid_argument _ -> "time unknown"
+  if timestamp = 0L then ""
+  else
+    try
+      let time = Unix.localtime (Int64.to_float timestamp) in
+      let today = Unix.localtime (Unix.gettimeofday ()) in
+      if
+        time.Unix.tm_year = today.Unix.tm_year
+        && time.Unix.tm_yday = today.Unix.tm_yday
+      then
+        Standard_printf.sprintf "%02d:%02d" time.Unix.tm_hour time.Unix.tm_min
+      else
+        Standard_printf.sprintf "%04d-%02d-%02d" (time.Unix.tm_year + 1900)
+          (time.Unix.tm_mon + 1) time.Unix.tm_mday
+    with Unix.Unix_error _ | Invalid_argument _ -> "time unknown"
 
 let render_compact_history page =
   Output.line ~tone:Output.Accent "Local history";
-  List.iter (fun row ->
+  List.iter
+    (fun row ->
       let node = row.Service.history_node in
-      let marker = if node.History.id = page.Service.page_cursor then "*" else "o" in
-      let label = if node.History.parent = None then "Initial capture" else
-        match row.Service.history_title,row.Service.history_paths with
-        | Some title,_ when not (String.starts_with ~prefix:"Work on " title) -> Output.display_value title
-        | _,Ok [] -> "No file changes"
-        | _,Ok (path :: rest) -> Output.display_value (Model.Path.to_string path) ^ (if rest = [] then "" else Standard_printf.sprintf " +%d" (List.length rest))
-        | _,Error _ -> "Changes unavailable"
+      let marker =
+        if node.History.id = page.Service.page_cursor then "*" else "o"
+      in
+      let label =
+        if node.History.parent = None then "Initial capture"
+        else
+          match (row.Service.history_title, row.Service.history_paths) with
+          | Some title, _ when not (String.starts_with ~prefix:"Work on " title)
+            ->
+              Output.display_value title
+          | _, Ok [] -> "No file changes"
+          | _, Ok (path :: rest) ->
+              Output.display_value (Model.Path.to_string path)
+              ^
+              if rest = [] then ""
+              else Standard_printf.sprintf " +%d" (List.length rest)
+          | _, Error _ -> "Changes unavailable"
       in
       let prefix = marker ^ " #" ^ Int64.to_string node.History.id ^ "  " in
       let time = compact_capture_time node.History.created_at in
-      let label = Output.ellipsize ~max_columns:(Output.terminal_width () - String.length prefix - String.length time - 2) label in
-      Output.line ~tone:(if marker = "*" then Output.Accent else Output.Plain) (prefix ^ label ^ (if time = "" then "" else "  " ^ time));
-      Option.iter (fun parent ->
-          let forked = List.exists (fun previous -> previous.Service.history_node.History.id = parent && List.length previous.Service.history_children > 1) page.Service.entries in
+      let label =
+        Output.ellipsize
+          ~max_columns:
+            (Output.terminal_width () - String.length prefix
+           - String.length time - 2)
+          label
+      in
+      Output.line
+        ~tone:(if marker = "*" then Output.Accent else Output.Plain)
+        (prefix ^ label ^ if time = "" then "" else "  " ^ time);
+      Option.iter
+        (fun parent ->
+          let forked =
+            List.exists
+              (fun previous ->
+                previous.Service.history_node.History.id = parent
+                && List.length previous.Service.history_children > 1)
+              page.Service.entries
+          in
           if forked || parent <> Int64.pred node.History.id then
-            Output.line ~tone:Output.Muted ("    from #" ^ Int64.to_string parent)) node.History.parent;
+            Output.line ~tone:Output.Muted
+              ("    from #" ^ Int64.to_string parent))
+        node.History.parent;
       if List.length row.Service.history_children > 1 then
-        Output.line ~tone:Output.Muted ("    alternatives " ^ String.concat ", " (List.map (fun id -> "#" ^ Int64.to_string id) row.Service.history_children));
-      (match row.Service.availability with
-       | Service.Available -> ()
-       | Service.Not_retained -> Output.line ~tone:Output.Caution "    ! Contents no longer retained"
-       | Service.Unavailable reason -> Output.line ~tone:Output.Caution ("    ! Contents unavailable: " ^ display_line (public_error_message reason)))) page.Service.entries
+        Output.line ~tone:Output.Muted
+          ("    alternatives "
+          ^ String.concat ", "
+              (List.map
+                 (fun id -> "#" ^ Int64.to_string id)
+                 row.Service.history_children));
+      match row.Service.availability with
+      | Service.Available -> ()
+      | Service.Not_retained ->
+          Output.line ~tone:Output.Caution "    ! Contents no longer retained"
+      | Service.Unavailable reason ->
+          Output.line ~tone:Output.Caution
+            ("    ! Contents unavailable: "
+            ^ display_line (public_error_message reason)))
+    page.Service.entries
 
 let run_history arguments =
   let rec parse root before limit = function
@@ -5290,8 +5540,18 @@ let run_history arguments =
             ~message:"Saved local history inspected." ~data ~next_actions ())
   | Text_format when not (requested_details ()) ->
       render_compact_history page;
-      Option.iter (fun before -> Output.line ~tone:Output.Muted (Standard_printf.sprintf "More  yeokcham history --before %Ld --limit %d" before limit)) page.Service.next_before;
-      Option.iter (fun (_,_,_,reason) -> Output.line ~tone:Output.Caution ("! Saved state unverified: " ^ display_line (public_error_message reason))) failure
+      Option.iter
+        (fun before ->
+          Output.line ~tone:Output.Muted
+            (Standard_printf.sprintf
+               "More  yeokcham history --before %Ld --limit %d" before limit))
+        page.Service.next_before;
+      Option.iter
+        (fun (_, _, _, reason) ->
+          Output.line ~tone:Output.Caution
+            ("! Saved state unverified: "
+            ^ display_line (public_error_message reason)))
+        failure
   | Text_format ->
       Printf.printf "current %s\n" (reference page.Service.page_cursor);
       List.iter
@@ -5461,19 +5721,28 @@ let render_navigation_details ~preview result =
 
 let render_navigation_text ~preview result =
   if requested_details () then render_navigation_details ~preview result
-  else (
+  else
     let number = Int64.to_string result.Service.target_node.History.id in
     let summary =
       if preview then "Preview / select saved version #" ^ number
-      else if result.Service.history_applied then Output.symbol ~ascii:"+" ~unicode:"✓" ^ " Restored saved version #" ^ number
-      else Output.symbol ~ascii:"=" ~unicode:"✓" ^ " Already at saved version #" ^ number
+      else if result.Service.history_applied then
+        Output.symbol ~ascii:"+" ~unicode:"✓"
+        ^ " Restored saved version #" ^ number
+      else
+        Output.symbol ~ascii:"=" ~unicode:"✓"
+        ^ " Already at saved version #" ^ number
     in
     Output.line ~tone:(if preview then Output.Accent else Output.Good) summary;
     List.iter render_compact_path result.Service.history_changes;
-    if result.Service.target_provisional then Output.line ~tone:Output.Muted "  New saved version; allocated only on confirmation.";
-    if result.Service.captures_unsaved then Output.line ~tone:Output.Muted
-        (if preview then "  Unsaved edits will be saved separately." else "  Unsaved edits saved separately.");
-    if preview then Output.line ~tone:Output.Muted "Preview only. Rerun with --yes to apply.")
+    if result.Service.target_provisional then
+      Output.line ~tone:Output.Muted
+        "  New saved version; allocated only on confirmation.";
+    if result.Service.captures_unsaved then
+      Output.line ~tone:Output.Muted
+        (if preview then "  Unsaved edits will be saved separately."
+         else "  Unsaved edits saved separately.");
+    if preview then
+      Output.line ~tone:Output.Muted "Preview only. Rerun with --yes to apply."
 
 let run_local_navigation ~flags ~base_arguments ~direction =
   let root = flags.selection_root in
@@ -9259,7 +9528,8 @@ let () =
   | Ok mode ->
       Output.configure ~mode ~machine_output:(requested_format () = Json_format)
   | Error message -> fail_with "invalid-invocation" message);
-  if snd (detail_arguments ()) > 1 then fail_with "invalid-invocation" "--details may be specified only once";
+  if snd (detail_arguments ()) > 1 then
+    fail_with "invalid-invocation" "--details may be specified only once";
   match command_arguments () with
   | _ :: [ "--version" ] -> print_endline version_text
   | _ :: [ "--help" ] | _ :: [ "-h" ] -> print_help []

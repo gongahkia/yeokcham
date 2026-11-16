@@ -53,7 +53,8 @@ let styled code value = code ^ value ^ reset
 
 let paint tone value =
   if not (color_enabled Stdout) then value
-  else match tone with
+  else
+    match tone with
     | Plain -> value
     | Muted -> styled "\027[90m" value
     | Accent -> styled (bold ^ cyan) value
@@ -65,11 +66,17 @@ let line ?(tone = Plain) value = Stdlib.print_endline (paint tone value)
 
 let symbol ~ascii ~unicode =
   let locale =
-    ["LC_ALL";"LC_CTYPE";"LANG"]
-    |> List.find_map (fun name -> match Sys.getenv_opt name with Some value when value <> "" -> Some value | Some _ | None -> None)
+    [ "LC_ALL"; "LC_CTYPE"; "LANG" ]
+    |> List.find_map (fun name ->
+        match Sys.getenv_opt name with
+        | Some value when value <> "" -> Some value
+        | Some _ | None -> None)
     |> Option.value ~default:"C" |> String.lowercase_ascii
   in
-  let utf8 = String.ends_with ~suffix:"utf-8" locale || String.ends_with ~suffix:"utf8" locale in
+  let utf8 =
+    String.ends_with ~suffix:"utf-8" locale
+    || String.ends_with ~suffix:"utf8" locale
+  in
   if utf8 && usable_terminal Unix.stdout then unicode else ascii
 
 let terminal_width () =
@@ -83,10 +90,19 @@ let ellipsize ~max_columns value =
     else if columns >= limit - 3 then Some offset
     else
       let byte = Char.code value.[offset] in
-      let length = if byte < 0x80 then 1 else if byte < 0xe0 then 2 else if byte < 0xf0 then 3 else 4 in
-      stop (min (String.length value) (offset + length)) (columns + 1)
+      let length =
+        if byte < 0x80 then 1
+        else if byte < 0xe0 then 2
+        else if byte < 0xf0 then 3
+        else 4
+      in
+      stop
+        (min (String.length value) (offset + length))
+        (columns + if byte < 0x80 then 1 else 2)
   in
-  match stop 0 0 with None -> value | Some offset -> String.sub value 0 offset ^ "..."
+  match stop 0 0 with
+  | None -> value
+  | Some offset -> String.sub value 0 offset ^ "..."
 
 let starts_with_any prefixes value =
   List.exists (fun prefix -> String.starts_with ~prefix value) prefixes

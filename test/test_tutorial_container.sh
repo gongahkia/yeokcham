@@ -38,11 +38,11 @@ docker run --rm "$image" /bin/sh -ec '
   case "$forced" in *"$escape"*) ;; *) exit 1 ;; esac
   completion=$(yeokcham completion bash --color always)
   case "$completion" in *"$escape"*) exit 1 ;; esac
-  initial=$(yeokcham init --root /workspace/yeokcham --username alice \
+  initial=$(yeokcham init --details --root /workspace/yeokcham --username alice \
     --draft first-task --title "first task" | sed -n "s/^saved //p" | sed -n "1p")
   test "${#initial}" = 64
   printf "%s\\n" "second note" >>/workspace/yeokcham/note.txt
-  saved=$(yeokcham save --root /workspace/yeokcham | sed -n "s/^saved //p" | sed -n "1p")
+  saved=$(yeokcham save --details --root /workspace/yeokcham | sed -n "s/^saved //p" | sed -n "1p")
   test "${#saved}" = 64
   printf "%s\\n" "unsaved line" >>/workspace/yeokcham/note.txt
   yeokcham restore --yes --root /workspace/yeokcham --checkpoint "$saved" \
