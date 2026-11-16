@@ -193,6 +193,14 @@ let record_warning warning =
   Output.print_warning ("warning: " ^ warning)
 
 let print_json bytes =
+  let destination =
+    Option.value !json_stdout_destination ~default:Unix.stdout
+  in
+  let bytes =
+    if Unix.isatty destination then
+      Yojson.Safe.from_string bytes |> Yojson.Safe.pretty_to_string ~std:true
+    else bytes
+  in
   match !json_stdout_destination with
   | None -> Output.print_raw_endline bytes
   | Some descriptor ->
@@ -4254,10 +4262,13 @@ let render_compact_path difference =
         " (" ^ compact_entry (Some after) ^ ")"
     | None, Some _ | Some _, None | Some _, Some _ | None, None -> ""
   in
-  Output.line
-    ("  " ^ Output.paint tone code ^ " "
-    ^ Output.display_value (Model.Path.to_string difference.Service.path)
-    ^ mode)
+  Output.wrap
+    ~max_columns:(max 2 (Output.terminal_width () - 4))
+    (Output.display_value (Model.Path.to_string difference.Service.path) ^ mode)
+  |> List.iteri (fun index text ->
+      Output.line
+        ((if index = 0 then "  " ^ Output.paint tone code ^ " " else "    ")
+        ^ text))
 
 let render_display_difference difference =
   let entry = difference.Service.entry_difference in
@@ -4269,8 +4280,31 @@ let render_display_difference difference =
        (render_snapshot_entry entry.Service.after))
    else
      let _, _, description = compact_change entry in
-     Output.line ~tone:Output.Accent
-       (Output.display_value (Model.Path.to_string entry.Service.path));
+     let counts =
+       match difference.Service.text_difference with
+       | Some (Text_diff.Text hunks) ->
+           let removed, added =
+             List.fold_left
+               (fun counts hunk ->
+                 List.fold_left
+                   (fun (removed, added) line ->
+                     match line.Text_diff.kind with
+                     | Text_diff.Removed -> (removed + 1, added)
+                     | Text_diff.Added -> (removed, added + 1)
+                     | Text_diff.Context -> (removed, added))
+                   counts hunk.Text_diff.lines)
+               (0, 0) hunks
+           in
+           "  "
+           ^ Output.paint Output.Good ("+" ^ string_of_int added)
+           ^ " "
+           ^ Output.paint Output.Bad ("-" ^ string_of_int removed)
+       | Some (Text_diff.Opaque _) | None -> ""
+     in
+     Output.line
+       (Output.paint Output.Accent
+          (Output.display_value (Model.Path.to_string entry.Service.path))
+       ^ counts);
      if entry.Service.before = None || entry.Service.after = None then
        Output.line ~tone:Output.Muted
          ("  " ^ description ^ " / "
@@ -4322,30 +4356,35 @@ let render_display_difference difference =
       in
       Output.line ~tone:Output.Muted ("  " ^ message)
   | Some (Text_diff.Text hunks) ->
-      List.iter
-        (fun hunk ->
-          Output.line ~tone:Output.Muted
-            (Standard_printf.sprintf "@@ -%d,%d +%d,%d @@"
-               hunk.Text_diff.old_start hunk.Text_diff.old_count
-               hunk.Text_diff.new_start hunk.Text_diff.new_count);
-          List.iter
-            (fun line ->
-              Output.line
-                ~tone:
-                  (match line.Text_diff.kind with
-                  | Text_diff.Added -> Output.Good
-                  | Text_diff.Removed -> Output.Bad
-                  | Text_diff.Context -> Output.Plain)
-                (Standard_printf.sprintf "%s%s"
-                   (match line.Text_diff.kind with
-                   | Text_diff.Context -> " "
-                   | Text_diff.Removed -> "-"
-                   | Text_diff.Added -> "+")
-                   (display_line line.Text_diff.text));
-              if not line.Text_diff.newline then
-                Output.line ~tone:Output.Muted "\\ No newline at end of file")
-            hunk.Text_diff.lines)
-        hunks
+      if not (requested_details ()) then
+        V1_cli_layout.diff_hunks ~columns:(Output.terminal_width ())
+          ~escape:display_line hunks
+        |> List.iter (fun line -> Output.line line)
+      else
+        List.iter
+          (fun hunk ->
+            Output.line ~tone:Output.Muted
+              (Standard_printf.sprintf "@@ -%d,%d +%d,%d @@"
+                 hunk.Text_diff.old_start hunk.Text_diff.old_count
+                 hunk.Text_diff.new_start hunk.Text_diff.new_count);
+            List.iter
+              (fun line ->
+                Output.line
+                  ~tone:
+                    (match line.Text_diff.kind with
+                    | Text_diff.Added -> Output.Good
+                    | Text_diff.Removed -> Output.Bad
+                    | Text_diff.Context -> Output.Plain)
+                  (Standard_printf.sprintf "%s%s"
+                     (match line.Text_diff.kind with
+                     | Text_diff.Context -> " "
+                     | Text_diff.Removed -> "-"
+                     | Text_diff.Added -> "+")
+                     (display_line line.Text_diff.text));
+                if not line.Text_diff.newline then
+                  Output.line ~tone:Output.Muted "\\ No newline at end of file")
+              hunk.Text_diff.lines)
+          hunks
 
 let metadata_failure metadata =
   match Service.metadata_validation_failure metadata with
@@ -5215,7 +5254,10 @@ let run_diff arguments =
           ^ compact_state comparison.Service.after_state);
       if not changed then Output.line ~tone:Output.Good "No differences"
       else
-        List.iter render_display_difference
+        List.iteri
+          (fun index difference ->
+            if index > 0 && not (requested_details ()) then Output.line "";
+            render_display_difference difference)
           comparison.Service.display_differences
 
 let run_changes arguments =
@@ -5295,12 +5337,46 @@ let compact_capture_time timestamp =
     with Unix.Unix_error _ | Invalid_argument _ -> "time unknown"
 
 let render_compact_history page =
-  Output.line ~tone:Output.Accent "Local history";
-  List.iter
-    (fun row ->
+  let current_visible =
+    List.exists
+      (fun row ->
+        row.Service.history_node.History.id = page.Service.page_cursor)
+      page.Service.entries
+  in
+  Output.line ~tone:Output.Accent
+    (if current_visible then "Local history  (* current)"
+     else
+       "Local history / current #"
+       ^ Int64.to_string page.Service.page_cursor
+       ^ " outside this page");
+  let graph, continuations =
+    V1_cli_layout.history_graph
+      (List.map
+         (fun row ->
+           ( row.Service.history_node.History.id,
+             row.Service.history_node.History.parent ))
+         page.Service.entries)
+  in
+  let columns = Output.terminal_width () in
+  let fits =
+    List.for_all
+      (fun row ->
+        String.length row.V1_cli_layout.prefix <= max 2 (columns - 24))
+      graph
+  in
+  if not fits then
+    Output.line "Connections shown as parent numbers (graph exceeds width).";
+  List.iter2
+    (fun row graph ->
       let node = row.Service.history_node in
-      let marker =
-        if node.History.id = page.Service.page_cursor then "*" else "o"
+      let current = node.History.id = page.Service.page_cursor in
+      let prefix =
+        if fits then (
+          let prefix = Bytes.of_string graph.V1_cli_layout.prefix in
+          if current then Bytes.set prefix graph.V1_cli_layout.node_column '*';
+          Bytes.to_string prefix)
+        else if current then "* "
+        else "o "
       in
       let label =
         if node.History.parent = None then "Initial capture"
@@ -5317,47 +5393,54 @@ let render_compact_history page =
               else Standard_printf.sprintf " +%d" (List.length rest)
           | _, Error _ -> "Changes unavailable"
       in
-      let prefix = marker ^ " #" ^ Int64.to_string node.History.id ^ "  " in
+      let identity = "#" ^ Int64.to_string node.History.id in
       let time = compact_capture_time node.History.created_at in
+      let lead = prefix ^ identity ^ "  " in
+      let time =
+        if time = "" || columns < String.length lead + 24 then ""
+        else "  " ^ time
+      in
       let label =
         Output.ellipsize
-          ~max_columns:
-            (Output.terminal_width () - String.length prefix
-           - String.length time - 2)
+          ~max_columns:(columns - String.length lead - String.length time)
           label
       in
       Output.line
-        ~tone:(if marker = "*" then Output.Accent else Output.Plain)
-        (prefix ^ label ^ if time = "" then "" else "  " ^ time);
-      Option.iter
-        (fun parent ->
-          let forked =
-            List.exists
-              (fun previous ->
-                previous.Service.history_node.History.id = parent
-                && List.length previous.Service.history_children > 1)
-              page.Service.entries
-          in
-          if forked || parent <> Int64.pred node.History.id then
-            Output.line ~tone:Output.Muted
-              ("    from #" ^ Int64.to_string parent))
-        node.History.parent;
-      if List.length row.Service.history_children > 1 then
-        Output.line ~tone:Output.Muted
-          ("    alternatives "
-          ^ String.concat ", "
-              (List.map
-                 (fun id -> "#" ^ Int64.to_string id)
-                 row.Service.history_children));
-      match row.Service.availability with
+        ~tone:(if current then Output.Accent else Output.Plain)
+        (lead ^ label ^ time);
+      let rails = if fits then graph.V1_cli_layout.rails else "  " in
+      if not fits then
+        Output.line
+          (rails ^ "parent "
+          ^ Option.fold ~none:"none (initial capture)"
+              ~some:(fun id -> "#" ^ Int64.to_string id)
+              node.History.parent);
+      (match row.Service.availability with
       | Service.Available -> ()
       | Service.Not_retained ->
-          Output.line ~tone:Output.Caution "    ! Contents no longer retained"
+          Output.line ~tone:Output.Caution
+            (rails ^ "! Contents no longer retained")
       | Service.Unavailable reason ->
           Output.line ~tone:Output.Caution
-            ("    ! Contents unavailable: "
-            ^ display_line (public_error_message reason)))
-    page.Service.entries
+            (rails ^ "! Contents unavailable: "
+            ^ display_line (public_error_message reason)));
+      if fits then
+        List.iter (fun line -> Output.line line) graph.V1_cli_layout.connectors)
+    page.Service.entries graph;
+  if fits then
+    List.iter
+      (fun (prefix, id) ->
+        Output.line (prefix ^ "#" ^ Int64.to_string id ^ " (earlier history)"))
+      continuations;
+  if
+    fits
+    && List.exists
+         (fun row ->
+           List.exists
+             (fun text -> String.contains text 'X')
+             row.V1_cli_layout.connectors)
+         graph
+  then Output.line "X = crossing; paths remain separate."
 
 let run_history arguments =
   let rec parse root before limit = function

@@ -1,9 +1,17 @@
+(library
+ (name v1_cli_presentation)
+ (wrapped false)
+ (modules v1_cli_output v1_cli_layout)
+ (foreign_stubs
+  (language c)
+  (names v1_cli_terminal_stubs))
+ (libraries unix yeokcham_encoding yeokcham_v1_local_service))
+
 (executable
  (name yeokcham_v1)
  (public_name yeokcham)
  (modules
   yeokcham_v1
-  v1_cli_output
   v1_runtime
   v1_watch
   v1_watch_runner
@@ -12,6 +20,7 @@
  (flags
   (:standard -w -70))
  (libraries
+  v1_cli_presentation
   yeokcham_encoding
   yeokcham_snapshot
   yeokcham_v1_undo

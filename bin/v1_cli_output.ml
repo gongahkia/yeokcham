@@ -56,13 +56,11 @@ let paint tone value =
   else
     match tone with
     | Plain -> value
-    | Muted -> styled "\027[90m" value
+    | Muted -> value
     | Accent -> styled (bold ^ cyan) value
     | Good -> styled green value
     | Caution -> styled yellow value
     | Bad -> styled red value
-
-let line ?(tone = Plain) value = Stdlib.print_endline (paint tone value)
 
 let symbol ~ascii ~unicode =
   let locale =
@@ -79,30 +77,105 @@ let symbol ~ascii ~unicode =
   in
   if utf8 && usable_terminal Unix.stdout then unicode else ascii
 
+external native_terminal_width : unit -> int = "yeokcham_cli_terminal_width"
+external character_width : int -> int = "yeokcham_cli_character_width"
+
 let terminal_width () =
-  Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt
-  |> Option.fold ~none:80 ~some:(fun columns -> max 24 (min 240 columns))
+  let native = native_terminal_width () in
+  if native > 0 then native
+  else
+    Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt
+    |> Option.fold ~none:80 ~some:(fun columns ->
+        if columns > 0 then min 1000 columns else 80)
+
+(* only renderer-owned SGR sequences are accepted here; user controls are escaped
+   before layout. Keep the sequences together so wrapping cannot split ANSI. *)
+let atoms value =
+  let rec scan offset acc =
+    if offset >= String.length value then List.rev acc
+    else if value.[offset] = '\027' then
+      match String.index_from_opt value offset 'm' with
+      | Some finish ->
+          scan (finish + 1)
+            ((String.sub value offset (finish - offset + 1), 0) :: acc)
+      | None -> scan (offset + 1) (("?", 1) :: acc)
+    else
+      let decoded = String.get_utf_8_uchar value offset in
+      let length = Uchar.utf_decode_length decoded in
+      let character = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+      let text = String.sub value offset length in
+      let width = if character < 128 then 1 else character_width character in
+      scan (offset + length) ((text, width) :: acc)
+  in
+  scan 0 []
+
+let display_width value =
+  List.fold_left (fun total (_, width) -> total + width) 0 (atoms value)
+
+let wrap ?(words = false) ~max_columns value =
+  let limit = max 2 max_columns in
+  let buffer = Buffer.create (String.length value) in
+  let rows = ref [] and columns = ref 0 in
+  let source_columns = ref 0 in
+  let flush () =
+    rows := Buffer.contents buffer :: !rows;
+    Buffer.clear buffer;
+    columns := 0
+  in
+  let emit (text, width) =
+    (if width > 0 && !columns + width > limit then
+       let previous = Buffer.contents buffer in
+       match if words then String.rindex_opt previous ' ' else None with
+       | Some index when index > 0 ->
+           let tail =
+             String.sub previous (index + 1) (String.length previous - index - 1)
+           in
+           Buffer.truncate buffer index;
+           flush ();
+           Buffer.add_string buffer tail;
+           columns := display_width tail
+       | Some _ | None -> flush ());
+    if width > 0 && !columns + width > limit then flush ();
+    Buffer.add_string buffer text;
+    columns := !columns + width
+  in
+  List.iter
+    (fun (text, width) ->
+      if text = "\n" then (
+        flush ();
+        source_columns := 0)
+      else if text = "\t" then (
+        let spaces = 4 - (!source_columns mod 4) in
+        for _ = 1 to spaces do
+          emit (" ", 1)
+        done;
+        source_columns := !source_columns + spaces)
+      else (
+        emit (text, width);
+        source_columns := !source_columns + width))
+    (atoms value);
+  flush ();
+  List.rev !rows
+
+let pad_right ~columns value =
+  value ^ String.make (max 0 (columns - display_width value)) ' '
+
+let line ?(tone = Plain) value =
+  let width = terminal_width () in
+  wrap ~words:true ~max_columns:width value
+  |> List.iter (fun row -> Stdlib.print_endline (paint tone row))
 
 let ellipsize ~max_columns value =
   let limit = max 4 max_columns in
-  let rec stop offset columns =
-    if offset >= String.length value then None
-    else if columns >= limit - 3 then Some offset
-    else
-      let byte = Char.code value.[offset] in
-      let length =
-        if byte < 0x80 then 1
-        else if byte < 0xe0 then 2
-        else if byte < 0xf0 then 3
-        else 4
-      in
-      stop
-        (min (String.length value) (offset + length))
-        (columns + if byte < 0x80 then 1 else 2)
-  in
-  match stop 0 0 with
-  | None -> value
-  | Some offset -> String.sub value 0 offset ^ "..."
+  if display_width value <= limit then value
+  else
+    let rec take columns = function
+      | [] -> ""
+      | (text, width) :: rest ->
+          if columns + width > limit - 3 then "..."
+          else text ^ take (columns + width) rest
+    in
+    take 0 (atoms value)
 
 let starts_with_any prefixes value =
   List.exists (fun prefix -> String.starts_with ~prefix value) prefixes

@@ -157,11 +157,13 @@ The current P2 checkpoint also supports:
 ```
 
 `diff` with no states compares saved work with current disk files. Numeric states
-select positions within this workspace; history also prints full
+select positions within this workspace; `history --details` and JSON include full
 `workspace:sequence` identities. Exact saved-state comparisons leave working
-files and the history cursor alone. Text differences are readable within the
-stated display bounds; opaque files retain type/mode/content identities.
-History includes alternate continuations and availability, with 50 rows by
+files and the history cursor alone. Text diff shows line numbers and change
+counts, with before/after columns in terminals at least 100 columns wide and
+unified rows in narrower terminals. Long lines wrap without eliding contents.
+Opaque files retain explicit type/mode information and diagnostic identities.
+History draws connected local undo alternatives and availability, with 50 rows by
 default. Follow `--before` to read another page. Missing contents and unretained
 states are reported explicitly.
 
@@ -169,5 +171,5 @@ If rules or a special file prevent a complete observation, `status` still shows
 saved metadata and reports capture incomplete with unknown unsaved state. It does
 not report clean. The JSON domain result includes outcomes, real data and actions;
 current result/error aliases remain supported. Watcher/service and private backup
-state are distinct from a successful local save. P2's remaining application
-work remains in progress.
+state are distinct from a successful local save. The scoped P2/P3 slices are
+complete; broader native setup, participant and hardening gates remain P4 work.

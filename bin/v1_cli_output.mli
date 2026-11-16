@@ -21,4 +21,7 @@ val line : ?tone:tone -> string -> unit
 
 val symbol : ascii:string -> unicode:string -> string
 val terminal_width : unit -> int
+val display_width : string -> int
+val wrap : ?words:bool -> max_columns:int -> string -> string list
+val pad_right : columns:int -> string -> string
 val ellipsize : max_columns:int -> string -> string

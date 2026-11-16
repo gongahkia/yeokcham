@@ -107,6 +107,11 @@
   (run python3 %{dep:test_cli_presentation.py} %{dep:../bin/yeokcham_v1.exe})))
 
 (test
+ (name test_cli_layout)
+ (modules test_cli_layout)
+ (libraries alcotest qcheck-core qcheck-alcotest v1_cli_presentation))
+
+(test
  (name test_cli_domain_data)
  (modules test_cli_domain_data)
  (libraries alcotest yojson yeokcham_v1_cli_data)

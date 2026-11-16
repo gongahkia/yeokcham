@@ -8,6 +8,10 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
+- Active dogfooding follow-up: connected local history, responsive numbered
+  diffs and readable terminal contrast. Started on clean `main`
+  `fba3daa945eb2c670595ab660576be30b8b3d380`; this preserves that revision's
+  removal of the HTML preview. P4 remains unstarted. Verification is pending.
 - Scoped dogfooding follow-up: compact local CLI output is complete at
   `8693ff36dc7d27230df3d1b6cdaa745442719115` after actual first-use feedback.
   The full P4 task remains unstarted. See [presentation notes](implementation/cli-presentation.md)
@@ -2038,7 +2042,8 @@ format/data implications are in the report and receipt.
 The user completed the initial local init/edit/save/history/undo/redo journey and
 reported that the text output exposed too many IDs, hashes and implementation
 fields. This bounded follow-up implements progressive detail for those local
-views and supplies an [interactive HTML prototype](prototypes/cli-output.html).
+views and supplied an interactive HTML prototype (subsequently removed in
+`fba3daa945eb2c670595ab660576be30b8b3d380`).
 The implementation is `8693ff36dc7d27230df3d1b6cdaa745442719115`; the external
 `8ae801e52f8b73dfa97d833414138b136d32153c` snapshot captured earlier partial work
 and was inspected/preserved. No amend/reset/push or additional agent was used.

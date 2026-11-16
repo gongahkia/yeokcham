@@ -2144,7 +2144,8 @@ signed records and storage/journal APIs are unchanged.
 and `ellipsize : max_columns:int -> string -> string`. Explicit semantic styling
 avoids the legacy first-token color heuristic for compact views. Styling follows
 the existing TTY/NO_COLOR/--color/machine-output boundary; glyphs have ASCII
-fallbacks. COLUMNS supplies the bounded label/word-row width, defaulting to 80.
+fallbacks. Native stdout terminal width supplies layout width; positive COLUMNS
+(bounded to 1000), then 80, supplies the fallback for redirected output.
 Full paths are escaped, while compact history summaries can be elided; detailed
 views retain exact identities/paths and full UTC times. Compact times are local.
 
@@ -2156,3 +2157,43 @@ unknown capture, unavailable history, alternatives, type/mode/symlink/opaque
 information, escaping, literal options and real TTY styling/fallbacks.
 See [presentation notes](cli-presentation.md) and
 [verification](results/cli-presentation-20261116.json). This adds no registry code.
+
+### Connected history and responsive diff — November 16, 2026
+
+Private Dune library `v1_cli_presentation` owns `V1_cli_output`, `V1_cli_layout`
+and `v1_cli_terminal_stubs.c`. It changes presentation only. The executable and
+`test_cli_layout` consume the same implementation, without another state store.
+
+`V1_cli_output.display_width : string -> int`,
+`wrap : ?words:bool -> max_columns:int -> string -> string list` and
+`pad_right : columns:int -> string -> string` measure renderer-owned SGR as zero
+width and POSIX UTF-8 characters with native `wcwidth`. The C helper uses a
+thread-local locale temporarily, leaving the process locale intact. Complex
+emoji cluster geometry remains terminal dependent. `terminal_width` queries
+`TIOCGWINSZ` on each call. `line` wraps prose at spaces when possible; paths and
+source text use hard wrapping before styling. `ellipsize` retains fitting labels
+intact. Muted text now uses the normal terminal foreground for legibility.
+
+`V1_cli_layout.history_graph : (int64 * int64 option) list -> graph_row list *
+(string * int64) list` takes verified descending single-parent local history.
+Each `graph_row` contains `prefix`, `node_column`, `rails` and `connectors`.
+Fixed occupied lanes connect actual parents, with open parent identities returned
+for pagination. Crossings use X; they do not coalesce identities. Exceptionally
+wide graphs use explicit parent references in the renderer. Availability and
+current-cursor data still come from `Service.history_page`; equal snapshots do
+not coalesce history nodes. These lanes represent private alternatives, not
+shared branches.
+
+`V1_cli_layout.diff_hunks : columns:int -> escape:(string -> string) ->
+Text_diff.hunk list -> string list` returns numbered unified rows below 100
+columns and paired before/after rows otherwise. Replacements pair within a
+change block; context keeps both source line numbers, unmatched additions or
+deletions have a blank opposite side. Wrapped rows use `>` and retain displayed
+text without elision; CR/control escaping and final-newline markers remain.
+The CLI adds per-file line counts and retains opaque/type/mode messages.
+`--details` keeps full diagnostic identities and the prior unified diff form.
+
+`print_json` indents only for the actual terminal destination (including the
+saved descriptor in the generic JSON boundary). Redirected encoding, schema,
+domain fields and ANSI suppression are unchanged. No records, trust decisions,
+registry codes, mutations or service outcomes are changed by these layouts.

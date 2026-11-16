@@ -13,9 +13,14 @@ reveals full identities, object hashes and recovery diagnostics; domain JSON
 keeps its existing fields. Color follows TTY/NO_COLOR/--color rules, with ASCII
 fallbacks and explicit warning text. Recovery words still appear once during
 initialization; the public verification phrase is available through `device show`.
-The [interactive terminal prototype](prototypes/cli-output.html) illustrates the
-default views. [Presentation notes](implementation/cli-presentation.md) record the
-scope and verification. Later feature families below remain target behavior.
+Local history now draws parent connections, including alternative continuations.
+Diff uses numbered before/after columns from 100 terminal columns, with numbered
+unified output below that width. Native terminal size takes precedence over
+`COLUMNS`; long contents wrap. Secondary text uses the normal terminal foreground.
+JSON is indented on a terminal and stays compact when redirected, with the same
+data. [Presentation notes](implementation/cli-presentation.md) record scope and
+verification. The earlier HTML prototype was removed. Later feature families
+below remain target behavior.
 
 ## Purpose
 
