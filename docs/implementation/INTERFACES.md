@@ -2127,3 +2127,32 @@ creation, older-courier requested-branch priority, complete unvisited-branch byt
 unchanged receipt history and private-cache isolation.
 
 No native custody, human, managed scheduling or cross-OS qualification is claimed.
+
+
+### Compact local human output — November 16, 2026
+
+The local `init`, `save`, `status`, `changes`, `diff`, `history` and in-place
+navigation renderers in `bin/yeokcham_v1.ml` now use compact human summaries.
+Shared output option `--details` is registered in `Cli_spec` and its shell
+completions. Its extraction respects option values and the literal `--` boundary;
+duplicate flags refuse before command execution. Existing domain JSON fields,
+signed records and storage/journal APIs are unchanged.
+
+`V1_cli_output` adds `tone = Plain | Muted | Accent | Good | Caution | Bad`,
+`paint : tone -> string -> string`, `line : ?tone:tone -> string -> unit`,
+`symbol : ascii:string -> unicode:string -> string`, `terminal_width : unit -> int`
+and `ellipsize : max_columns:int -> string -> string`. Explicit semantic styling
+avoids the legacy first-token color heuristic for compact views. Styling follows
+the existing TTY/NO_COLOR/--color/machine-output boundary; glyphs have ASCII
+fallbacks. COLUMNS supplies the bounded label/word-row width, defaulting to 80.
+Full paths are escaped, while compact history summaries can be elided; detailed
+views retain exact identities/paths and full UTC times. Compact times are local.
+
+The one-time init recovery words remain mandatory text output. Public root
+verification is also available after initialization through `device show`;
+`init --details` retains the full diagnostic ceremony. The new process-level
+presentation suite checks compact first use, exact JSON/diagnostic preservation,
+unknown capture, unavailable history, alternatives, type/mode/symlink/opaque
+information, escaping, literal options and real TTY styling/fallbacks.
+See [presentation notes](cli-presentation.md) and
+[verification](results/cli-presentation-20261116.json). This adds no registry code.

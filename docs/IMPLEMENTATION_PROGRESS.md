@@ -8,6 +8,10 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
+- Scoped dogfooding follow-up: compact local CLI output is complete at
+  `8693ff36dc7d27230df3d1b6cdaa745442719115` after actual first-use feedback.
+  The full P4 task remains unstarted. See [presentation notes](implementation/cli-presentation.md)
+  and [verification](implementation/results/cli-presentation-20261116.json).
 - Active implementation slice: none after P3 closeout. P3 shared workflow,
   session `p3-shared-2026-11-15`, started on clean main
   `2c7329d3ee930a38d5e8654346fab5d28853c707` and is complete at implementation
@@ -2027,3 +2031,50 @@ contents and an appropriate reader: source reversion does not undo accepted
 history, remote publication or ordinary-file writes. Report/ledger/evidence are
 committed separately from implementation. Full rollback review order and exact
 format/data implications are in the report and receipt.
+
+
+## Compact local CLI dogfooding follow-up — November 16, 2026
+
+The user completed the initial local init/edit/save/history/undo/redo journey and
+reported that the text output exposed too many IDs, hashes and implementation
+fields. This bounded follow-up implements progressive detail for those local
+views and supplies an [interactive HTML prototype](prototypes/cli-output.html).
+The implementation is `8693ff36dc7d27230df3d1b6cdaa745442719115`; the external
+`8ae801e52f8b73dfa97d833414138b136d32153c` snapshot captured earlier partial work
+and was inspected/preserved. No amend/reset/push or additional agent was used.
+
+Ordinary output now leads with the outcome, branch/local version and affected
+paths; save is one confirmation line. History keeps short selectable numbers,
+current position, parent/alternative links and availability. Navigation hides
+proof/snapshot internals unless `--details` is requested. Exact recovery actions
+still identify a blocked operation. JSON data and domain/storage/trust semantics
+remain unchanged. Native initialization still shows recovery words once; the
+public verification phrase is available later through `device show`. ANSI/TTY/
+NO_COLOR behavior and ASCII fallbacks are tested, including real pseudo-terminals.
+
+All final build/lint/CI/doc checks pass on a stable hashed source snapshot.
+Focused checks passed presentation9, specification4, CLI28, inspection9 and
+selection16 cases; branch17 passed after replacing obsolete init-copy assertions.
+The preceding CI run passed all 30 real TLS transport and 86 local-state cases;
+its only failed target was that old branch wording. Final CI reused successful
+matching Dune results and passed after the test-copy correction. Earlier compile,
+formatter-promotion, symlink wording and missing-fish-PATH failures are retained
+in external logs and were resolved without weaker safety/data assertions.
+
+The prototype's six scenes, three controls and 320/375/1100-pixel layouts passed
+headless Chromium checks without console errors or horizontal overflow. The
+three updated container/artifact shell scripts passed syntax checks; actual
+container execution remains unavailable because this user cannot read the Docker
+socket. All 14 README/P1/P2/P3/G01 preservation hashes match. No accepted G01
+measurement or artifact directory was recreated. Evidence lives under
+`/home/gongahkia/.cache/yeokcham-cli-ui-20261116/`; the compact committed
+[receipt](implementation/results/cli-presentation-20261116.json) records commands,
+exits, log/source hashes, cached results and rollback order.
+
+This is actual first-use presentation feedback and a scoped fix. It does not
+close P4's native onboarding, representative participant/project, responsiveness
+or broader qualification gates, and closes no original full-design phase.
+README and all current recovery roots/user files remain outside this change.
+Whole-slice source rollback requires reviewing `8693ff3` and the earlier external
+`8ae801e`; no durable data formats changed. No live user-demo navigation, push,
+release, deployment or full P4 execution was performed by this agent.

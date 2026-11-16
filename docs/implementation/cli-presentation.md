@@ -63,3 +63,10 @@ The browser preview is checked at 320, 375 and 1100 pixels, with its controls
 exercised. Exact outcomes and source revisions are recorded in the progress
 ledger. This fixes the observed presentation problem; it does not close all
 native/participant/performance gates for P4 or any original full-design phase.
+
+
+Verified implementation: `8693ff36dc7d27230df3d1b6cdaa745442719115`. Build, lint,
+CI, focused process/TTY tests and browser checks pass. Final CI reused matching
+successful Dune actions. The [verification receipt](results/cli-presentation-20261116.json)
+records exact commands, source/log hashes, corrected initial failures, unavailable
+container execution and the full-slice rollback order. P4 remains unstarted.
