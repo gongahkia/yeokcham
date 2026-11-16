@@ -8,10 +8,15 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
-- Active dogfooding follow-up: connected local history, responsive numbered
-  diffs and readable terminal contrast. Started on clean `main`
-  `fba3daa945eb2c670595ab660576be30b8b3d380`; this preserves that revision's
-  removal of the HTML preview. P4 remains unstarted. Verification is pending.
+- Dogfooding follow-up: connected local history, responsive numbered diffs and
+  readable terminal contrast are implemented in external snapshot
+  `8a0c768fefc3bdb9b62d92250de4b6e180bd3f16`. Started on clean `main`
+  `fba3daa945eb2c670595ab660576be30b8b3d380`; its HTML-preview removal is preserved.
+  Build, lint and 95 focused cases pass. Full CI remains blocked by a copy-out
+  fixture failure independently reproduced on the starting revision; full
+  verification is therefore incomplete. See the
+  [receipt](implementation/results/cli-graph-20261116.json) and handoff below.
+  P4 remains unstarted.
 - Scoped dogfooding follow-up: compact local CLI output is complete at
   `8693ff36dc7d27230df3d1b6cdaa745442719115` after actual first-use feedback.
   The full P4 task remains unstarted. See [presentation notes](implementation/cli-presentation.md)
@@ -2083,3 +2088,81 @@ README and all current recovery roots/user files remain outside this change.
 Whole-slice source rollback requires reviewing `8693ff3` and the earlier external
 `8ae801e`; no durable data formats changed. No live user-demo navigation, push,
 release, deployment or full P4 execution was performed by this agent.
+
+
+## Connected history and responsive diff follow-up — November 16, 2026
+
+The second dogfooding round asked for a connected Git-style local history,
+clearer text comparisons, legible secondary text and terminal resizing support.
+The implementation is external snapshot
+`8a0c768fefc3bdb9b62d92250de4b6e180bd3f16` (`work~`), preserved without amendment.
+Its implementation/test files match the final checked source hashes. Work began
+on clean `main` at `fba3daa945eb2c670595ab660576be30b8b3d380`, whose removal of
+the HTML prototype remains intact. This handoff is separate from implementation.
+
+`V1_cli_layout` draws actual single-parent local history lanes, including forks,
+crossings, current selection, off-page ancestors and unavailable contents. Equal
+snapshots remain distinct history positions. Narrow graphs that cannot fit use
+explicit parent references. Numbered diffs use before/after columns from 100
+columns, unified rows below that, per-file line counts and wrapped continuation
+markers without source-text elision. Opaque/type/mode changes remain explicit.
+`V1_cli_output` queries actual stdout terminal size before COLUMNS/80 fallbacks,
+measures UTF-8 characters and renderer SGR, and uses the terminal foreground for
+secondary text. JSON is indented only on an actual terminal; redirected bytes,
+parsed domain data and ANSI suppression retain their existing boundaries.
+
+The documented environment at
+`/home/gongahkia/.cache/yeokcham-p1-20261114/environment.sh` supplied OCaml 5.5.0,
+Dune 3.25.0 and ocamlformat 0.29.0. Final `make build` and `make lint` exited 0.
+Fresh focused checks passed **95 cases**: layout6 (including 500 graph-parent
+and 500 tab-preservation examples), presentation15, specification4, branch17,
+legacy CLI28, inspection9 and selection16. PTYs were resized to 24/40/60/100/
+120/140 columns with stale or absent COLUMNS. Source reconstruction also covered
+99/100-column layout boundaries, long lines, controls, CR and final newlines.
+An actual 11-column CLI reproduction exposed lost tab indentation at a wrap;
+the corrected output and regression/property tests pass. Actual output was
+visually inspected with a dark terminal palette. No repository prototype was
+restored and no live user workspace was modified by these tests.
+
+**Full verification remains incomplete.** `DUNE_JOBS=1 make ci` exited **2**
+after 1070.639 seconds. Its seven freshly reported OCaml suites passed all 172
+cases, including 86 local-state, 30 TLS and 15 public-package cases. The native
+integration Python suite passed all 14 journeys. The failing suite was
+`test/test_benchmark_runner.py`, with two subcase errors in
+`RunnerTests.test_resume_preserves_samples_and_refuses_changed_inputs` (linear
+and branching): copy-out restore refused with
+`installed target bytes changed at "restored" after application`.
+Other unchanged Dune actions were cached. No guard or assertion was weakened.
+
+This failure was independently reproduced on the starting revision `fba3daa`
+using a Git source archive, a separate build directory and the Dune action
+TMPDIR. The export's read-only revision lookup was supplied because it has no
+`.git`; original CLI invocations/assertions remained intact. No Git branch or
+worktree was created. Direct default/custom TMPDIR fixture runs passed; the
+underlying cause is **not established**. A continuation should diagnose the
+post-application copy-out check under the Dune action environment, retain the
+complete-byte/identity guards, and obtain passing full CI before claiming full
+verification. This is an existing blocker, not evidence that the UI change
+introduced it. Earlier parallel CI also hit a 20-second large replacement timeout;
+the unchanged integration test passed directly and in the final serial run.
+The first tool-managed CI process ended with SIGTERM/143, with cause unknown;
+its owned orphan server helpers were stopped. All attempts are retained.
+
+The [receipt](implementation/results/cli-graph-20261116.json) binds exact source,
+commands, exits, logs, baseline comparison, visual output and preservation hashes.
+Evidence is under `/home/gongahkia/.cache/yeokcham-cli-graph-20261116/`.
+Documentation links pass independently; make stopped at its failing test target
+before that CI prerequisite. The README and all 14 preserved handoff/G01 hashes
+match. Only tiny synthetic CI fixtures ran; accepted G01 measurements and their
+external artifact directories were not rerun or recreated.
+
+No signed-record registry, durable format, capture, selection, trust or journal
+behavior was changed. Source rollback of `8a0c768` restores the first compact
+renderer and terminal JSON whitespace; it does not undo user files, history,
+identities or restore proofs. Reconcile the separate handoff documentation when
+rolling back. No rollback, push, release or deployment was performed by this
+agent. Native macOS/Windows, physical-terminal/font qualification and optional
+container execution remain unavailable (the Docker socket is unreadable).
+Finite commands adapt at rendering boundaries; existing scrollback remains
+terminal-managed. Complex emoji widths can vary by terminal/font. P4 and all
+original-phase completion counts remain unchanged.

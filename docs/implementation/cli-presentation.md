@@ -96,3 +96,13 @@ CI, focused process/TTY tests and browser checks pass. Final CI reused matching
 successful Dune actions. The [verification receipt](results/cli-presentation-20261116.json)
 records exact commands, source/log hashes, corrected initial failures, unavailable
 container execution and the full-slice rollback order. P4 remains unstarted.
+
+Second-pass implementation: `8a0c768fefc3bdb9b62d92250de4b6e180bd3f16`.
+Build, lint and 95 focused cases pass, including graph topology, wrapped source
+reconstruction, tab indentation, actual PTY resizing and JSON boundaries.
+**Full CI is blocked:** its copy-out fixture fails with Dune's action TMPDIR,
+independently reproduced on the starting revision `fba3daa`. The final serial
+CI run exited 2; TLS30, integration14 and local-state86 passed. The cause of the
+copy-out refusal is not established, and full verification remains incomplete.
+The [follow-up receipt](results/cli-graph-20261116.json) records this result,
+the baseline comparison and remaining limitations. No durable formats changed.

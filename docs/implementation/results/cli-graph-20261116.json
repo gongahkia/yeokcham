@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-16",
+  "scope": "Connected local history, responsive diff and terminal readability",
+  "status": "implemented; focused checks passed; full CI blocked by a pre-existing failure",
+  "starting_revision": "fba3daa945eb2c670595ab660576be30b8b3d380",
+  "implementation_revision": "8a0c768fefc3bdb9b62d92250de4b6e180bd3f16",
+  "implementation_commit_origin": "external work~ snapshot; preserved without amendment",
+  "verification": {
+    "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/verification-03.json",
+    "sha256": "97bf7ef51de7009a3089bd1b0800b69fa6fa1baa0195df53cee31e36ecfa379c"
+  },
+  "provenance": {
+    "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/provenance.json",
+    "sha256": "6dc6ebf478b3c083e5c8bdb77b013369b059f7402c0e90790b75873e35991f89"
+  },
+  "environment": {
+    "source": "/home/gongahkia/.cache/yeokcham-p1-20261114/environment.sh",
+    "ocaml": "5.5.0",
+    "dune": "3.25.0",
+    "ocamlformat": "0.29.0",
+    "DUNE_JOBS": "1"
+  },
+  "commands": [
+    {
+      "label": "build",
+      "command": [
+        "make",
+        "build"
+      ],
+      "exit": 0,
+      "seconds": 0.713,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-build.log",
+      "sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff"
+    },
+    {
+      "label": "lint",
+      "command": [
+        "make",
+        "lint"
+      ],
+      "exit": 0,
+      "seconds": 0.995,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-lint.log",
+      "sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d"
+    },
+    {
+      "label": "layout",
+      "command": [
+        "_build/default/test/test_cli_layout.exe"
+      ],
+      "exit": 0,
+      "seconds": 2.138,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-layout.log",
+      "sha256": "ed7b8aaffb72dcb67d27da5d7eb20a1e1d3346885fe118e3d850b01b496234d1"
+    },
+    {
+      "label": "presentation",
+      "command": [
+        "python3",
+        "-B",
+        "test/test_cli_presentation.py",
+        "_build/default/bin/yeokcham_v1.exe"
+      ],
+      "exit": 0,
+      "seconds": 5.982,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-presentation.log",
+      "sha256": "91e35c0eae42dd04d86f61716add53c316b07a9279afe382d6893d0a2fc0b35d"
+    },
+    {
+      "label": "spec",
+      "command": [
+        "_build/default/test/test_v1_cli_spec.exe"
+      ],
+      "exit": 0,
+      "seconds": 0.06,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-spec.log",
+      "sha256": "4c01b9723166c392e09f7e5437d96729df18a78d4891585d49ad31e18311b9fa"
+    },
+    {
+      "label": "branch",
+      "command": [
+        "python3",
+        "-B",
+        "test/test_local_branch_cli.py",
+        "_build/default/bin/yeokcham_v1.exe"
+      ],
+      "exit": 0,
+      "seconds": 2.798,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-branch.log",
+      "sha256": "61a70a3a0a71fe5c8dab0db3039d4bf5aec7522b05ac92b71a4d256c0c6484f8"
+    },
+    {
+      "label": "cli",
+      "command": [
+        "_build/default/test/test_v1_cli.exe"
+      ],
+      "exit": 0,
+      "seconds": 7.599,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-cli.log",
+      "sha256": "8c171c69be07808de8d13037e9dd85daaf4136d57e6b3c75f0cf5df1aeb7130a"
+    },
+    {
+      "label": "inspection",
+      "command": [
+        "python3",
+        "-B",
+        "test/test_local_inspection_cli.py",
+        "_build/default/bin/yeokcham_v1.exe"
+      ],
+      "exit": 0,
+      "seconds": 1.537,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-inspection.log",
+      "sha256": "f7738739db0ff2abf20b8f3a3fbf16a21196d8930029cdf873835f3e5356ec18"
+    },
+    {
+      "label": "selection",
+      "command": [
+        "python3",
+        "-B",
+        "test/test_local_selection_cli.py",
+        "_build/default/bin/yeokcham_v1.exe",
+        "_build/default/test/local_cli_fault.exe"
+      ],
+      "exit": 0,
+      "seconds": 5.068,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-selection.log",
+      "sha256": "3b5429b315941e497749c384f81434d03f63b31d0c5fb693966a0ddc4115504e"
+    },
+    {
+      "label": "ci",
+      "command": [
+        "make",
+        "ci"
+      ],
+      "exit": 2,
+      "seconds": 1070.639,
+      "log": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-03-ci.log",
+      "sha256": "244eba38abfc0e8473e5cd3cb272cf8ab342e0d3ae5af85ada2e0da386f4360f"
+    }
+  ],
+  "focused_cases": {
+    "layout": 6,
+    "graph_property_examples": 500,
+    "tab_property_examples": 500,
+    "presentation": 15,
+    "specification": 4,
+    "local_branch": 17,
+    "legacy_cli": 28,
+    "local_inspection": 9,
+    "local_selection": 16
+  },
+  "focused_case_total": 95,
+  "criteria": {
+    "connected_history": "passed: parent-edge property, forks, pagination, current cursor, equal snapshots, unavailable contents and narrow fallback",
+    "diff": "passed: numbered paired/unified layouts, source reconstruction at 24/40/80/99/100/120/200 columns, newline/control/CR/type/mode/opaque information",
+    "terminal_width": "passed: actual PTY resize at 24/40/60/100/120/140 with stale or absent COLUMNS",
+    "contrast": "passed: no dark gray or dim ANSI for secondary text; visual inspection of captured actual output",
+    "machine_boundary": "passed: terminal-only JSON indentation, unchanged redirected encoding and parsed data, no JSON ANSI",
+    "navigation": "passed: preview/cancellation and actual recovery regressions; no service or journal changes"
+  },
+  "ci": {
+    "exit": 2,
+    "blocking_fixture": "test/test_benchmark_runner.py: RunnerTests.test_resume_preserves_samples_and_refuses_changed_inputs",
+    "blocking_shapes": [
+      "linear",
+      "branching"
+    ],
+    "message": "installed target bytes changed at \"restored\" after application",
+    "baseline": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/baseline-comparison.json",
+      "sha256": "0a94472d65a81e0bcaccad8493e597e445d8ab3eebc5abfe145ef75587b5eea9"
+    },
+    "baseline_log": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/baseline-copyout-02.log",
+      "sha256": "915048d72e85148894561198ea824b1194da85e65f9b6d453e6f63725e04ebcd"
+    },
+    "baseline_revision": "fba3daa945eb2c670595ab660576be30b8b3d380",
+    "baseline_build": "git archive source export and separate build directory; no branch or Git worktree",
+    "baseline_harness_note": "Only read-only Git revision lookup was supplied for the source export, which has no .git. Original CLI invocations and assertions were retained.",
+    "passing_current_ci": {
+      "ocaml_suites_reported": 7,
+      "ocaml_cases_reported": 172,
+      "native_tls": 30,
+      "native_integration_python": 14,
+      "local_state": 86
+    },
+    "cache": "Other unchanged Dune results were reused. This was a full make ci attempt with DUNE_JOBS=1; it did not pass.",
+    "root_cause": "Not established. Failure reproduced with Dune action TMPDIR on both starting and updated binaries. Direct default/custom TMPDIR runs passed. No guard or test was weakened."
+  },
+  "earlier_checks": {
+    "interrupted_first_run": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/interruption-01.json",
+      "sha256": "f534791793401fa9dd4fd4d516f9dea05ef320711f56fd2e9df5ad3184c33517"
+    },
+    "parallel_ci": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/verification-02.json",
+      "sha256": "1399fcf043758d28f9e14cbc17c2f9d2445bda5d1171bf837f7e8b0b67a597b4"
+    },
+    "parallel_ci_log": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/check-02-ci.log",
+      "sha256": "8674b8632f7d9d11bc20c36ea721b6e4d9690ac23cfa251e64c4d326a95fce99"
+    },
+    "parallel_notes": "CI exited 2 with the same copy-out errors and a 20-second binary-resolution timeout. Source later changed for the tab fix; this run is not final source acceptance.",
+    "direct_integration": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/integration-reproduction-01.log",
+      "sha256": "c444a2c17220cfa29c6c12f181e03c4e0450e1c96f4dd2bb45f87795beff18bf"
+    },
+    "direct_copyout": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/copyout-reproduction-01.log",
+      "sha256": "3c2c4845c2c375b1e473661418e6b3c4067f8d8468806fe2f6e94793a8c11981"
+    },
+    "custom_tmpdir_copyout": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/copyout-reproduction-custom-tmpdir.log",
+      "sha256": "06ae742e9b5309c5d83cd8207884eba8e72c36e2f0e6e7ccdb83553aceaed30b"
+    },
+    "tab_before": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/tab-reproduction-before.txt",
+      "sha256": "b19f743e646cbbcc78578a71152ddae224e5bf47af77731d065babb696f9b01b"
+    },
+    "tab_after": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/tab-reproduction-after.txt",
+      "sha256": "efcfda50691852a71ae9f4fac2489b0ec81fd4425ec771b9a2e6193e1c0d6f87"
+    },
+    "resolved": "Strict optional-argument/deprecation warnings corrected, old flat-history expectations replaced with topology assertions, and actual tab-wrap indentation loss corrected before final focused checks."
+  },
+  "visual": {
+    "actual_output": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/actual-output.json",
+      "sha256": "edd0fabb8c84878dd1b00b4f04cb0dcdd2c2f71ae4db9b4e1e4613cabaca1c8b"
+    },
+    "screenshot": {
+      "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/actual-output.png",
+      "sha256": "cc6026c4a074e239c0fd88b4cab961fc72662e9e08e57329be6dea3ac9eb9ead"
+    },
+    "note": "Actual CLI output from disposable projects, rendered with a representative dark terminal palette. No repository HTML preview restored."
+  },
+  "source_stable_during_final_checks": true,
+  "preserved_sha256": {
+    "README.md": "30b991bb5a0232a47ba79c4ea4f7a29f0c1175464ad4c7f1ea9d4feb0068af0d",
+    "docs/implementation/results/P02-acceptance.json": "2d90e4eb923010aa10e659c663f1fd3b7bf00e21301e90bba4ceaaa20a2aba6a",
+    "docs/implementation/reports/P02-attempt-01.md": "b44eedb856ce8b1c0a88d84a5332d1efd51a1303420912bc38feb76615563641",
+    "docs/implementation/results/G01-acceptance.json": "a83992829ec0900fbf8ee695f49a0ee4f65ce25b71a371590543779a66a55f72",
+    "docs/implementation/results/G01-baseline.json": "03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b",
+    "docs/implementation/results/G01-baseline.md": "402ce4e7941e2883a9f8d4874ff19b6d411abf660334ed112f8bbfaa2831a805",
+    "docs/implementation/results/G01-environment.json": "9d8807a24f8f9e8d85d31ca6dccfbdf09704f059ca51805632989638e841d648",
+    "docs/implementation/results/G01-export-smoke-v2.json": "25ec7c07b4f56178a66b7c27b8d02fd475643094afd6c6bc319415b6a110b3c0",
+    "docs/implementation/results/G01-export-smoke.json": "16ff643c6e1fbb4acbc0a55ddea433ca22dad5baf31ba8872b731fb99281e8a1",
+    "docs/implementation/results/G01-harness-v2.json": "f619fbcba8c0c5ea41c5ffacaaab59fa62b2489e5f38989ac80841c88130fb96",
+    "docs/implementation/results/G01-measurement-checkpoint.json": "3a728403a717dd5afd902559db06ebf211d8e963f2cea30d83557593583dc9b6",
+    "docs/implementation/results/G01-resumption.json": "98d9afc0ff39935934d7597259440d8168093b034c6bd37a0b8bd051fc60d36d",
+    "docs/implementation/reports/P03-attempt-01.md": "d28ecbe65c2553aa19c1917b5b6f902ce0f8e0a97d405282866460d06b92c4a7",
+    "docs/implementation/results/P03-acceptance.json": "ddfa87d8e886bcaf49f48ccba0aeec5d6c876cfc606bfa331b0cb343595943b1"
+  },
+  "preserved_matches": {
+    "README.md": true,
+    "docs/implementation/results/P02-acceptance.json": true,
+    "docs/implementation/reports/P02-attempt-01.md": true,
+    "docs/implementation/results/G01-acceptance.json": true,
+    "docs/implementation/results/G01-baseline.json": true,
+    "docs/implementation/results/G01-baseline.md": true,
+    "docs/implementation/results/G01-environment.json": true,
+    "docs/implementation/results/G01-export-smoke-v2.json": true,
+    "docs/implementation/results/G01-export-smoke.json": true,
+    "docs/implementation/results/G01-harness-v2.json": true,
+    "docs/implementation/results/G01-measurement-checkpoint.json": true,
+    "docs/implementation/results/G01-resumption.json": true,
+    "docs/implementation/reports/P03-attempt-01.md": true,
+    "docs/implementation/results/P03-acceptance.json": true
+  },
+  "data_and_scope": {
+    "signed_records_or_registry_changed": false,
+    "durable_formats_changed": false,
+    "readme_changed": false,
+    "g01_measurements_rerun": false,
+    "live_demo_modified": false,
+    "p4": "unstarted; no phase completion claimed",
+    "push_by_this_agent": false
+  },
+  "limitations": [
+    "Full CI remains blocked by the independently reproduced pre-existing copy-out failure.",
+    "Native macOS/Windows execution and physical terminal/font qualification were not available; Linux PTYs and actual-output visual inspection were used.",
+    "Optional container checks were not run; /var/run/docker.sock is unreadable to this user.",
+    "Finite CLI commands choose current width at rendering boundaries. Old terminal scrollback is not redrawn; complex emoji widths remain terminal/font dependent."
+  ],
+  "rollback": {
+    "implementation": "8a0c768fefc3bdb9b62d92250de4b6e180bd3f16",
+    "implication": "Reverting the implementation changes rendering and terminal JSON whitespace only; it does not undo file writes, history, identities or restore proofs. Reconcile/revert the separate handoff documentation as appropriate.",
+    "performed": false
+  },
+  "documentation_check": {
+    "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/docs-before-closeout.log",
+    "sha256": "8a59072551d9d80243593598a5f95142f169313ca079ddd28938e5f321dc915c"
+  },
+  "handoff_documentation_check": {
+    "path": "/home/gongahkia/.cache/yeokcham-cli-graph-20261116/closeout-checks.json",
+    "sha256": "fc4ec952b187aa9099ebd11ad4ac4280663c396664aeb3191e63e723b08f236d"
+  }
+}
