@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Yeokcham — terminal output</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1117;--surface:#151a23;--text:#e0e6ef;--muted:#9ca9bb;--line:#30394a;--accent:#9bd8f5;--good:#9cdeb0;--bad:#f3a0a5;--warn:#e3c891}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 system-ui,sans-serif}main{max-width:1060px;margin:56px auto;padding:0 24px}header{margin-bottom:28px}h1{font-size:22px;font-weight:600;letter-spacing:-.6px;margin:0}p{color:var(--muted);margin:6px 0}code,pre{font-family:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace}code{font-size:.92em}.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:20px}button{font:inherit;font-size:13px;color:var(--muted);border:1px solid transparent;padding:7px 12px;border-radius:6px;background:none;cursor:pointer}button:hover{color:var(--text);background:var(--surface)}button[aria-pressed=true]{color:var(--text);background:var(--surface);border-color:var(--line)}button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.modes{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}.terminal{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;max-width:100%;transition:max-width .2s}.bar{display:flex;align-items:center;gap:7px;padding:14px 20px;border-bottom:1px solid var(--line)}.dot{height:7px;width:7px;border-radius:50%;background:var(--line)}.caption{font-size:12px;color:var(--muted);margin-left:10px}.screen{padding:24px;min-height:330px}pre{font-size:14px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}.prompt{color:var(--muted)}.command{color:var(--text)}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}.accent{color:var(--accent);font-weight:600}.muted{color:var(--muted)}.hint{font-size:12px;color:var(--muted);margin-top:16px}.note{margin-top:28px;max-width:680px}.note strong{color:var(--text);font-weight:500}.plain .good,.plain .bad,.plain .warn,.plain .accent{color:var(--text);font-weight:400}.plain .muted{color:var(--muted)}.narrow .terminal{max-width:46ch}.narrow .screen{padding:18px}@media(max-width:600px){main{margin:24px auto;padding:0 16px}.modes{margin-left:0;width:100%;margin-top:6px}.screen{padding:18px}pre{font-size:13px}h1{font-size:20px}}@media(prefers-reduced-motion:reduce){.terminal{transition:none}}
+</style>
+</head>
+<body>
+<main id="preview">
+  <header><h1>Yeokcham <span class="muted">/ terminal output</span></h1><p>One outcome. The affected work. A useful next step.</p></header>
+  <nav class="controls" aria-label="Command preview">
+    <button data-scene="init" aria-pressed="false">First run</button>
+    <button data-scene="status" aria-pressed="true">Status</button>
+    <button data-scene="diff" aria-pressed="false">Diff</button>
+    <button data-scene="save" aria-pressed="false">Save</button>
+    <button data-scene="history" aria-pressed="false">History</button>
+    <button data-scene="undo" aria-pressed="false">Undo / redo</button>
+    <div class="modes"><button id="details" aria-pressed="false">--details</button><button id="color" aria-pressed="true">Color</button><button id="width" aria-pressed="false">Narrow</button></div>
+  </nav>
+  <section class="terminal" aria-label="Terminal preview">
+    <div class="bar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="caption">~/first-project</span></div>
+    <div class="screen"><pre id="output" aria-live="polite"></pre></div>
+  </section>
+  <div class="hint">Illustrative output · recovery words are placeholders · ANSI styling has a readable plain-text fallback.</div>
+  <p class="note"><strong>Progressive detail.</strong> Default views use local version numbers and file names. Full identities, object hashes and recovery proofs belong in <code>--details</code> and structured JSON. Real warnings stay visible.</p>
+</main>
+<script>
+const root=document.getElementById('preview'),out=document.getElementById('output');
+let scene='status',details=false,color=true,narrow=false;
+const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+const span=(tone,text)=>`<span class="${tone}">${escape(text)}</span>`;
+const prompt=cmd=>span('prompt','$ ')+span('command','yeokcham '+cmd)+'\n';
+const show={
+init:()=>prompt('init')+span('good','✓ Project ready')+'\n  first-project / main\n'+span('muted','  Existing files saved privately on this device.')+'\n\n'+span('warn','Recovery words - shown once')+'\n  word01 word02 word03 word04 word05 word06\n  word07 word08 word09 word10 word11 word12\n  word13 word14 word15 word16 word17 word18\n  word19 word20 word21 word22 word23 word24\n'+span('muted','  Record offline. Keep private.')+'\n\nNext  edit your files, then run yeokcham save\n'+span('muted','Capture is manual; private backup is not configured.'),
+status:()=>prompt('status')+span('accent','main / saved #0')+'\n1 path to save\n  '+span('warn','M')+' note.txt\n\nNext  yeokcham diff / yeokcham save\n'+span('muted','Capture: manual / Backup: not configured'),
+diff:()=>prompt('diff')+span('muted','#0 -> working files')+'\n'+span('accent','note.txt')+'\n'+span('muted','@@ -1,1 +1,1 @@')+'\n'+span('bad','-First version')+'\n'+span('good','+Second version'),
+save:()=>prompt('save')+span('good','✓ Saved #1 on this device')+'\n\n'+prompt('diff')+span('good','No differences'),
+history:()=>prompt('history')+span('accent','Local history')+'\n'+span('accent','* #1  note.txt  21:25')+'\no #0  Initial capture',
+undo:()=>prompt('undo --preview')+span('accent','Preview / select saved version #0')+'\n  '+span('warn','M')+' note.txt\n'+span('muted','Preview only. Rerun with --yes to apply.')+'\n\n'+prompt('undo --yes')+span('good','✓ Restored saved version #0')+'\n  '+span('warn','M')+' note.txt\n\n'+prompt('redo --yes')+span('good','✓ Restored saved version #1')+'\n  '+span('warn','M')+' note.txt'
+};
+function render(){
+ root.classList.toggle('plain',!color);root.classList.toggle('narrow',narrow);
+ document.querySelectorAll('[data-scene]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.scene===scene));
+ document.getElementById('details').setAttribute('aria-pressed',details);
+ document.getElementById('color').setAttribute('aria-pressed',color);
+ document.getElementById('width').setAttribute('aria-pressed',narrow);
+ out.innerHTML=show[scene]();
+ if(details)out.innerHTML+='\n\n'+span('muted','Diagnostic example (--details)')+'\n'+span('muted','snapshot a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0')+'\n'+span('muted','workspace 0123456789abcdef0123456789abcdef')+'\n'+span('muted','Exact domain data remains available with --format json.');
+}
+document.querySelectorAll('[data-scene]').forEach(b=>b.addEventListener('click',()=>{scene=b.dataset.scene;render()}));
+document.getElementById('details').addEventListener('click',()=>{details=!details;render()});
+document.getElementById('color').addEventListener('click',()=>{color=!color;render()});
+document.getElementById('width').addEventListener('click',()=>{narrow=!narrow;render()});
+render();
+</script>
+</body>
+</html>

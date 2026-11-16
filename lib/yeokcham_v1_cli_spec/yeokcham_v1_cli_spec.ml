@@ -52,6 +52,7 @@ let command ?(options = [ root ]) ?(hook = false) command_path =
     then command_options
     else command_options @ [ color ]
   in
+  let command_options = command_options @ [flag "--details"] in
   { command_path; command_options; command_hook_eligible = hook }
 
 let commands =

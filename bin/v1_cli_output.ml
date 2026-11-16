@@ -1,4 +1,5 @@
 type color_mode = Auto | Always | Never
+type tone = Plain | Muted | Accent | Good | Caution | Bad
 type stream = Stdout | Stderr
 
 let mode = ref Auto
@@ -49,6 +50,43 @@ let color_enabled stream =
              (match stream with Stdout -> Unix.stdout | Stderr -> Unix.stderr)
 
 let styled code value = code ^ value ^ reset
+
+let paint tone value =
+  if not (color_enabled Stdout) then value
+  else match tone with
+    | Plain -> value
+    | Muted -> styled "\027[90m" value
+    | Accent -> styled (bold ^ cyan) value
+    | Good -> styled green value
+    | Caution -> styled yellow value
+    | Bad -> styled red value
+
+let line ?(tone = Plain) value = Stdlib.print_endline (paint tone value)
+
+let symbol ~ascii ~unicode =
+  let locale =
+    ["LC_ALL";"LC_CTYPE";"LANG"]
+    |> List.find_map (fun name -> match Sys.getenv_opt name with Some value when value <> "" -> Some value | Some _ | None -> None)
+    |> Option.value ~default:"C" |> String.lowercase_ascii
+  in
+  let utf8 = String.ends_with ~suffix:"utf-8" locale || String.ends_with ~suffix:"utf8" locale in
+  if utf8 && usable_terminal Unix.stdout then unicode else ascii
+
+let terminal_width () =
+  Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt
+  |> Option.fold ~none:80 ~some:(fun columns -> max 24 (min 240 columns))
+
+let ellipsize ~max_columns value =
+  let limit = max 4 max_columns in
+  let rec stop offset columns =
+    if offset >= String.length value then None
+    else if columns >= limit - 3 then Some offset
+    else
+      let byte = Char.code value.[offset] in
+      let length = if byte < 0x80 then 1 else if byte < 0xe0 then 2 else if byte < 0xf0 then 3 else 4 in
+      stop (min (String.length value) (offset + length)) (columns + 1)
+  in
+  match stop 0 0 with None -> value | Some offset -> String.sub value 0 offset ^ "..."
 
 let starts_with_any prefixes value =
   List.exists (fun prefix -> String.starts_with ~prefix value) prefixes
