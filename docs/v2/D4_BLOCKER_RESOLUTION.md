@@ -251,6 +251,12 @@ Six-frontier enumeration is a small bounded reference oracle, not permission to
 search unbounded merge orders in a service. Future optimized paths need equivalent
 results/refusals against this oracle, or a newly reviewed profile version.
 
+Long-lived single-file histories must be part of budget qualification: repeatedly
+requiring user choices merely because ordinary history has grown would fail the
+quiet-operation objective. The proposed numerical bounds are not evidence that
+such histories meet that objective; ancestor-proof reuse and its validation need
+measurement before the profile is promoted.
+
 ### 5.3 Deterministic pseudocode
 
 ```text
@@ -343,6 +349,11 @@ case 7. Dependencies do not constitute independent selection or approval. Source
 privacy/authority/closure verification remains a separate admission prerequisite;
 the toy reference does not implement those security boundaries.
 
+In case 8, `requires x=1` is literal file content, not a machine-enforced runtime
+constraint. Content dependency means reproducibility from A1, not a promise that
+later compatible selection can never supersede A1. A semantic requirement on
+program behavior needs observed evidence or an explicit acceptance decision.
+
 ## 7. Falsification results, limits and retained counterexamples
 
 Observed external scratch directory:
@@ -429,6 +440,9 @@ SQL remains the sole operation authority. Before exposing destination bytes:
    safety CAS roots, intended native parent identity/raw leaf name, staging slot
    and source/attachment identities. Pin all required objects under the shared
    publication/GC gate. Signing/human waits have already released all locks.
+   For copy-out, the destination pre-state is Absent and there are no displaced
+   originals. A source capture pin describes that capture, not a fresh observation
+   of all current source bytes; copy-out never mutates the source tree.
 2. Construct the *entire* target in a private exclusive staging directory on the
    same filesystem. No user originals are moved during new-destination staging.
    Pre-Prepared partial staging is owned temporary work, never a completed
@@ -456,8 +470,11 @@ SQL remains the sole operation authority. Before exposing destination bytes:
    macOS `renameatx_np(..., RENAME_EXCL)` to install the staged directory. **Never
    exchange, ordinary replacing rename, or populate the destination recursively.**
 6. Sync source staging-parent and destination-parent directories; verify the
-   installed owned directory, marker and complete target bytes again. Only then
-   record Materialized. The native name claim and exposure are one atomic
+   installed owned directory, marker and complete target bytes again. Rewalk the
+   requested parent/ancestor chain and check that it still names the bound native
+   objects. A renamed parent or substituted pathname pauses with the installed
+   tree retained; it is not success at the requested spelling. Only then record
+   Materialized. The native name claim and exposure are one atomic
    operation; byte durability still depends on flush/filesystem qualification.
 7. Commit the permitted metadata/result, then Completed/root transfer. Copy-out
    changes no source cursor, counter, accepted basis or ordinary source files.
@@ -904,13 +921,20 @@ The retained final model verifies that join's bytes and returns ChoiceRequired
 for its two incomparable comparison origins. This correction affected only
 disposable scratch, not source, fixtures or RFCs.
 
-Final checks cover Markdown local targets/fragments, structure/fences/whitespace,
-and the 517-file starting preservation manifest. Only this D4 path is added.
-Initial Git state was clean at `3d31a41a58e0f79d02fcfa8dc864760748a29729`; final
-HEAD/status are inspected independently because D3 observed external snapshots.
-No pre-existing user-owned tracked/untracked file may be discarded or rewritten
-to obtain a clean status. Any externally committed D4 snapshot is observed and
-preserved, not attributed to a commit command from this task.
+Observed closeout at 2026-11-20 08:08 UTC: the documentation link checker passes
+390 local file references; the new document has no local fragment links. Its 17
+numbered sections, balanced fences and whitespace checks pass. `git diff --check`
+passes. The 517-file starting hash/mode manifest reports no changes or removals;
+only this D4 path was added relative to the start.
+
+Initial Git state was clean at `3d31a41a58e0f79d02fcfa8dc864760748a29729`.
+An external process committed an intermediate D4 snapshot as
+`793bdd036e8f448f876c808376d336e4763601d1` during this review. Observed final HEAD
+is that commit; status is ` M docs/v2/D4_BLOCKER_RESOLUTION.md` on
+`main...origin/main`, with no additional untracked files. The working changes
+retain the later qualifications and this closeout. This task ran no commit
+command and did not discard or rewrite the external snapshot. Preservation is
+measured against the initial files, independently of the changing Git baseline.
 
 Not run: OCaml builds/tests/full CI, native rename/locking/flush experiments,
 real SQL/GC process-kill faults, provider installation, public-control byte
