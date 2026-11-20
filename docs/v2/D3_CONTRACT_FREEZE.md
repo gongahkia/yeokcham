@@ -939,3 +939,619 @@ native ownership and cryptographic proof require adapter validation. Therefore
 the skeleton can **represent** the required transitions but is not a fully frozen
 or independently sufficient enforcing schema. No claim of complete SQL contract
 freeze is made while those OPEN fields/transitions remain.
+
+## 7. Transaction boundaries, concurrency and uncertain results
+
+The following pseudocode defines ownership/order. It is not SQL product code.
+`verified_inventory` is a bounded, immutable validation result produced while
+objects are protected; a bare list of object IDs is not that capability.
+Current branch/authority/policy inputs are exact dependency-scoped projections
+over admitted facts. Their indexed query must agree with the verified records;
+cache corruption cannot grant authorization. Full graph/object verification
+occurs outside the SQL writer, followed by short input-version/set checks.
+
+```text
+capture_append(workspace, expected_version, observed, key):
+    take workspace OS lock; require no pending operation
+    take shared publication/GC gate for object production and root handoff
+    scan/verify native included tree and ignores; publish objects durably
+    finish exact observation/read-set validation outside SQL
+    BEGIN IMMEDIATE
+      look up key; same digest => return stored result, mismatch => refuse
+      require current cursor/basis/attachment/version == observed expectations
+      if snapshot == current completed snapshot:
+          store unchanged request result; no new capture/object identity
+      else:
+          n = next_seq; refuse NULL/exhaustion
+          reserve n by advancing next_seq (max -> NULL)
+          insert capture(n,parent=current_cursor,snapshot,basis) + active pins
+          UPDATE workspace SET cursor=n, content_version=v+1 WHERE version=v
+          require exactly one updated row
+          store completed request result including CaptureId
+    SQL COMMIT; release gate/lock; acknowledge that exact completed observation
+
+selected_publication(source, paths, predecessor, basis, key):
+    resolve exact retained source, current exclusions and public closure
+    record/pin frozen unsigned intent + pending request under shared gate/short SQL
+    release locks; obtain signature from external provider
+    reacquire required source lock/shared gate; reload/revalidate relevant inputs
+    publish verified signed object and exact scope/witness objects durably
+    BEGIN IMMEDIATE
+      resolve key; validate source/profile/authority/admission dependencies
+      insert public admission + source correspondence + active pins
+      insert immutable outbound obligation; update same request result
+      if CLI requested fresh source capture: append it atomically here too
+      do NOT move accepted heads/basis or edit ordinary files
+    SQL COMMIT; transfer temporary pins; acknowledge same RecordId on retry
+
+receipt(batch):
+    bounded isolated staging/verification; no lock over network
+    take shared gate; publish only completely verified immutable objects
+    precompute candidate admission/graph/trust facts, protect inventory
+    BEGIN IMMEDIATE
+      recheck exact relevant current authority/policy and duplicate identities
+      atomically insert eligible authority/public admission + offline roots
+      store exact inbox/request result (identity derived from verified courier)
+      preserve EVERY workspace cursor, counter, basis, private position, operation
+    SQL COMMIT; release gate; acknowledge receipt, not source application
+
+acceptance_commit(operation):
+    exact plan already confirmed; provider waits completed outside all locks
+    Prepared committed with safety/target/public roots, reservation, frozen signature
+    execute native actions outside SQL under workspace lock (section 9)
+    persist/verify Materialized observation at a short durable phase transition
+    take shared gate; validate object inventory/current relevant projections
+    BEGIN IMMEDIATE
+      require same pending owner/plan/serial/workspace version and reserved sequence
+      require actual accepted parents/event heads and authority/policy still valid
+      if stale: ROLLBACK; persist Paused at Materialized; no public admission
+      else insert exact accepted record + branch event + public roots
+      append exact target capture parented to frozen pre-operation cursor
+      UPDATE workspace cursor/basis/version WHERE version=expected
+      insert outbound obligation; operation=Committed/result; request=committed
+      preserve unrelated receipts and other workspaces' rows
+    SQL COMMIT; no native file replay after this boundary
+
+operation_completion(operation):
+    take workspace lock/shared gate; read exact committed/historical outcome
+    verify cleanup eligibility outside SQL; retain uncertain physical nodes
+    BEGIN IMMEDIATE
+      insert durable restore-proof/physical-retention owner and surviving pins
+      set operation Completed, release pending reservations and obsolete pins
+      mark same request completed with same accepted/capture identities
+    SQL COMMIT
+    cleanup only unowned staging, no required original/displaced copy
+    acknowledge historical completion; current live files may have later edits
+
+root_pin_transfer(old_owner, new_owner):
+    take shared gate; validate exact surviving inventory
+    BEGIN IMMEDIATE
+      insert new owner + roots; require covered inventory
+      change old owner to released only after survival checks
+      remove old pin rows if eligible, atomically with that ownership transition
+    SQL COMMIT; never an intermediate unprotected committed root
+```
+
+No SQL transaction spans network IO, signing-provider wait, human confirmation,
+full working-tree scan, object closure streaming, native filesystem replacement
+or long rendering. Backup API destination transactions are a separate private
+backup-file mechanism, not permission to hold the live metadata writer during
+such work. Progress/action phase writes are short transactions between physical
+steps; object/root-changing writes also use the shared gate.
+
+Publication of an exact historical source must not be invalidated merely by a
+later cursor moving. Bind the chosen source and exclusions, not “latest”. Its
+temporary retention owner cannot be released just because a signing worker dies
+while a pending immutable request still references its objects. Pending signing
+intent is local data, never a public record or accepted fact.
+
+Request handling around COMMIT:
+
+```text
+before first attempt: scope key by action + verified caller; hash exact arguments
+if known request exists:
+    differing arguments => error; no execution
+    completed/committed => return its durable exact result
+    pending with operation => inspect/resume THAT operation
+    pending signing intent => resume THAT unsigned intent; do not guess latest
+on BEGIN BUSY: bounded retry after release/backoff and relevant revalidation
+on COMMIT SQLITE_BUSY with transaction still open:
+    finish bounded retry or SQL ROLLBACK; never repeat transaction body blindly
+on IO error/disconnection/process loss/uncertain COMMIT:
+    close/reopen via normal SQLite recovery, query original key + plan association
+    found committed => original success/result
+    found pending => exact pending operation/intent, not a fresh relative action
+    absent, DB recovered/verified => retry original intent after current validation
+    DB unavailable/corrupt => outcome unknown; preserve data, require diagnosis
+```
+
+SQLite documents COMMIT/BUSY and automatic rollback distinctions; inspect actual
+transaction state, not just the exception category
+([transaction details](https://www.sqlite.org/lang_transaction.html)). A lost
+response is not cancellation, and a cancelled wait cannot revoke a committed
+publication. CLI Cancelled before effects uses exit 3 with a typed `cancelled`
+outcome; after physical interruption exit 8/RecoveryRequired; after durable commit
+report the committed fact. This proposed cancellation mapping does not change
+the existing CLI during D3.
+
+Three-workspace contention example: A captures a large asset, B waits for a human
+on a pinned plan, C receives/captures. B holds no lock. A holds A's workspace lock
+and a shared GC gate during its bounded pass, but no SQL writer while scanning.
+C can hold C's lock and another shared gate concurrently. SQL commits serialize
+briefly; neither references a global generation invalidated by the other.
+A paused operation in B blocks B's ordinary capture only. Collection takes the
+exclusive gate and waits for pass/reader boundaries, not a person or network.
+Do not promise unlimited progress under disk saturation; measure queue fairness,
+BUSY waits and GC starvation. If two long scans exhaust workers, scheduler
+fairness must yield work at safe boundaries; no forced lock stealing.
+
+## 8. Immutable objects, roots, GC and backup
+
+### 8.1 Publication and reader protocol
+
+Lock order, when needed:
+
+```text
+workspace locks (ascending raw ID for multi-workspace operations)
+  -> native destination namespace reservation lock (short; exact policy OPEN B3)
+  -> shared publication/GC gate
+  -> short SQLite transaction
+```
+
+Collector order is exclusive publication/GC gate -> short SQL snapshot/progress
+transactions. It never acquires a workspace/destination lock. No writer takes the
+gate while already holding SQL. Never hold a destination namespace lock waiting
+for another workspace or a human. Local request-key serialization also must not
+invert these orders; a collision returns its pending/result association.
+
+Objects are staged create-only/no-follow on the destination filesystem, validated
+for canonical envelope/type/length/ID, file-synced, exclusively published and all
+new shard/ancestor directory entries synced before metadata can reference them.
+An existing ID must verify; no overwrite repair. Download/network staging is
+outside the gate until a complete bounded local verification/publish pass.
+Native flush failures refuse the required durability class.
+
+All publishers/root changes take the shared gate through their SQL pin handoff.
+A reader takes it **before reading the SQL root** and keeps it through consuming
+the closure, or atomically establishes durable reader pins before releasing it.
+Do not hold a SQL read transaction during a long diff/export. A strict read-only
+view uses the gate without inserting pins; an explicitly pinned export may write
+retention metadata and is not advertised as zero-write inspection. Reader pins
+cannot expire because a timeout/PID file says a process might have died. Confirm
+process identity/lock liveness or require explicit safe release; leaking a pin is
+safer than collecting data a reader still needs.
+
+GC marks from active fact/retention inventories while holding the gate exclusive.
+Roots include completed captures, admitted public/offline closure, authority,
+unreleased plans, pending/committed operations, source witnesses, outbox, readers,
+backup intents and physical retention. `exact-object` witness roots retain only
+the specified Merkle metadata nodes and selected values needed by proof, not an
+unselected private blob reached through an arbitrary tree pointer. Unknown types
+or traversal schema refuse collection, rather than guessing edges.
+
+Initial automatic history eviction is disabled. Future explicit collection first
+quarantines verified unreachable IDs and records restartable intent/progress;
+purge rechecks the latest roots under the exclusive gate and requires explicit
+irreversible authorization. No SQL transaction is held across object moves.
+If an object became reachable between two separate collection passes, restore/
+verify or republish its canonical bytes before making the root available; purge
+must not rely on a stale mark set. Persistent quarantine control/receipt encoding
+is OPEN before an M1b GC consumer, and its absence prohibits enabling GC.
+
+An FK to `object_root` proves a reference, not durability/validity. The gate and
+verified inventory bridge the pre-SQL object operation; readers still verify
+bytes when consumed. Concurrent corruption/external same-user writes are not
+made impossible by this protocol. An admitted object later missing/corrupt is
+an integrity/availability failure, not normal orphan recovery.
+
+### 8.2 Object/metadata/GC crash matrix
+
+| Case | Durable objects / authoritative metadata and roots | Cleanup, retry, truthful outcome and operator need |
+| --- | --- | --- |
+| A: file fsync, before canonical directory publication | Temp bytes may be durable; no canonical path or committed fact. Old roots remain | Owned temp may be reclaimed after confirming no live owner. No completed capture. Retry original key; no operator for ordinary owned staging |
+| B: canonical object publication, before SQL COMMIT | Canonical bytes may be durable orphans; metadata old, no new root/result | Exclusive GC may later quarantine them after checking pending request/operation pins. Retry same key after lookup. Do not auto-admit an orphan signature or call it saved |
+| C: SQL COMMIT outcome unknown | Either old metadata or whole new metadata/root/request set, after SQLite recovery | Query original key/operation. No reallocation/resigning as a new accepted result. Report unknown while DB unavailable; operator only for persistent corruption/IO ambiguity |
+| D: metadata committed, response lost | Complete result/IDs and roots committed; response state irrelevant | Return exact historical result on same key. Later disk changes do not alter it. No operator for a normal retry |
+| E: reachable object reader vs GC | Shared gate or committed durable reader pins protects bytes before SQL root read ends | Collector waits/excludes pins. Reader releases after consumption. No timeout-based stealing. Operator may be needed to inspect an unreleasable stale pin, not to overwrite user files |
+| F: publisher vs apparently unreachable object | Shared publish gate prevents exclusive collector between publication and root COMMIT; collector's exclusive gate prevents new roots during mark/move | Winner determines order. Later publisher must verify/restore/re-publish a quarantined ID before its root commit. Recheck roots before purge. No new semantic record from orphan bytes |
+| G: consistent DB backup while captures publish | Shared GC gate protects all objects referenced by completed destination snapshot even if source roots are later released; writers may commit through short backup steps | Derive inventory from destination DB, sync/seal metadata artifact, commit backup-intent pins in live DB before releasing gate. Report that captured boundary, not latest state. Incomplete backup is not coverage |
+| H: DB backup includes pending operation, incomplete physical staging | Completed capture/public closure can be pinned; DB operation facts alone cannot reconstruct source-native/staged/displaced bytes | Classify as history backup, not resumable operation bundle. Restore inspection must show missing physical recovery scope and refuse replay. Resuming original physical state requires original intact staging or explicit operator recovery choice; never silently mark operation Completed |
+
+### 8.3 Consistent backup correction and durability limits
+
+Use SQLite's online backup API, not `cp` on a live database. Source connections
+can change during incremental backup; the API may restart its copy. Do not label
+the completed artifact with a guessed source version/time captured before the
+backup began. Inspect **the completed destination database** for its actual
+boundary/inventory and pin that inventory while the GC gate is still held
+([backup API](https://www.sqlite.org/c3ref/backup_finish.html)). Source writers
+can proceed; bound/retry starvation without claiming an unfinished backup.
+
+Sync the sealed backup DB/artifact and parent directory, then create a live
+backup-retention owner protecting artifact and exact object inventory before
+release. A crash before that intent commits leaves an unacknowledged artifact,
+not backup coverage. A crash afterward leaves a retryable frozen backup intent.
+Do not back up bearer secrets/private custody as ordinary metadata fields.
+
+A resumable-operation bundle additionally locks affected workspaces in raw-ID
+order, snapshots the operation set and exact native staging/retained locations,
+and verifies all snapshot pending operations have complete physical coverage.
+If a new operation slipped in on another workspace, retry/refuse the stronger
+bundle. No global human/network wait. External open descriptors can still mutate
+retained nodes: a bundle cannot claim a stable physical backup without byte/
+identity checks and the required quiescence. Missing staging in an old history
+backup is an explicit limitation, not permission to reset a partial worktree.
+
+Hardware/filesystem controllers must honor flushes and locking. Process-kill tests
+do not prove power-loss durability. SQLite's own atomic-commit assumptions do not
+extend to arbitrary CAS/worktree files
+([atomic commit](https://www.sqlite.org/atomiccommit.html)). The current OCaml
+store tolerates some unsupported directory-fsync errors; Python strong mode
+must not inherit that as an undocumented success. Qualify APFS/native Linux
+filesystems and storage hardware assumptions; refuse unsupported required modes.
+No universal preservation claim covers arbitrary external writes after the last
+verified boundary, failing media or an adversary with unrestricted same-user IO.
+
+## 9. Native application and recovery contract
+
+### 9.1 State facts and permitted transitions
+
+```text
+Prepared -> Applying -> Materialized -> Committed -> Completed
+Prepared -> Cancelled                         (only before source mutation)
+Prepared/Applying/Materialized -> Paused       (record exact resume origin)
+Paused -> recorded origin                     (same intent, checked classification)
+Paused -> Recovery                            (explicit confirmed private choice)
+Recovery -> Materialized -> Committed -> Completed  (private recovery effects)
+```
+
+Recovery does not admit an abandoned acceptance. Its private replacement intent
+and retained roots are linked to the original operation; an applied operation
+cannot simply be dropped so that normal capture resumes on a partial tree.
+Exactly how recovery intent is encoded with a one-pending-operation owner is
+OPEN before M2: amend the current operation under a signed-off recovery intent
+version or atomically transfer ownership to a linked recovery operation. Do not
+create two independently active owners or rewrite the original plan. Original
+immutable intent/result remains inspectable.
+
+Prepared records the exact plan, safety snapshot/occurrence, frozen public result,
+workspace target, stage/displacement inventory, destination/source reservation,
+read set, expected metadata inputs, reserved sequence and action intents. Staging
+is complete/verified/synced before any source mutation. Pre-Prepared temporary
+staging is not a recoverable operation or completed result and cannot contain
+the only unpreserved source bytes.
+
+Applying records action intent *before* each native mutation. Post-mutation
+progress is an observation, not authority that bytes still match. Materialized
+means all target paths were verified at the recorded observation boundary; it
+does not claim a globally atomic snapshot visible to external applications.
+After that boundary, later disk edits are later private work. Neither commit
+nor completion replays file writes. Committed is the exact SQL linearization
+of permitted domain effects. Completed transfers pins and closes ownership;
+it is not a fresh scan of today's files.
+
+Immutable action intent needs: no-follow opened root/ancestor identities,
+canonical path/ordinal, preimage bytes/type/mode/absence, staged target image,
+exclusive/exchange operation, slot/retained locations, expected before/after
+native identities, applicable ignore/obstruction scope and required flushes.
+Progress records serial, classified state and verified observations, separately.
+Exact canonical field/ABI encoding is OPEN B3; arbitrary JSON paths are not a
+substitute. A materialized observation digest must bind exact verified intent,
+not a bool or an mtime-only fingerprint.
+
+### 9.2 Action classification and eight timelines
+
+Before apply/resume, validate root/parent identity, full required CAS closure,
+native representability and actual pre/post bytes. An action is safe only when
+the named live and stage/displaced images match a permitted pair. Preserve
+unexpected nodes and pause. Never discard a changed displaced entry merely
+because the new target installed correctly.
+
+| Timeline | Bytes, intent/progress and recovery obligation |
+| --- | --- |
+| 1: staged target, no replacement | Source O, staged T, immutable Prepared/action intent and safety O/target T pins. Resume verifies O/T/root/ignore/parents before proceeding; prewrite cancellation retains safety. Changed stage/source pauses/refuses; neither overwritten |
+| 2: exchange succeeded, progress lost | Live T, retained O; SQL may still say action intent. Native pair plus complete-byte checks establishes applied state; sync directories and advance same action/serial. Do not exchange again and swap O back. Any unexpected retained bytes stay retained and pause |
+| 3: several files installed, then crash | Live mixture of target T_i and untouched O_j, retained originals plus unapplied stages. Intent was durable for every action. Classify every affected pair, resume only verified pre/post states, protect safety/full target/physical locations. No ordinary capture of the mixture |
+| 4: user edits installed path after interruption | Live U, retained O, staged/target T in CAS, old progress insufficient. Pause; leave U and O intact. Explicit recovery can preserve U as a recovery observation then restore safety or keep current through a new checked private plan. No automatic replay/rollback over U |
+| 5: old descriptor modifies displaced inode | Safety CAS still O; retained old inode now U even if same size/mtime, live T. Metadata identity equality is insufficient: complete byte verification detects changed U. Preserve U and T, pause and diagnose. Later arbitrary descriptor writes remain outside a universal guarantee |
+| 6: Materialized T, new accepted head before COMMIT | T boundary recorded, later live U possibly exists; safety O and all staging/roots retained. Refuse stale public acceptance, pause at Materialized; no T replay over U and no blind rollback. Explicit private recovery or fresh reconciliation/confirmation required |
+| 7: restore/copy-out physical writes finish, response lost | If Materialized/Committed/Completed exists, resume metadata/cleanup or return same historical result under original key. If no Materialized fact, classify live T plus retained O and verify before advancing. Source cursor stays unchanged for copy-out. A later destination edit U is not overwritten by retry |
+| 8: two copy-outs to overlapping destinations | Source A/B facts/pins stay intact. Reserve exact destination plus ancestor/descendant ownership before first mutation. Second overlapping request refuses/returns owning operation; unrelated workspace writes continue. Equality-only index is insufficient. Cross-store ownership remains OPEN B3; no general rollout may assume this case is solved |
+
+For every row, public control objects staged for acceptance remain private until
+the permitted SQL commit. Recovery roots remain active during Paused and
+Materialized-stale states. Completion transfers safety/target/physical retention
+before dropping pending roots. A user explicitly forgetting a proof is distinct
+from silently deleting the last observed original or external bytes.
+
+### 9.3 Path and destination ownership
+
+Initial source mutations require an exclusive process-owned workspace lock and
+a durable pending operation. Store that owner in SQL before the first write;
+after process death the OS lock releases but pending ownership remains.
+Observers/receipt do not clear it. Root/ancestor replacement, symlink/reparse
+traversal, case/normalization collision, unrepresentable names, modes or unsupported
+special files refuse before mutation where detectable. A late race preserves
+the unexpected displaced node and pauses. Ignored/noncolliding obstructions
+remain live; a covering action must not delete them as “untracked”.
+
+Within a store, destination reservations must serialize under one short native
+namespace lock: resolve no-follow identities, compare all live scopes for equal,
+ancestor or descendant overlap, commit durable reservation with operation, then
+release namespace lock. The reservation survives Paused/process death until
+completion or explicit prewrite cancellation. Include a new destination's parent
+identity and exact byte components, not merely realpath/string prefix. Revalidate
+before every mutation; an external rename can invalidate an earlier observation.
+Reject destinations inside any managed source/staging/store tree and aliases.
+
+**OPEN B3:** per-repository SQL cannot arbitrate two different stores targeting
+the same external directory. A scheduler's advisory registration list cannot be
+promoted silently to a complete authority. D4 must choose/qualify an interoperable
+native namespace-reservation protocol, or explicitly restrict unsupported export
+scopes and test the refusal. Do not add an undocumented global authoritative DB
+or a second mutable operation journal as a convenience. Safe isolated M2 fixtures
+are not evidence of general multi-store collision exclusion.
+
+Copy-out stages an entire target tree on the same filesystem, installs into a
+new/empty destination with exclusive/exchange semantics, and retains the displaced
+empty directory in case an old open directory descriptor writes into it. Reject
+occupied/unsafe/cross-filesystem destinations; no recursive overwrite downgrade.
+Source history/cursor/counter/basis remains unchanged. Serialization with the
+source workspace is acceptable initially; unrelated stores/workspaces must not
+wait on a human or the source's unresolved content conflicts.
+
+### 9.4 Native qualification and baseline issue
+
+Source [C adapter](../../lib/yeokcham_snapshot/yeokcham_scan_stubs.c) uses
+`openat`/`fstatat` no-follow, Linux `renameat2(RENAME_NOREPLACE/RENAME_EXCHANGE)`
+and macOS `renameatx_np(RENAME_EXCL/RENAME_SWAP)`. Linux documentation confirms
+open descriptors survive rename; Apple's published headers define the distinct
+exclusive/swap flags ([Linux rename](https://man7.org/linux/man-pages/man2/rename.2.html),
+[Apple header](https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/sys/stdio.h)).
+These establish API requirements, not filesystem-specific durability or a ready
+Python ABI. Probe actual filesystem support; handle failures without overwrite.
+
+Require same-filesystem staging, complete target closure preflight, sufficient
+space, no-follow descriptor-relative operations, file and parent-directory flush,
+mode/symlink fidelity, path/native identity and complete-byte post-checks. Python
+`os.replace` permits replacement and is not displaced-node preservation
+([Python os](https://docs.python.org/3.14/library/os.html#os.replace)). Unchecked
+`shutil.copytree`, recursive overwrite/unlink or a stat-only retry is prohibited.
+The Windows adapter needs handle/no-reparse traversal, exact names and qualified
+preservation/flush primitives. No Windows in-place capability is claimed.
+
+`BASELINE-COPYOUT-20261116` is a live evidence gap, not diagnosed here. M2 must
+include tiny linear/branching 8,192-byte/eight-file attribute fixtures; Dune-action
+versus direct/temp-directory placement as recorded; new/empty destination; CRLF,
+empty dirs, symlink/executable, large/chunked and non-UTF8 names where supported;
+root/parent replacement; external descriptor and preserved-mtime byte mutations;
+all intent/mutation/sync/progress/Materialized/COMMIT boundaries; repeated retries;
+and overlapping destinations. Check actual original/staged/installed/retained
+bytes, names, modes, fingerprints, paths and observation boundary independently.
+
+A positive run plus injected deliberate mismatch must discriminate correct from
+incorrect full-target validation. Same bytes with changed metadata, and changed
+bytes with preserved metadata, need separate cases. Never delete the failing
+guard. M2 cannot advertise safe copy-out from a green happy-path port alone.
+OCaml diagnosis/fix is separately authorized work; Python success cannot make
+old CI green. If the baseline mechanism remains unexplained, explicitly isolate
+its conditions and obtain an approved safety limitation before rollout; otherwise
+source-writing/copy-out qualification stays blocked. M0 records the gap only.
+
+## 10. Agent API, normal product behavior and J1–J8
+
+### 10.1 Small shared API
+
+Keep D2 section 11's one application API with typed requests/results; no agent
+orchestration service. Minimum operations and boundaries:
+
+| Method family | Exact inputs and result; effect boundary |
+| --- | --- |
+| `create_workspace` | Exact capture/snapshot/accepted basis, new/empty ordinary directory, request/provenance. Fresh WorkspaceId, explicit source ancestry, journaled initial application; no implicit public branch |
+| `capture` / `observe_fresh` | Workspace and request/cancellation. Capture returns committed CaptureId/SnapshotId; fresh observation reports observed disk state without moving cursor. Instability is explicit |
+| `status`, `history`, `candidates`, `compare`, `inspect_recovery` | Metadata-only saved facts or exact retained snapshots, bounded pages, availability. No hidden scan, network, signing, test execution or history allocation |
+| `publish_candidate` | Exact source CaptureId, predecessor/null, public basis, byte paths, exclusion profile and request. Signed public record/correspondence/outbound, no acceptance or latest substitution |
+| `prepare_acceptance` | Exact selected candidates, accepted branch/mode and exact decisions. Pinned immutable plan with accepted/private outputs or typed blocker; no source application |
+| `accept` / `restore` | Exact PlanId, confirmation/custody as needed and request. Recorded native operation and exact committed outcome; no silent new target on retry |
+| `record_test_evidence` | Exact tested SnapshotId, runner identity, command/toolchain/environment digest, start/end observations, output digest, result/time and interruption qualification |
+| `resume_operation`, `prepare_recovery`, `recover_operation` | Exact OperationId/PlanId and observed preservation facts. Same intent or explicit linked private recovery; no inferred rollback |
+| `retire_workspace` | Confirmed exact lifecycle plan, scheduling stop, uncaptured/ignored/pending assessment. Keep captures/outbound/recovery. Directory deletion is a separate protected operation |
+
+All return stable outcome/code, exact IDs, scope, durability/observation boundary,
+operation/preserved locations, retryability and literal next actions. Keep
+Completed/Unchanged/Prepared/ChoiceRequired/Conflicted/Stale/Unavailable/
+IntegrityFailure/Unauthorized/Unsupported/RecoveryRequired/Cancelled/Interrupted
+distinct. “Captured successfully” cannot be inferred from a process heartbeat.
+
+Test evidence is an observed fact about exact inputs, not authority or a guarantee
+of semantic correctness. Prefer a disposable exact-snapshot execution directory;
+if live inputs change, evidence is qualified stale/unknown. Store secret-safe
+environment identities, never plaintext tokens or source in normal logs. A crash
+before flush/acknowledged capture can leave later disk work; report that separately.
+Separate directories are not an OS sandbox for same-user agents.
+
+Three-agent experiment is deferred to M6, using matched Git worktree/Jujutsu
+workspace automation, recorded overlapping code/opaque edits, one worker crash
+after acknowledged capture plus later unacknowledged writes, capture-worker
+failure separately, coordinator restart, continuation/publication in A/C, exact
+evidence, selective acceptance and safe retirement. Count mistakes/interventions,
+preserved/uncaptured distinctions, time/storage/resources, and repeat/counterbalance
+operator order. D1's >=30% lower median recovery/selection-time threshold remains
+a proposed decision rule, not an observed result.
+
+A persisted lane is rejected unless a recurring identity/lifecycle need cannot
+be expressed by WorkspaceId plus a small adapter. Equal outcomes with modest
+Git/jj scripts, no useful improvement over the best adapted baseline, or benefits
+entirely attributable to API/presentation falsify the need for a new primitive.
+Do not create a lane now to make the future experiment easier.
+
+### 10.2 Journey obligations and failures
+
+These retain D1 section 5 and D2 section 17, rather than claiming early-tranche
+coverage of the entire everyday VCS:
+
+| Journey | Required conformance / honest failure / next action | Gate |
+| --- | --- | --- |
+| J1 quiet ordinary editing | After actual readiness, zero routine commands. Discover missed events; report last completed capture separately from dirty/unknown later disk. Unstable/full/unavailable store retains last completed state, retries, offers manual controls without claiming service health | M3 native macOS/Linux; later Windows |
+| J2 historical alternatives | Retained target + safety/current branches survive explicit navigation. Missing/archived bytes report unavailable/fetch requirement; ignored obstructions refuse before covering writes; offer separate exact copy | M2/M3 native recovery |
+| J3 two owner laptops | Encrypted owner-only private history exchange, fresh workspace namespace, no receiving cursor movement. Locked account/missing keys/network is waiting/unavailable; public relay is not substitute backup | M7b, not M5 |
+| J4 teammates | A2/B2 independent publication; exact selective acceptance and explicit accepted-head reconciliation. Unknown authority/ambiguous selector/conflict are distinct blockers; valid private work continues. Case 4b must be solved, not waived | B1 then M4/M5 |
+| J5 opaque assets | Exact streamed variants/type/mode/availability; whole-path selection or explicit replacement. Text bounds do not exclude large storage. Missing closure or native representation refuses before mutation | M1a/M2 and M5 exchange |
+| J6 three agents, one crash | Distinct namespaces/directories, surviving completed captures and identifiable later disk writes, exact evidence and retirement. No claim to recover unflushed buffers or provide process isolation | API starts M2/M4; value M6 |
+| J7 interrupted restore | Pending owner prevents partial-tree capture; classified same-intent resume or explicit recovery, external edits retained. Missing/changed stage pauses with concrete operation/location, never clear-journal advice | B3 then M2/M3 |
+| J8 backup outage | Continue retained local history, report incomplete backup, retain sole copies/outbox. Genuine local exhaustion can stop capture; no optimistic quota eviction. Unlock/reconnect/free eligible space actions | M7b |
+
+Normal experience: initialize once; edit without VCS commands while service
+healthy; automatically preserve completed included disk observations; share
+explicitly; receive without applying; continue independent work with unresolved
+candidate conflicts; integrate/reconcile exact work when needed. No `done` action
+combines incompatible consent boundaries and no extra delivery is required.
+
+Initialization staging: local-only M2/M3 may use an explicit null public basis
+and refuse collaboration. Final collaboration setup creates authenticated empty
+main genesis and privately captures existing contents. It obtains protected
+device custody explicitly, but locked custody later does not stop private capture.
+No hosted account is required for local editing; private-account recovery/setup
+is separate. Managed registration/readiness must disclose incompleteness. Minimum
+public setup precedes M4/M5, not deferred to M7 onboarding polish.
+
+J1 never promises every intermediate write, unsaved editor buffers, a global
+multi-file instant, infinite local storage, a powered-off service, complete remote
+freshness or an available archive during outage. A rotating metadata audit cannot
+claim an unchanged file solely from matching size/mtime; explicit captures and
+destructive plans verify included contents. Any future incremental index requires
+independent correctness evidence for missed same-metadata changes.
+
+## 11. Independent vectors, dependency gates and open items
+
+### 11.1 Independent vector inventory
+
+Do not execute the old writing generator in place, rewrite old goldens or invent
+expected hashes. New vectors are generated/reviewed **after** exact schemas close,
+with two independent encoding/verification paths, fixed public test seeds and
+complete body/signing-input/signature/envelope/logical-ID/storage-ID artifacts.
+Independence means not importing the proposed production encoder/chunker/model.
+OpenSSL plus a separately specified CBOR encoder can verify Ed25519 vectors;
+production provider agreement alone is not a second protocol specification.
+
+| Inventory | Required positive and negative cases |
+| --- | --- |
+| Retained content bytes | Empty/one-byte/64-KiB boundary/64-KiB+1 content; exact Buzhash table, rolling wrap, minimum/average/maximum boundaries; streamed vs whole input; equal bytes/full digest vs manifest ref |
+| Retained tree/snapshot | Empty/nested directories, raw byte/non-UTF8 names, ordering, executable, symlink target bytes, CRLF/final newline, unsupported nodes and unrepresentable destination; fixed complete IDs independently calculated |
+| Envelope and CBOR | All retained/new type codes, endian lengths/checksums, payload-body embedding, truncation/trailing/unknown features/versions, nonminimal ints, bool-as-int, duplicate/unsorted map keys/sets, indefinite/tag/float rejection and allocation bombs |
+| Four new public kinds | Exact ordered fields, absent/null, malformed IDs/signatures, domain NUL and cross-kind/version/repository substitution, genesis/fork/ordinary/reconcile, branch names/forks, complete resolution context; blocked until OPEN fields close |
+| Candidate semantics | Cases 1–11 including 4b, all valid receipt/selection orders, dependencies vs selected, already accepted predecessor, rebase abandoning contents, equal snapshots/distinct facts, accounted-but-rejected variants, cycle/missing-scope/unknown profile |
+| Compose/criss-cross | Unique/missing/multiple comparison bases, noncommuting merge-order counterexample, explicit comparison proof, wrong claimed result, actual/unused/overlapping resolutions; no hidden ancestor |
+| Private correspondence | Selected presence/absence/necessary directories; old unselected blob GC; source is older exact capture; nonancestor/equal-byte impostor; ignore-profile change during signer wait; P3 D/E plus rejected-source variants |
+| Private plan/request/action | Exact canonical schema/digest, request argument mismatch, same-plan/different-key association, stored source/no latest substitution, phase/action serials; field encoding OPEN before consumers |
+| SQL/object/GC | Every fsync/publication/SQL BEGIN/COMMIT/response/pin-transfer boundary, two publishers+collector, readers/pins, re-reachable quarantine, orphan signed objects, full disk/IO/BUSY/corruption, backed-up DB boundary and missing operation staging |
+| Native application | Section 9's eight timelines, preflight/no-follow/case/mode/ignored collision, unchanged metadata/changed bytes and vice versa, overlapping exports, supported FS capability/refusal, Materialized late edits |
+| Trust/public eligibility | Historical vs current/revoked/late admission, missing adoption/policy refusal, authority forks, no private-cache oracle, no test/hook execution on receipt; principal/review matrix before M7a |
+| Service/value | Readiness, restart/wake/overflow/replaced roots, fair three-workspace queues, full/unstable/paused/locked modes, cold/warm/resource trials and adapted Git/jj comparison |
+
+Old Core vectors remain normative only for old Core bytes. Do not update old
+all-head tests to make Model A appear compatible; add new-version expectations
+and preserve unchanged safety negatives. A new public-control vector using OPEN
+as an empty field is expressly forbidden. Full new-vector generation was not
+performed in D3.
+
+### 11.2 Qualification and budget register
+
+| Dependency/platform | Selection gate, not installed qualification |
+| --- | --- |
+| CPython | Floor 3.13, initially test 3.13/3.14 on native macOS arm64/x86_64 where shipped and Linux; explicitly review 3.15 rather than inferring parity from this D3 host |
+| SQLite | Feature floor 3.37.0; exact build/source/options/VFS allowlist, STRICT/FK/partial-index/backup behavior, verified DELETE/EXTRA/full flush, multi-process fault/locking tests. Do not switch to WAL without its own reviewed version/checkpoint qualification |
+| Canonical CBOR | `cbor2` candidate behind a strict bounded prevalidation/profile wrapper; independent bytes and decoder resource negatives on every supported wheel/build; generic canonical mode is insufficient |
+| Ed25519 | PyNaCl/libsodium candidate; detached signatures/wrong-domain/corrupt/truncated negatives and exact bytes; protected OS/external custody not a Python plaintext secret file |
+| Compression/archive | python-zstandard/libsodium are later candidates; bounded windows/output/lengths and exact protocol/key recovery review before use; no dependency brought in for convenience |
+| Native binding | Small audited extension with no-follow, exclusive/exchange, handle lifetime and flush contract; kernel/filesystem capability probes and refusal tests before M2 |
+| Services | systemd user/LaunchAgent actual ready handshake and first reconciliation, bounded workers and durable pauses; Windows login-start strategy plus native qualification starts at M2/M3 |
+
+Provider API evidence was consulted
+([cbor2](https://cbor2.readthedocs.io/en/latest/api.html),
+[PyNaCl](https://pynacl.readthedocs.io/en/latest/signing/)); it does not select
+versions or establish resource-bounded protocol conformance. Freeze exact
+versions/hashes/licenses/platform artifacts in the separately authorized baseline
+and consumer gates, without installing anything in D3.
+
+All D2 section 17 numbers remain **proposed acceptance budgets**, not observations:
+small 10 MiB/1,000-file capture p95 <=2 s including debounce; medium
+100 MiB/10,000-file small-edit capture <=5 s; warm metadata status <=100 ms,
+50-row history <=200 ms; small ready plan <=2 s; idle <0.5% one core averaged
+over 10 minutes; idle RSS <=128 MiB and aggregate target 256 MiB with measurement
+definitions; large 1/10 GiB streaming buffers <=64 MiB/worker; small copy-out
+<=3 s and bulk <=3x verified-copy reference; metadata recovery diagnosis <=2 s
+at 100,000 captures; warm commit BUSY p95 <=100 ms; warm append at 100,000 vs
+1,000 captures <=2x excluding tree IO. Record distributions, failures, audit cost,
+cold/warm, fixture hashes, SSD/filesystem/power/CPU/RAM/builds. No previous G01
+measurement is rerun or replaced. Initial full scans may fail these budgets;
+profile rather than weakening fidelity. Zero unchanged capture identities and
+separate source/history/asset tiers remain conformance obligations.
+
+### 11.3 Explicit unresolved contracts and prohibitions
+
+| OPEN item | Exact disposition needed | Prohibited consumer |
+| --- | --- | --- |
+| B1 material representation/normalization | Deterministic case 4b solution; represented vs resolution-accounted paths; rebases/Compose/criss-cross/private-witness rules; permutation/reference tests | General M1a composition and M4/M5 acceptance |
+| B2 public proof fields | Accepted key 5/9, Compose proof and resolution key 5 including comparison identity/bounds, noncircular material ancestry and scope lifting | Any emitted/accepted new public control vector or production codec depending on them |
+| B2 authority/public protocol | Exact unchanged trust bundle reuse or new carriage with independent vectors, policy/version negotiation; no cross-domain adoption reuse | M4/M5 public mutation/receipt |
+| Private controls | Canonical plan/request/observation/verification-inventory schema and hash domains beyond PlanId; complete transition/immutability/root-release rules | M1b durable product metadata and M2 executor |
+| B3 native application | Exact action/native identity/phase/recovery intent encoding and ownership transfer; qualified ABI/flush behavior | M2 filesystem writer |
+| B3 destination arbitration | Equal/prefix/alias/cross-store ownership, interrupted reservation recovery and refusal scope | General copy-out/create-workspace/application rollout |
+| GC control | Quarantine/purge intent, exact owner survival/re-reachable-object resolution and native fault matrix | Enabling collection; automatic history eviction remains off |
+| Dependencies/platforms | Exact provider/build allowlist, Windows/path qualification and supported durability class | Capability claims on unqualified hosts |
+| Archive/review/migration | Complete account/principal/review/crypto and explicit import/export schemas with independent evidence | M7 features or implicit repository upgrade |
+
+No unknown required mode is treated as optional. No writable Python process opens
+an OCaml `.yeokcham` store, shares its mutable object directory, or manages the
+same ordinary root. Use an experimental `yeokcham-py`, separate `.yeokcham-v2`
+marker/store and mandatory exclusions for both implementations; old marker in an
+ancestor or overlapping managed tree refuses. No silent default executable
+replacement. Read-only exported fixtures are not authorization for live migration.
+
+No production code, dependency installation, old-vector rewrite, OCaml fix, P4,
+G-phase, M0, ledger/README/RFC amendment, branch switch/reset, commit or push is
+part of D3. Owner approval and code authorization remain separate. Exact M0 scope,
+acceptance/rollback and the D4 prerequisite are in architecture sections 8–9.
+
+## 12. D3 verification record
+
+Observed checks, separate from proposed acceptance work:
+
+| Check | Result / limit |
+| --- | --- |
+| HEAD/status/target discovery | HEAD above; clean main initially, no nonignored untracked files; both D3 paths absent; only D1/D2 added since D2's old observed HEAD |
+| Source/document review | Both canonical RFCs read in full; relevant contracts/source/C/tests/vectors inspected; no generator or VCS runtime run |
+| External SQLite feasibility | Exit 0; 23 checks on CPython 3.15.0 / SQLite 3.54.1. External disposable files only; no dependency install or live Yeokcham data |
+| SQL checks included | Deferred capture/cursor FK transaction, size/nullable-parent/allocation/immutability/version/sequence checks, one pending operation and one plan association, pause/Materialized/serial checks, exact destination uniqueness, duplicate request, endpoint-bound ack, FK/integrity check and explicit SQL transaction behavior |
+| Strengthened negative checks | Three additional checks isolated the short-snapshot, nullable-parent-pair and forward-parent CHECK failures from unrelated FK/duplicate/allocation errors; all refused for the intended constraint |
+| Symbolic semantic check | Independently calculated maximal common ancestors for case 4b: SA1/A2 -> A1, SA1/A2/Z1 -> R0; exact x-line endpoint replacements disagree at the older base. Passed as a counterexample to the stated global rule, not a production implementation test |
+| Not established by SQL check | Complete graph/root/native validation, correct cryptography/objects, schema migration, multi-process GC, lost COMMIT recovery, backup consistency under faults, 3.13/3.14 support, filesystem/power-loss correctness |
+
+The SQLite exercise used fake typed-length IDs exclusively to test relational
+shape, not fabricated valid public records. Its result and extracted illustrative
+DDL remain outside the checkout at
+`/var/folders/55/fw1sdntj20v8650vsmkn7s8c0000gn/T/yeokcham-d3-sql-i6f7z02z/`.
+This is a D3 technical-assumption experiment, not M0/M1b implementation or an
+independent protocol-vector generator. Assertions confirmed that Python's
+`commit()`/`rollback()` left an explicitly opened transaction in progress under
+`autocommit=True`, while SQL `COMMIT`/`ROLLBACK` performed the intended boundary.
+
+Closeout checks: `python3 -B tools/check_doc_links.py` passed (375 local file
+references at that check); both draft markers, consecutive numbered sections,
+balanced fences and absence of trailing whitespace passed. `git diff --check`
+passed; added-document text is also checked separately from the tracked diff.
+The initial 515-file SHA-256/mode manifest matches, with exactly the two D3 paths
+added. The checker validates local target existence, not external links or
+heading fragments; official external sources were accessed separately.
+
+External commits `1154446827185beb33fab750bea297d082a4035b` and
+`3d25c1750ffa39b9ddc228846933a2a50181a006` captured intermediate D3 drafts while
+the review was running. No commit was issued by this review; those snapshots
+were preserved without reset/amend. Final HEAD/status are reported independently.
+All pre-existing files remain unchanged despite that external Git activity.
+
+Native/OCaml/CI/property/service/performance/lane/power-loss checks
+were not run because this is a scoped design review, not their implementation
+tranche. BASELINE-COPYOUT remains unresolved. No runtime success is inferred from
+documentation validation, and no owner approval is recorded.

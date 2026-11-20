@@ -136,7 +136,8 @@ command-time capture, deferred conflicts and an operation log
 ([working copy](https://docs.jj-vcs.dev/latest/working-copy/),
 [conflicts](https://docs.jj-vcs.dev/latest/conflicts/),
 [operations](https://docs.jj-vcs.dev/latest/operation-log/)). Practical superiority
-is unproved. Compare modestly scripted versions with matched capture cadence,+retention and visibility; count automation and verified restoration costs.
+is unproved. Compare modestly scripted versions with matched capture cadence,
+retention and visibility; count automation and verified restoration costs.
 
 Keep facts, not a class/service/table for each noun:
 
@@ -228,7 +229,8 @@ also check SQLite's documented WAL-reset fixes and exact vendor backports
 ([WAL](https://www.sqlite.org/wal.html#the_wal_reset_bug)).
 
 `cbor2`, PyNaCl/libsodium, optional python-zstandard and an audited small native
-binding remain candidates. Freeze versions, source/wheel hashes, licenses,+supported wheels/architectures, strict parser resource bounds, signature negatives,
+binding remain candidates. Freeze versions, source/wheel hashes, licenses,
+supported wheels/architectures, strict parser resource bounds, signature negatives,
 custody integration and native capability behavior before their consumer tranche.
 Generic canonical CBOR mode is not the restricted Yeokcham decoder contract.
 No dependency lock or production provider is approved by being named here.
@@ -330,10 +332,20 @@ not owner-approved specifications or experimentally proven guarantees.
 
 ## 10. D3 verification and repository handoff
 
-The companion records the exact lightweight validation. Only the two requested
-D3 documents are added. Existing tracked files and the 515-file preservation
-manifest are checked again at closeout; no branch switch, commit, push, dependency
-installation, production change, M0, P4 or G-phase is performed.
+The companion records the exact lightweight validation. Documentation links,
+draft structure/fences/whitespace, the illustrative SQL checks and a symbolic
+common-base counterexample check passed. Only the two requested D3 paths are
+added relative to the starting HEAD; all 515 pre-existing inventoried files and
+modes match their starting manifest. No production/native runtime was tested.
+
+External snapshots appeared during D3: `1154446827185beb33fab750bea297d082a4035b`
+added the architecture draft, and `3d25c1750ffa39b9ddc228846933a2a50181a006`
+added the then-current partial contract draft. They were observed, not issued
+by this review, and were preserved. HEAD/status are checked again at final
+handoff rather than assuming those intermediate snapshots remain latest.
+This review issued no branch-switch, commit, push, dependency-installation,
+production-change, M0, P4 or G-phase command. Source snapshots do not constitute
+approval of the drafts or completion of a technical gate.
 
 Documentation links/structure and a disposable SQL feasibility check do not
 establish runtime preservation, native durability, public interoperability or
