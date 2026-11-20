@@ -44,7 +44,7 @@ this is not a total-file limit. Streaming manifests/chunks represent larger file
 | Content / code 1 | CBOR `[1, file_bytes]`, canonical storage for length <=65,536 | Retain; exact inline boundary required |
 | Chunk / code 13 | CBOR `[1, chunk_bytes]`, separate envelope kind/domain-derived stored ID | Retain; equal payload alone does not equal Content object ID |
 | File_manifest / code 14 | CBOR `[1,total_length,1,64,16384,65536,131072,full_content_b32,[[chunk_object_b32,length],...]]`; total >65,536 | Retain ordered chunk references, lengths/full digest and canonical boundary verification, not merely successful concatenation |
-| Buzhash-v1 | Table seed `0x6a09e667f3bcc909`, 256 unsigned-64 recurrence values `state=state*6364136223846793005+1442695040888963407 mod 2^64`; rotate-left rolling hash; window 64, min/avg/max 16/64/128 KiB | Retain exact source recurrence and rolling/reset behavior. Full table/boundaries/stream feed corpus missing; a similarly named library is not compatibility |
+| Buzhash-v1 | Table seed `0x6a09e667f3bcc909`, 256 unsigned-64 recurrence values `state=state*6364136223846793005+1442695040888963407 mod 2^64`; rotate-left rolling hash; window 64, min/avg/max 16/64/128 KiB | Retain exact source recurrence; chunk cuts reset current length/buffer, **not** rolling hash/window/seen. Full table/boundaries/stream feed corpus missing; a similarly named library is not compatibility |
 | Tree / code 2 | `[1, entries]`; File `[0,name_bytes,mode,content_object_b32]`, Directory `[1,name_bytes,tree_object_b32]`; raw-byte name order; modes Regular=0, Executable=1, Symlink=2 | Retain, including empty tree/directory objects. No case/Unicode normalization. Symlink content is target bytes, not followed contents |
 | Snapshot / code 3 | `[1, root_tree_object_b32]` | Retain full closure and wrong-kind/missing/corrupt negatives |
 | Old Core controls | Codes 41 revision, 42 accepted, 43 branch, 47 resolution; body schema 1; domain directly followed by canonical body **without NUL** | Old inspection/regression only for changed semantics. Do not emit Model A in those old codes/domains |
@@ -54,6 +54,15 @@ this is not a total-file limit. Streaming manifests/chunks represent larger file
 The CBOR generic-map distinction is source-backed, not a new relaxed public parser.
 Any V2 payload schema still requires its exact ordered keys. Likewise, constructor
 sorting is not permission to repair noncanonical signed input during decoding.
+
+**Source-only writer/reader asymmetry:** `Content.store` switches to a manifest
+above 65,536 bytes, but the inspected `Content.decode` and `load_bounded` Content
+branch do not repeat that size check. M0 did not execute an oversized inline
+fixture. Do not claim the existing reader rejects it, or silently infer that
+Python must accept it for canonical admission. Canonical writer output stays
+unchanged; inspection versus mutation-admission treatment of this legacy shape
+is **OPEN before the M1a reader consumer** (O13 in the safety companion).
+This is an inventoried contract distinction, not an OCaml fix or a new byte format.
 
 ## Existing families and fresh comparison coverage
 
@@ -76,6 +85,10 @@ concatenation. These are inventory checksums, **not object or record IDs**.
 Thus **34/74** files received fresh independent generation/comparison; the
 remaining 40 received inventory/preservation checks, not fresh runtime passes.
 No new retained-content corpus or V2 public-control vectors were generated.
+An additional M0 hash comparison matched all 13 original Core golden files to
+the literal-file digests in the P01 acceptance receipt. The current total is 17
+because P3 added four resolution-revision artifacts; the original 13 are unchanged.
+This receipt comparison is not 13 additional unique generated vectors.
 
 ### Generators, exact inputs and existing expected outputs
 
@@ -157,6 +170,7 @@ Do not calculate an expected hash using the proposed production encoder itself.
 | RC04 identity distinctions | Same file bytes under two names, Regular vs Executable, Content vs Chunk kind with same payload; two distinct capture IDs referencing one snapshot | FullContentId equal where bytes equal; correct distinct stored/tree/snapshot/history identities; no fake causal edge |
 | RC05 invalid content | RC01/02 closure with missing/corrupt chunk, wrong total/individual lengths/full ID, manifest for <=65536, noncanonical cut/parameters, wrong referenced kind | Exact expected typed rejection before availability claim, including bounded-display reads that request zero bytes |
 | RC06 malformed names/CBOR/envelope | RC03 with empty/dot/dotdot/slash/NUL/duplicate/unordered name or invalid mode; envelope prefixes 0..56/truncations, flipped checksum/type/version/features/length; nonminimal args, indefinite/tag/float/duplicate or unordered keys, malformed UTF-8, bool-as-int, trailing data | Strict bounded failures; sparse nonnegative generic maps are not incorrectly rejected merely for nonconsecutive keys, while exact record payload shape is enforced |
+| RC07 reader admission asymmetry | Valid Envelope-1/Content1 payload `[1,P(65537)]` and otherwise identical canonical Manifest14 closure for P(65537) | Writer must choose manifest. Existing inline reader branch lacks the writer cutoff; Python read-only inspection versus verified mutation-admission result remains OPEN O13. Freeze policy and independent expected outcome before consumer; no guessed rejection or automatic identity conversion |
 
 Independent method: one small reference emitter/chunker written from the source-
 backed specification without importing production code, plus a separately written

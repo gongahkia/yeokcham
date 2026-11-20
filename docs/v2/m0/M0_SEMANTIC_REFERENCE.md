@@ -329,8 +329,8 @@ basis Accepted(S0), public result T20, scope f only. Private correspondence
 proves P's f value at exact h1 using scope/Merkle witnesses and h1 ancestor of h2.
 Select `{P}`; dependencies cl(S0)/P and its public contents. h1/h2/secret/witness
 remain private. Public f frontier `{P:f}` dominates R0:f, result D_public=T20.
-Known-present K is exactly **T20**, not h1 or h2 including secret.
-Private merge `merge(K,T20,E)` yields exact E because accepted side is unchanged.
+Known-present projection K_present is exactly **T20**, not h1 or h2 including secret.
+Private merge `merge(K_present,T20,E)` yields exact E because accepted side is unchanged.
 Expected accepted T20; expected workspace T21+private-later secret. A2/B2, if
 known from default K's public graph, remain unselected/pending. No secret bytes
 or private ancestry enter public closure. Missing/nonancestor/discarded source
@@ -353,8 +353,8 @@ An explicit completeness claim about that sibling set would be a different plan.
 
 Start with the same S17 plan/selection/dependencies/frontier/result proposal.
 Receive valid S_B/T40 with parent S0, chosen B2. Now accepted heads
-`{S0? no: S_B}` replace S0 as the known target head, or `{S_A,S_B}` if S_A
-was independently already committed. For the uncommitted S17 plan the exact
+`{S_B}` replace S0 as the known target head. If S_A was independently already
+committed, the head set instead contains `{S_A,S_B}`. For the uncommitted S17 plan the exact
 bound set `{S0}` is no longer current, even if a new head's bytes matched T00.
 **Stale**, requiring a new parent-complete plan/decision. No fresh accepted output
 is authorized; proposed T20 is retained, not committed. A2 remains pending in
@@ -408,7 +408,7 @@ No unselected tip in this isolated family is deleted; AX1/AY1 historical roles
 remain. The algorithm must check all bounded derivations, not pick the first
 successful grouping. This is D4's stronger retained regression, not an invented base.
 
-### S22 — deletion versus descendant edit, not missing data
+### S22 — deletion versus continued file edit, not missing data
 
 Start S0/T00, known K plus DEL; DEL null evolution/different change, basis
 Revision(R0), result empty tree and exact scope `{f.txt}`. Select `{DEL,A2}`;
