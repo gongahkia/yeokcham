@@ -1,6 +1,6 @@
 """Local, unsigned normalization profile. Logical charges never count cache misses."""
 
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import TypeVar
 
@@ -93,6 +93,11 @@ class Counter:
         self.text_bytes = 0
         self.aligned: set[tuple[bytes, bytes]] = set()
         self.path_aligned: set[tuple[Path, bytes, bytes]] = set()
+        # Immutable hunk memos are request-local, with payload charged before retention.
+        self.diff_cache: dict[
+            tuple[bytes, bytes],
+            tuple[int, tuple[tuple[int, int, tuple[bytes, ...]], ...]],
+        ] = {}
 
     def snapshot(self) -> Charge:
         return Charge(
@@ -190,7 +195,7 @@ class Counter:
 
 def logical_closure(
     parents: Mapping[T, tuple[T, ...]],
-    roots: Iterable[T],
+    roots: Sequence[T],
     *,
     traversal: str = "dfs",
     max_nodes: int = 4096,
@@ -201,6 +206,15 @@ def logical_closure(
     Input order and traversal affect neither cardinalities nor cycle validation.
     Engine graphs are already topologically validated before this boundary.
     """
+    if (
+        type(max_nodes) is not int
+        or not 0 <= max_nodes <= 4096
+        or type(unit_limit) is not int
+        or not 0 <= unit_limit <= 1_000_000
+    ):
+        raise ValueError("closure limits may only reduce qualified bounds")
+    if len(roots) > max_nodes:
+        raise BudgetExceeded("origins_path")
     if traversal not in ("dfs", "bfs"):
         raise ValueError("unsupported traversal")
     todo = list(roots)

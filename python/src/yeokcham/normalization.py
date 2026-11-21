@@ -9,6 +9,7 @@ are request-local and are never a persisted source of authority.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
+from typing import Literal
 
 from .composition import (
     Mode,
@@ -33,6 +34,7 @@ from .normalization_budget import (
 )
 
 __all__ = [
+    "BudgetRefusal",
     "Context",
     "Fact",
     "Limits",
@@ -42,6 +44,7 @@ __all__ = [
     "OriginKey",
     "Resolution",
     "Result",
+    "Status",
     "logical_closure",
     "normalize",
     "preserve_private",
@@ -95,9 +98,30 @@ class Fact:
     profile: tuple[str, str] = PROFILE
 
 
+Status = Literal[
+    "Ready",
+    "Conflicted",
+    "ChoiceRequired",
+    "Stale",
+    "Unavailable",
+    "IntegrityFailure",
+    "InvalidContent",
+    "ResourceLimit",
+    "UnsupportedFormat",
+    "InvalidEncoding",
+    "NoncanonicalRepresentation",
+]
+
+
+@dataclass(frozen=True)
+class BudgetRefusal:
+    dimension: str
+    limit: int
+
+
 @dataclass(frozen=True)
 class Result:
-    status: str
+    status: Status
     tree: Tree | None = None
     reason: str = ""
     conflicts: tuple[Context, ...] = ()
@@ -108,10 +132,11 @@ class Result:
     lineage: tuple[tuple[Path, OriginKey], ...] = ()
     origins: tuple[tuple[OriginKey, Origin], ...] = ()
     charge: Charge = field(default_factory=Charge)
+    budget: BudgetRefusal | None = None
 
 
 class _Stop(Exception):
-    def __init__(self, status: str, reason: str, contexts: tuple[Context, ...] = ()):
+    def __init__(self, status: Status, reason: str, contexts: tuple[Context, ...] = ()):
         self.status = status
         self.reason = reason
         self.contexts = contexts
@@ -587,8 +612,9 @@ class _Engine:
             values, ambiguous = self.solve(p, frontier)
             if ambiguous:
                 reason = "comparison"
-            elif len(values) > 1 and reason != "comparison":
-                reason = "nonconfluent"
+            elif len(values) > 1:
+                if reason != "comparison":
+                    reason = "nonconfluent"
             elif not values:
                 conflicts.add(p)
             else:
@@ -597,6 +623,14 @@ class _Engine:
             raise _Stop("ChoiceRequired", reason)
         tentative = {p: v for p, v in states.items() if v is not None}
         conflicts.update(structural_conflicts(tentative))
+        # A conflicted child has no tentative value yet. Its absent/file parent
+        # still requires a whole-subtree decision, not an unusable child choice.
+        conflicts.update(
+            path[:depth]
+            for path in tuple(conflicts)
+            for depth in range(1, len(path))
+            if path[:depth] not in tentative or tentative[path[:depth]].mode is not None
+        )
         roots = tuple(
             sorted(
                 p
@@ -738,10 +772,18 @@ def normalize(
             else error.status
         )
         contexts = error.contexts if isinstance(error, _Stop) else ()
+        budget = (
+            BudgetRefusal(
+                error.dimension, getattr(limits, error.dimension, (1 << 63) - 1)
+            )
+            if isinstance(error, BudgetExceeded)
+            else None
+        )
         return Result(
             status,
             reason=str(error) if not isinstance(error, _Stop) else error.reason,
             conflicts=contexts,
+            budget=budget,
             selected=selection,
             retained=tuple(sorted(engine.pool, key=lambda r: r.raw)) if engine else (),
             charge=engine.counter.snapshot() if engine else Charge(),

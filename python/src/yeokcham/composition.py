@@ -94,6 +94,11 @@ Hunk = tuple[int, int, tuple[bytes, ...]]
 def _diff(base: bytes, result: bytes, counter: Counter, path: Path) -> list[Hunk]:
     counter.text(base)
     counter.text(result)
+    cached = counter.diff_cache.get((base, result))
+    if cached is not None:
+        cells, hunks = cached
+        counter.alignment(path, base, result, cells)
+        return list(hunks)
     a, b = _lines(base), _lines(result)
     prefix = suffix = 0
     while prefix < min(len(a), len(b)) and a[prefix] == b[prefix]:
@@ -140,6 +145,10 @@ def _diff(base: bytes, result: bytes, counter: Counter, path: Path) -> list[Hunk
             replacement.append(b[prefix + j])
             j += 1
     flush(i)
+    counter.payload(
+        path, sum(len(line) for _, _, replacement in output for line in replacement)
+    )
+    counter.diff_cache[(base, result)] = ((n + 1) * (m + 1), tuple(output))
     return output
 
 
@@ -188,6 +197,7 @@ def merge_bytes(
     )
     if any(_overlap(a, b) for a, b in itertools.pairwise(hunks)):
         return None
+    counter.transient(path, len(left) + len(right))
     source = _lines(base)
     pieces: list[bytes] = []
     cursor = 0
@@ -211,6 +221,10 @@ def merge_state(
     if any(v is None or v.mode is None for v in (base, left, right)):
         return False, None
     assert base is not None and left is not None and right is not None
+    # A symlink is an opaque entry. Only the whole-entry rules above may
+    # choose it; do not combine a link conversion with an independent byte edit.
+    if Mode.SYMLINK in (base.mode, left.mode, right.mode):
+        return False, None
     mode = (
         left.mode
         if left.mode == right.mode or right.mode == base.mode
@@ -220,15 +234,12 @@ def merge_state(
     )
     if mode is None:
         return False, None
-    # Symlinks permit independent unchanged mode/content rules but never text merging.
     if left.data == right.data:
         data = left.data
     elif left.data == base.data:
         data = right.data
     elif right.data == base.data:
         data = left.data
-    elif Mode.SYMLINK in (base.mode, left.mode, right.mode):
-        return False, None
     else:
         merged = merge_bytes(
             base.data, left.data, right.data, counter=counter, path=path

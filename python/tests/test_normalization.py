@@ -798,3 +798,126 @@ def test_generated_dag_against_exhaustive_tree_oracle(steps, reverse):
         assert dict(result.tree)[f] == value
     else:
         assert result.tree is None
+
+
+def test_ancestor_subset_input_is_bounded_before_copy():
+    n, _ = api()
+    from yeokcham.normalization_budget import BudgetExceeded
+
+    with pytest.raises(BudgetExceeded, match="origins_path"):
+        n.logical_closure({0: ()}, tuple(range(4097)))
+    with pytest.raises(ValueError):
+        n.logical_closure({0: ()}, (0,), max_nodes=4097)
+
+
+def test_budget_refusal_is_structured_data():
+    n, _ = api()
+    result = n.normalize(
+        pool(), (rid("S0"),), (rid("A2"),), limits=n.Limits(ancestor_units=0)
+    )
+    assert (
+        result.tree is None
+        and result.budget.dimension == "ancestor_units"
+        and result.budget.limit == 0
+    )
+
+
+def test_alignment_memo_does_not_repeat_matrix_allocation(monkeypatch):
+    _, c = api()
+    from yeokcham.normalization_budget import Counter, Limits
+
+    counter = Counter(Limits())
+    base = b"x=0\ny=0\n"
+    left = b"x=1\ny=0\n"
+    right = b"x=0\ny=1\n"
+    assert c.merge_bytes(base, left, right, counter=counter, path=f) == b"x=1\ny=1\n"
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("repeated matrix allocation")
+
+    monkeypatch.setattr(c, "array", forbidden)
+    assert c.merge_bytes(base, left, right, counter=counter, path=g) == b"x=1\ny=1\n"
+    assert counter.local_cells[f] == counter.local_cells[g]
+
+
+@pytest.mark.parametrize("base_mode,left_mode", [(0, 2), (2, 0)])
+def test_symlink_conversion_and_concurrent_content_edit_conflict(base_mode, left_mode):
+    n, _ = api()
+    root = n.Fact(rid("link-root"), "genesis", tr({}))
+    base = n.Fact(
+        rid("link-base"),
+        "candidate",
+        tr({f: F(b"old", base_mode)}),
+        basis=root.identity,
+        scope=(f,),
+    )
+    left = n.Fact(
+        rid("link-left"),
+        "candidate",
+        tr({f: F(b"old", left_mode)}),
+        basis=base.identity,
+        scope=(f,),
+    )
+    right = n.Fact(
+        rid("link-right"),
+        "candidate",
+        tr({f: F(b"new", base_mode)}),
+        basis=base.identity,
+        scope=(f,),
+    )
+    result = n.normalize(
+        [root, base, left, right], (root.identity,), (left.identity, right.identity)
+    )
+    assert result.status == "Conflicted" and result.tree is None
+
+
+def test_executable_bit_and_regular_content_change_can_combine():
+    n, _ = api()
+    root = n.Fact(rid("exec-root"), "genesis", tr({}))
+    base = n.Fact(
+        rid("exec-base"),
+        "candidate",
+        tr({f: F(b"old")}),
+        basis=root.identity,
+        scope=(f,),
+    )
+    left = n.Fact(
+        rid("exec-left"),
+        "candidate",
+        tr({f: F(b"old", 1)}),
+        basis=base.identity,
+        scope=(f,),
+    )
+    right = n.Fact(
+        rid("exec-right"),
+        "candidate",
+        tr({f: F(b"new")}),
+        basis=base.identity,
+        scope=(f,),
+    )
+    result = n.normalize(
+        [root, base, left, right], (root.identity,), (left.identity, right.identity)
+    )
+    assert result.status == "Ready" and plain(result.tree) == {f: F(b"new", 1)}
+
+
+@pytest.mark.parametrize("replacement", [None, F(b"file"), F(b"target", 2)])
+@pytest.mark.parametrize("chosen", ["A", "B"])
+def test_parent_replacement_with_existing_child_edit_lifts_conflict(
+    replacement, chosen
+):
+    n, _ = api()
+    facts, a, b = structural(replacement)
+    b = {p: v for p, v in b.items() if p != (b"d", b"g")}
+    b[(b"d", b"f")] = F(b"edited")
+    facts = [replace(v, tree=tr(b)) if v.identity == rid("B") else v for v in facts]
+    prepared = n.normalize(facts, (rid("sg"),), (rid("A"), rid("B")))
+    assert prepared.status == "Conflicted" and prepared.conflicts[0].path == (b"d",)
+    choice = n.Resolution(prepared.conflicts[0], rid(chosen))
+    resolved = n.normalize(
+        facts, (rid("sg"),), (rid("A"), rid("B")), resolutions=(choice,)
+    )
+    assert resolved.status == "Ready" and plain(resolved.tree) == {
+        **(a if chosen == "A" else b),
+        (b"u",): F(b"new-u"),
+    }
