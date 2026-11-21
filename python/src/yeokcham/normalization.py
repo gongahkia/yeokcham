@@ -193,6 +193,7 @@ class _Engine:
             tuple[Path, tuple[OriginKey, ...]], frozenset[OriginKey]
         ] = {}
         self.closed: set[RecordId] = set()
+        self.dependencies: dict[RecordId, tuple[RecordId, ...]] = {}
         self.paths: tuple[Path, ...] = ()
         if len(facts) > limits.facts:
             raise BudgetExceeded("facts")
@@ -323,16 +324,25 @@ class _Engine:
             stack.append((rid, True))
             stack.extend((r, False) for r in reversed(deps[rid]))
         self.closed = set(order)
+        self.dependencies = deps
         heights: dict[RecordId, int] = {}
         paths: set[Path] = set()
         path_bytes = 0
         for rid in order:
             # An inline expression consumes a dependency level, without a new ID.
-            step = 2 if isinstance(self.pool[rid].basis, Compose) else 1
-            heights[rid] = max((heights[r] + step for r in deps[rid]), default=0)
+            fact = self.pool[rid]
+            if isinstance(fact.basis, Compose):
+                heights[rid] = max(
+                    max(
+                        heights[r] + 2
+                        for r in fact.basis.accepted + fact.basis.selected
+                    ),
+                    0 if fact.predecessor is None else heights[fact.predecessor] + 1,
+                )
+            else:
+                heights[rid] = max((heights[r] + 1 for r in deps[rid]), default=0)
             if heights[rid] > self.limits.depth:
                 raise BudgetExceeded("depth")
-            fact = self.pool[rid]
             self.validate_tree(fact.tree)
             if isinstance(fact.basis, Compose):
                 self.validate_tree(fact.basis.claimed)
@@ -433,7 +443,7 @@ class _Engine:
                     raise ContentError(Code.INTEGRITY, "false accepted result claim")
             self.views[rid] = view
 
-    def validate_tree(self, value: Tree) -> None:
+    def validate_tree(self, value: Tree, *, subtree: Path = ()) -> None:
         _invalid(type(value) is tuple, "tree must be immutable")
         if len(value) > self.limits.paths:
             raise BudgetExceeded("paths")
@@ -452,7 +462,24 @@ class _Engine:
                 "metadata outside public tree",
             )
             entries[path] = node
-        _invalid(not structural_conflicts(entries), "invalid input tree structure")
+        _invalid(
+            not any(len(p) >= len(subtree) for p in structural_conflicts(entries)),
+            "invalid input tree structure",
+        )
+
+    def input_paths(self, roots: tuple[RecordId, ...]) -> set[Path]:
+        """Fixed public input closure; an output claim cannot supply its own domain."""
+        seen: set[RecordId] = set()
+        todo = list(roots)
+        paths: set[Path] = set()
+        while todo:
+            rid = todo.pop()
+            if rid in seen:
+                continue
+            seen.add(rid)
+            paths.update(p for p, _ in self.pool[rid].tree)
+            todo.extend(self.dependencies[rid])
+        return paths
 
     def add(
         self, key: OriginKey, value: State, parents: tuple[OriginKey, ...]
@@ -640,6 +667,40 @@ class _Engine:
         if len(common - nonmax) != 1:
             raise _Stop("ChoiceRequired", "comparison")
 
+    def unseen_context_expansion(self, claimed: Context, current: Context) -> bool:
+        """Recognize an unsupported domain extension, never authorize its result."""
+        if (
+            type(claimed.comparisons) is not tuple
+            or len(claimed.comparisons) > self.limits.paths
+        ):
+            return False
+        if not all(
+            type(row) is tuple and len(row) == 2 and valid_path(row[0])
+            for row in claimed.comparisons
+        ):
+            return False
+        previous = {path for path, _ in claimed.comparisons}
+        extra = {path for path, _ in current.comparisons} - previous
+        if not extra or any(
+            self.origins[origin].state is not None or self.origins[origin].parents
+            for _, view in current.sources
+            for path, origin in view
+            if path in extra
+        ):
+            return False
+        projected = Context(
+            current.path,
+            current.accepted,
+            current.selected,
+            tuple(
+                (rid, tuple((p, o) for p, o in view if p not in extra))
+                for rid, view in current.sources
+            ),
+            tuple((p, origins) for p, origins in current.frontiers if p not in extra),
+            tuple((p, origin) for p, origin in current.comparisons if p not in extra),
+        )
+        return projected == claimed
+
     def compose(
         self,
         accepted: tuple[RecordId, ...],
@@ -668,6 +729,11 @@ class _Engine:
             not any(_prefix(a, b) for a, b in pairwise(ordered_scopes)),
             "overlapping resolutions",
         )
+        literal_domain = (
+            self.input_paths(accepted + selected)
+            if any(r.intent == "literal" for r in resolutions)
+            else set()
+        )
         for declared in resolutions:
             if declared.profile != PROFILE:
                 raise _Stop("ChoiceRequired", "unsupported-profile")
@@ -693,7 +759,9 @@ class _Engine:
                         raise ContentError(
                             Code.UNAVAILABLE, "missing complete replacement content"
                         )
-                    self.validate_tree(declared.replacement)
+                    self.validate_tree(
+                        declared.replacement, subtree=declared.context.path
+                    )
                     _invalid(
                         all(
                             _prefix(declared.context.path, p)
@@ -701,7 +769,7 @@ class _Engine:
                         ),
                         "replacement outside subtree scope",
                     )
-                    if any(p not in self.paths for p, _ in declared.replacement):
+                    if any(p not in literal_domain for p, _ in declared.replacement):
                         raise _Stop("ChoiceRequired", "unsupported-new-path-resolution")
         inputs = accepted + selected
         states: dict[Path, State] = {}
@@ -749,6 +817,8 @@ class _Engine:
             resolution = by_scope.get(context.path)
             if resolution is not None:
                 if resolution.context != context:
+                    if self.unseen_context_expansion(resolution.context, context):
+                        raise _Stop("ChoiceRequired", "unsupported-resolution-domain")
                     raise ContentError(Code.INTEGRITY, "resolution context changed")
                 if resolution.intent == "variant":
                     _invalid(

@@ -729,3 +729,178 @@ def test_nested_cache_charge_property(depth, cache):
         cache=not cache,
     )
     assert result == permuted and result.status == "Ready"
+
+
+@seed(20261124)
+@settings(max_examples=15, deadline=None)
+@given(st.integers(min_value=1, max_value=10), st.booleans())
+def test_nested_exact_logical_charge_boundaries(depth, cache):
+    facts = nested(depth)
+    # One path: queries for chain prefixes have costs 1,3,...,2*depth+1.
+    exact = (depth + 1) ** 2
+    ready = n.normalize(
+        facts,
+        (facts[0].identity,),
+        (facts[-1].identity,),
+        limits=n.Limits(ancestor_units=exact),
+        cache=cache,
+    )
+    refused = n.normalize(
+        facts,
+        (facts[0].identity,),
+        (facts[-1].identity,),
+        limits=n.Limits(ancestor_units=exact - 1),
+        cache=not cache,
+    )
+    assert ready.status == "Ready" and ready.charge.ancestor_units == exact
+    assert (
+        refused.status == "ChoiceRequired"
+        and refused.budget.dimension == "ancestor_units"
+    )
+    assert refused.tree is None
+
+
+def test_wide_dag_logical_set_reference():
+    from yeokcham.normalization_budget import logical_closure
+
+    parents = {0: (), 1: (0,), 2: (0,), 3: (1, 2), 4: (1, 2), 5: (3, 4)}
+    expected_edges = frozenset((child, p) for child, ps in parents.items() for p in ps)
+    for traversal in ("dfs", "bfs"):
+        nodes, edges = logical_closure(
+            parents, (5,), traversal=traversal, unit_limit=14
+        )
+        assert nodes == frozenset(parents) and edges == expected_edges
+        assert len(nodes) + len(edges) == 14
+    from yeokcham.normalization_budget import BudgetExceeded
+
+    with pytest.raises(BudgetExceeded, match="ancestor_units"):
+        logical_closure(parents, (5,), unit_limit=13)
+
+
+def test_later_new_descendant_requires_resolution_domain_qualification():
+    facts, context = structural()
+    root, _, a, b = facts
+    chosen = n.normalize(
+        facts,
+        (root.identity,),
+        (a.identity, b.identity),
+        resolutions=(literal(context, {d: D}),),
+    )
+    accepted = n.Fact(
+        rid("domain-accepted"),
+        "accepted",
+        chosen.tree,
+        parents=(root.identity,),
+        selected=(a.identity, b.identity),
+        resolutions=(literal(context, {d: D}),),
+    )
+    new_path = (b"d", b"future")
+    later = n.Fact(
+        rid("domain-later"),
+        "candidate",
+        tr({d: D, new_path: F(b"new"), u: F(b"new-u")}),
+        basis=accepted.identity,
+        scope=(new_path,),
+    )
+    r = n.normalize(facts + [accepted, later], (accepted.identity,), (later.identity,))
+    assert r.status == "ChoiceRequired" and r.reason == "unsupported-resolution-domain"
+    assert r.tree is None
+
+
+def test_literal_output_claim_cannot_supply_its_own_supported_path_domain():
+    facts, context = structural()
+    root, _, a, b = facts
+    new_path = (b"d", b"novel")
+    absent = n.OriginKey(root.identity, "result", new_path)
+    expanded = replace(
+        context,
+        sources=tuple(
+            (record, tuple(sorted(view + ((new_path, absent),))))
+            for record, view in context.sources
+        ),
+        frontiers=tuple(sorted(context.frontiers + ((new_path, (absent,)),))),
+        comparisons=tuple(sorted(context.comparisons + ((new_path, absent),))),
+    )
+    replacement = {d: D, new_path: F(b"new")}
+    accepted = n.Fact(
+        rid("self-domain"),
+        "accepted",
+        tr({**replacement, u: F(b"new-u")}),
+        parents=(root.identity,),
+        selected=(a.identity, b.identity),
+        resolutions=(literal(expanded, replacement),),
+    )
+    r = n.normalize(facts + [accepted], (accepted.identity,), ())
+    assert (
+        r.status == "ChoiceRequired" and r.reason == "unsupported-new-path-resolution"
+    )
+    assert r.tree is None
+
+
+def test_literal_nested_scope_retains_external_ancestor():
+    root = n.Fact(rid("nested-scope-G"), "genesis", ())
+    base = n.Fact(
+        rid("nested-scope-base"),
+        "candidate",
+        tr({d: D, df: F(b"base"), dg: F(b"outside")}),
+        basis=root.identity,
+        scope=(d,),
+    )
+    a = n.Fact(
+        rid("nested-scope-a"),
+        "candidate",
+        tr({d: D, df: F(b"A"), dg: F(b"outside")}),
+        basis=base.identity,
+        scope=(df,),
+    )
+    b = n.Fact(
+        rid("nested-scope-b"),
+        "candidate",
+        tr({d: D, df: F(b"B"), dg: F(b"outside")}),
+        basis=base.identity,
+        scope=(df,),
+    )
+    facts = [root, base, a, b]
+    preview = n.normalize(facts, (root.identity,), (a.identity, b.identity))
+    assert preview.status == "Conflicted" and preview.conflicts[0].path == df
+    result = n.normalize(
+        facts,
+        (root.identity,),
+        (a.identity, b.identity),
+        resolutions=(literal(preview.conflicts[0], {df: F(b"literal")}),),
+    )
+    assert result.status == "Ready" and plain(result.tree) == {
+        d: D,
+        df: F(b"literal"),
+        dg: F(b"outside"),
+    }
+
+
+def test_compose_depth_does_not_add_a_basis_edge_to_evolution_only_predecessor():
+    root = n.Fact(rid("depth-role-G"), "genesis", ())
+    facts = [root]
+    for i in range(255):
+        previous = facts[-1]
+        facts.append(
+            n.Fact(
+                rid("depth-role-" + str(i)),
+                "candidate",
+                tr({f: F(str(i).encode())}),
+                basis=previous.identity,
+                predecessor=None if i == 0 else previous.identity,
+                scope=(f,),
+            )
+        )
+    rebased = n.Fact(
+        rid("depth-role-rebased"),
+        "candidate",
+        tr({f: F(b"rebased")}),
+        basis=n.Compose((root.identity,), (), ()),
+        predecessor=facts[-1].identity,
+        scope=(f,),
+    )
+    r = n.normalize(facts + [rebased], (root.identity,), (rebased.identity,))
+    assert r.status == "Ready" and plain(r.tree) == {f: F(b"rebased")}
+    assert dict(r.origins)[dict(r.lineage)[f]].parents == (
+        n.OriginKey(root.identity, "result", f),
+    )
