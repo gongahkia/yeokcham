@@ -1,0 +1,1194 @@
+{
+  "independent_budget_and_structure": {
+    "counter_guards": [
+      "pairs",
+      "states",
+      "lcs-cells",
+      "state-bytes"
+    ],
+    "dp_vs_whole_tree_path_comparisons": 100,
+    "format": "yeokcham-m1a-budget-reference-observations-1",
+    "graph_projection_checks": 4,
+    "invalid_graph_guards": [
+      "cycle",
+      "missing",
+      "depth",
+      "fanout",
+      "records"
+    ],
+    "nonconfluence_permutations": 6,
+    "nonconfluence_witness": {
+      "ambiguous": false,
+      "base_hex": "610a630a620a",
+      "outputs_hex": [
+        "630a630a610a620a630a",
+        "630a630a620a630a"
+      ],
+      "trees": 3,
+      "variants_hex": [
+        "630a620a630a",
+        "610a610a620a630a",
+        "630a630a630a620a"
+      ]
+    },
+    "ocaml_witness_trees": [
+      {
+        "first_pair": [
+          0,
+          1
+        ],
+        "intermediate_hex": "610a620a630a",
+        "result_hex": "630a630a620a630a",
+        "then": 2
+      },
+      {
+        "first_pair": [
+          0,
+          2
+        ],
+        "intermediate_hex": null,
+        "result_hex": null,
+        "then": 1
+      },
+      {
+        "first_pair": [
+          1,
+          2
+        ],
+        "intermediate_hex": "630a630a610a620a630a",
+        "result_hex": "630a630a610a620a630a",
+        "then": 0
+      }
+    ],
+    "qualified": "small finite reference cases; not all structural resolution rules or physical resource qualification",
+    "structural_delete_add_trap": {
+      "A": "{}",
+      "B": "{('d',): 'directory', ('d', 'f'): 'file-0', ('d', 'g'): 'file-new'}",
+      "base": "{('d',): 'directory', ('d', 'f'): 'file-0'}",
+      "expected": "Conflicted(parent d); never Ready",
+      "postvalidation_detected": true,
+      "unchecked_path_result": "{('d', 'g'): 'file-new'}"
+    }
+  },
+  "symbolic": {
+    "case_results": [
+      {
+        "case": "S01",
+        "expected": "accepted T00 unchanged; pending ['A2']",
+        "observed": "['A2']"
+      },
+      {
+        "case": "S02",
+        "expected": "accepted T00 unchanged; pending ['A1', 'B1']",
+        "observed": "['A1', 'B1']"
+      },
+      {
+        "case": "S03",
+        "expected": "accepted T00 unchanged; pending ['A2', 'B2']",
+        "observed": "['A2', 'B2']"
+      },
+      {
+        "case": "S04",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "A2"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S05",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "A2"
+        ],
+        "target": "SA1"
+      },
+      {
+        "case": "S06",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'c\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "C_ind:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "C_ind"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'c\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "C_ind:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "C_ind",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'c\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "C_ind"
+        ],
+        "target": "SA1"
+      },
+      {
+        "case": "S07",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'z\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "Z1:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "Z1"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'z\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "Z1:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "Z1",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'g.txt': b'z\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "Z1"
+        ],
+        "target": "SA1"
+      },
+      {
+        "case": "S08",
+        "expected": "{'f.txt': b'x=1\\ny=0\\n', 'c.txt': b'requires x=1\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "C_dep:c.txt"
+              ],
+              "f.txt": [
+                "A1:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "C_dep"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=1\\ny=0\\n', 'c.txt': b'requires x=1\\n'}"
+          }
+        ],
+        "selection": [
+          "C_dep"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S09",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n', 'c.txt': b'requires x=1\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "C_dep:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "C_dep"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'c.txt': b'requires x=1\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "C_dep:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "C_dep",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n', 'c.txt': b'requires x=1\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "C_dep"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S10",
+        "expected": "'Conflicted'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "A2",
+              "B2"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          },
+          {
+            "frontier": null,
+            "order": [
+              "B2",
+              "A2"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "A2",
+          "B2"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S11",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt",
+                "B2_equal:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "B2_equal"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt",
+                "B2_equal:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "B2_equal",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "B2_equal"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S12",
+        "expected": "'Conflicted'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "OA",
+              "OB"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          },
+          {
+            "frontier": null,
+            "order": [
+              "OB",
+              "OA"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "OA",
+          "OB"
+        ],
+        "target": "SO"
+      },
+      {
+        "case": "S13",
+        "expected": "{'f.txt': b'x=1\\ny=1\\n', 'c.txt': b'composed\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "CQ:c.txt"
+              ],
+              "f.txt": [
+                "CQ:basis:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "CQ"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=1\\ny=1\\n', 'c.txt': b'composed\\n'}"
+          }
+        ],
+        "selection": [
+          "CQ"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S14",
+        "expected": "'ChoiceRequired'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "R"
+            ],
+            "outcome": "ChoiceRequired",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "R"
+        ],
+        "target": "SL"
+      },
+      {
+        "case": "S15-conflict",
+        "expected": "'Conflicted'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "B2"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "B2"
+        ],
+        "target": "SA"
+      },
+      {
+        "case": "S15-chosen",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "B2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "B2"
+        ],
+        "target": "SA"
+      },
+      {
+        "accepted_heads": [
+          "SA",
+          "SB"
+        ],
+        "case": "S15",
+        "equal_content_heads_still_distinct": true
+      },
+      {
+        "case": "S16",
+        "known_present": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "outcome": "Ready",
+        "private": "{'f.txt': b'x=2\\ny=1\\n', 'secret.txt': b'private later\\n'}",
+        "public": "{'f.txt': b'x=2\\ny=0\\n'}"
+      },
+      {
+        "case": "S17",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "A2"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S18",
+        "expected": "Stale, preserve materialized work if any",
+        "native_not_exercised": true,
+        "observed": "Stale"
+      },
+      {
+        "case": "S19",
+        "expected": "{'f.txt': b'x=0\\ny=1\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A3_rebased:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A3_rebased"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=0\\ny=1\\n'}"
+          }
+        ],
+        "selection": [
+          "A3_rebased"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "S20",
+        "expected": "'Conflicted'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "A2"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "A2"
+        ],
+        "target": "ChooseB"
+      },
+      {
+        "case": "S21",
+        "expected": "{'f.txt': b'x=2\\ny=1\\nz=1\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "AX2:f.txt",
+                "CZ1:f.txt",
+                "W:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "AX2",
+              "CZ1"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=1\\nz=1\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "AX2:f.txt",
+                "CZ1:f.txt",
+                "W:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "CZ1",
+              "AX2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=1\\nz=1\\n'}"
+          }
+        ],
+        "selection": [
+          "AX2",
+          "CZ1"
+        ],
+        "target": "W"
+      },
+      {
+        "case": "S22",
+        "expected": "'Conflicted'",
+        "runs": [
+          {
+            "frontier": null,
+            "order": [
+              "DEL",
+              "A2"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          },
+          {
+            "frontier": null,
+            "order": [
+              "A2",
+              "DEL"
+            ],
+            "outcome": "Conflicted",
+            "result": "None"
+          }
+        ],
+        "selection": [
+          "DEL",
+          "A2"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "ADV-compatible-lines",
+        "expected": "{'f.txt': b'x=2\\ny=1\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt",
+                "Y1:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "Y1"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=1\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt",
+                "Y1:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "Y1",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=1\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "Y1"
+        ],
+        "target": "S0"
+      },
+      {
+        "case": "ADV-duplicate-selection",
+        "expected": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "runs": [
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          },
+          {
+            "frontier": {
+              "bin": [
+                "G:bin"
+              ],
+              "c.txt": [
+                "G:c.txt"
+              ],
+              "f.txt": [
+                "A2:f.txt"
+              ],
+              "g.txt": [
+                "G:g.txt"
+              ],
+              "secret.txt": [
+                "G:secret.txt"
+              ]
+            },
+            "order": [
+              "A2",
+              "A2"
+            ],
+            "outcome": "Ready",
+            "result": "{'f.txt': b'x=2\\ny=0\\n'}"
+          }
+        ],
+        "selection": [
+          "A2",
+          "A2"
+        ],
+        "target": "S0"
+      }
+    ],
+    "fixture_facts": {
+      "A1": {
+        "basis": "R0",
+        "evolution": "R0",
+        "updates": {
+          "f.txt": "b'x=1\\ny=0\\n'"
+        }
+      },
+      "A2": {
+        "basis": "A1",
+        "evolution": "A1",
+        "updates": {
+          "f.txt": "b'x=2\\ny=0\\n'"
+        }
+      },
+      "A3_rebased": {
+        "basis": "S0",
+        "evolution": "A2",
+        "updates": {
+          "f.txt": "b'x=0\\ny=1\\n'"
+        }
+      },
+      "AX1": {
+        "basis": "R3",
+        "evolution": "R3",
+        "updates": {
+          "f.txt": "b'x=1\\ny=0\\nz=0\\n'"
+        }
+      },
+      "AX2": {
+        "basis": "AX1",
+        "evolution": "AX1",
+        "updates": {
+          "f.txt": "b'x=2\\ny=0\\nz=0\\n'"
+        }
+      },
+      "AY1": {
+        "basis": "R3",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=0\\ny=1\\nz=0\\n'"
+        }
+      },
+      "B1": {
+        "basis": "R0",
+        "evolution": "R0",
+        "updates": {
+          "f.txt": "b'x=3\\ny=0\\n'"
+        }
+      },
+      "B2": {
+        "basis": "B1",
+        "evolution": "B1",
+        "updates": {
+          "f.txt": "b'x=4\\ny=0\\n'"
+        }
+      },
+      "B2_equal": {
+        "basis": "B1",
+        "evolution": "B1",
+        "updates": {
+          "f.txt": "b'x=2\\ny=0\\n'"
+        }
+      },
+      "B3": {
+        "basis": "B2",
+        "evolution": "B2",
+        "updates": {
+          "f.txt": "b'x=5\\ny=0\\n'"
+        }
+      },
+      "CQ": {
+        "basis": "CQ:basis",
+        "evolution": null,
+        "updates": {
+          "c.txt": "b'composed\\n'"
+        }
+      },
+      "CZ1": {
+        "basis": "S3",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=0\\ny=0\\nz=1\\n'"
+        }
+      },
+      "C_dep": {
+        "basis": "A1",
+        "evolution": null,
+        "updates": {
+          "c.txt": "b'requires x=1\\n'"
+        }
+      },
+      "C_ind": {
+        "basis": "S0",
+        "evolution": null,
+        "updates": {
+          "g.txt": "b'c\\n'"
+        }
+      },
+      "DEL": {
+        "basis": "R0",
+        "evolution": null,
+        "updates": {
+          "f.txt": "None"
+        }
+      },
+      "L": {
+        "basis": "Q1",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=2\\ny=1\\n'"
+        }
+      },
+      "O0": {
+        "basis": "S0",
+        "evolution": null,
+        "updates": {
+          "bin": "b'\\x00zero'"
+        }
+      },
+      "OA": {
+        "basis": "O0",
+        "evolution": "O0",
+        "updates": {
+          "bin": "b'\\x00alice'"
+        }
+      },
+      "OB": {
+        "basis": "O0",
+        "evolution": "O0",
+        "updates": {
+          "bin": "b'\\x00bob'"
+        }
+      },
+      "R": {
+        "basis": "Q2",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=3\\ny=1\\n'"
+        }
+      },
+      "R0": {
+        "basis": "G",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=0\\ny=0\\n'"
+        }
+      },
+      "R3": {
+        "basis": "G",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=0\\ny=0\\nz=0\\n'"
+        }
+      },
+      "Y1": {
+        "basis": "R0",
+        "evolution": null,
+        "updates": {
+          "f.txt": "b'x=0\\ny=1\\n'"
+        }
+      },
+      "Z1": {
+        "basis": "S0",
+        "evolution": null,
+        "updates": {
+          "g.txt": "b'z\\n'"
+        }
+      }
+    },
+    "format": "yeokcham-m1a-normalization-observations-1",
+    "frontier7_refused_before_pair_work": true,
+    "leaf_ocaml_comparisons": 5,
+    "method": "fresh symbolic whole-tree enumeration; separate hand-reasoned M0 expectations; no signature/native/SQL implementation",
+    "nonconfluence_witness": {
+      "ambiguous": false,
+      "base_hex": "610a630a620a",
+      "outputs_hex": [
+        "630a630a610a620a630a",
+        "630a630a620a630a"
+      ],
+      "trees": 3,
+      "variants_hex": [
+        "630a620a630a",
+        "610a610a620a630a",
+        "630a630a630a620a"
+      ]
+    },
+    "not_verified": [
+      "cryptography/authority",
+      "native recovery",
+      "general structural resolutions",
+      "memory/runtime budgets",
+      "all possible graphs"
+    ],
+    "receipt_runs": [
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "A1",
+          "B1",
+          "A2",
+          "B2"
+        ]
+      },
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "A1",
+          "B1",
+          "B2",
+          "A2"
+        ]
+      },
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "A1",
+          "A2",
+          "B1",
+          "B2"
+        ]
+      },
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "B1",
+          "A1",
+          "A2",
+          "B2"
+        ]
+      },
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "B1",
+          "A1",
+          "B2",
+          "A2"
+        ]
+      },
+      {
+        "B2_pending": true,
+        "exact_A2_result": "{'f.txt': b'x=2\\ny=0\\n'}",
+        "order": [
+          "B1",
+          "B2",
+          "A1",
+          "A2"
+        ]
+      }
+    ],
+    "seeded_search_trials": 1392,
+    "source_m0_cases": 22,
+    "tree_counts_frontier_1_to_6": [
+      1,
+      1,
+      3,
+      15,
+      105,
+      945
+    ]
+  }
+}

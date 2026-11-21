@@ -1,0 +1,227 @@
+{
+  "content_observations": {
+    "files": 14,
+    "generic_cbor_positive": 19,
+    "identity": true,
+    "legacy_modes": 2,
+    "mixed_tree": true,
+    "negative": 109,
+    "object_envelopes": 103,
+    "verified_against_frozen_manifest": true
+  },
+  "environment": {
+    "ocaml_int_size": 63,
+    "ocaml_max_int": 4611686018427387903,
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.15.0 (main, Oct  9 2026, 11:16:41) [Clang 21.0.0 (clang-2100.3.34.2)]"
+  },
+  "external_reference_sha256": {
+    "budget-observations.json": "dec46428abab02888a2d727aeb8361eb65f5419ce2649f39508e84b4123d81ad",
+    "budget_probe.py": "dc8d805cc6bb1f11813e625498fe29f997f6598039049e9535976e66ca3c2d1c",
+    "normalization-observations.json": "baf9337627d4bbf06ea540ea08e17e06e228ce54974c4d537e0118cea93ee958",
+    "normalize_probe.py": "fbf0d0797214b1ba23fd8e9c5a7ac629e7e6e1153eddb8951385e0dcc6992a08",
+    "reproduction-final/corpus.json": "830c54d5db9eb04c6114548bc01857d9aee0bfaca67592e33477b2518ca39aeb"
+  },
+  "format": "yeokcham-m1a-reference-evidence-1",
+  "new_artifact_sha256_excluding_this_file": {
+    "docs/v2/m0/m1a-reference/M1A_CONTENT_ADMISSION.md": "fdf0ae1dd47336753a12bdd47498f92bb5c6273ffd6ae176b78d1ae998f23e63",
+    "docs/v2/m0/m1a-reference/M1A_NORMALIZATION_CONTRACT.md": "37b5ed1a7d1ff2825ac8fef97bc9277b0570f1f054081a2816283360a133d6c0",
+    "docs/v2/m0/m1a-reference/M1A_REFERENCE_CLOSURE.md": "84ed420b54d2cffe35666d93c5a0450bf48572b57f55913117c0850cdbcb9c8a",
+    "docs/v2/m0/m1a-reference/M1A_VECTOR_MANIFEST.md": "32e4f9b2ac8ffdafa1932a8664f416ac76c7f45fd2532d80062e23deed088055",
+    "docs/v2/m0/m1a-reference/content-vectors.json": "830c54d5db9eb04c6114548bc01857d9aee0bfaca67592e33477b2518ca39aeb",
+    "docs/v2/m0/m1a-reference/emit_content_reference.py": "77da867a00a843c1307e160ec63622079aa3a73c108dacee4f40069c033bc1ce",
+    "docs/v2/m0/m1a-reference/normalization-observations.json": "cf8372ccb348a35dcf54992fa9eb3f94fa1314664d79ccd13dd56e14efa5993f",
+    "docs/v2/m0/m1a-reference/probe_ocaml_reference.py": "1bce237f3e6441c487cb23ba4afe13890515d0b637b40541990e303bc7de4f34",
+    "docs/v2/m0/m1a-reference/verify_content_reference.py": "f996f4c790d91779e71738c908937478cdbe50067c1932c7517163a174282aab"
+  },
+  "not_verified": [
+    "full project build/CI",
+    "pinned OCaml 5.5.0",
+    "Python 3.13/3.14 runtime matrix",
+    "full Snapshot/store runtime",
+    "signatures and authority",
+    "general subtree resolutions and publication correspondence proofs",
+    "default-budget saturation/RSS/long-history qualification",
+    "native filesystem and SQLite faults or physical power loss",
+    "baseline copy-out root cause"
+  ],
+  "ocaml_probe": {
+    "bounded_generic_cbor_checks": 30,
+    "canonical_payload_roundtrips": 100,
+    "chunk_feed_comparisons": 24,
+    "compiler": "5.5.1",
+    "copied_sources": {
+      "lib/yeokcham_chunking/yeokcham_chunking.ml": "ec8bec612fdfaa756663a93e0c5119ca3c5419b0537b9ff2ae56e7583397fea2",
+      "lib/yeokcham_encoding/yeokcham_encoding.ml": "06404ab8817041517aa0d1e8a9843154daa320bce21271db9def707aacb9f852",
+      "lib/yeokcham_snapshot/yeokcham_snapshot.ml": "88dcb8e6b20b331156dfca593e58ef2814df10a719da36cf810b0b9bc1d21ad7",
+      "lib/yeokcham_v1_composition/line_hunks.ml": "dc08b9c7f2e8765779d0a936e2ec604ec73d60f85d733ba66717319f472dbb91"
+    },
+    "extracted_content_decode_sha256": "916430e10b24bb4126d3b691d5e31821c5be75616dbd196c77651c6cc5fea916",
+    "extracted_content_store_sha256": "d4fd1fb7216ffaf1771ec75b2c5d144b37b58ef02a96f7810707dcf278887efb",
+    "inline_readable_lengths": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      14,
+      17,
+      65535,
+      65536,
+      65537,
+      131072
+    ],
+    "legacy_inline_readable_length": 65537,
+    "not_qualified": [
+      "full Snapshot/store runtime",
+      "pinned OCaml 5.5.0 build",
+      "native filesystem",
+      "production Python"
+    ],
+    "table_sha256_be64": "2f6ff9d9844a9b987bd6ad9609ee980711be326dd6c96fca120bd9caa273d32f",
+    "writer_branch_checks": [
+      {
+        "branch": "inline",
+        "bytes": 0,
+        "name": "RC01-empty"
+      },
+      {
+        "branch": "inline",
+        "bytes": 1,
+        "name": "RC01-one"
+      },
+      {
+        "branch": "inline",
+        "bytes": 65535,
+        "name": "RC01-P65535"
+      },
+      {
+        "branch": "inline",
+        "bytes": 65536,
+        "name": "RC01-P65536"
+      },
+      {
+        "branch": "manifest:65537",
+        "bytes": 65537,
+        "name": "RC01-P65537"
+      },
+      {
+        "branch": "manifest:200000",
+        "bytes": 200000,
+        "name": "RC02-P200000"
+      },
+      {
+        "branch": "manifest:1048589",
+        "bytes": 1048589,
+        "name": "RC02-P1048589"
+      },
+      {
+        "branch": "manifest:262145",
+        "bytes": 262145,
+        "name": "RC02-zero262145"
+      },
+      {
+        "branch": "manifest:262145",
+        "bytes": 262145,
+        "name": "SUP-repeat1-262145"
+      },
+      {
+        "branch": "manifest:262145",
+        "bytes": 262145,
+        "name": "SUP-noise262145"
+      },
+      {
+        "branch": "inline",
+        "bytes": 4,
+        "name": "SUP-crlf"
+      },
+      {
+        "branch": "inline",
+        "bytes": 3,
+        "name": "SUP-lf"
+      },
+      {
+        "branch": "inline",
+        "bytes": 4,
+        "name": "SUP-final-lf"
+      },
+      {
+        "branch": "inline",
+        "bytes": 2,
+        "name": "SUP-binary"
+      }
+    ]
+  },
+  "old_core_framing": {
+    "checks": [
+      {
+        "bytes": 547,
+        "kind": 41,
+        "name": "shared-revision",
+        "old_record_id": "8a7510d30ac1cb18797274a60ac3e9ca6d6e0ee230b794604976364c64db8813"
+      },
+      {
+        "bytes": 533,
+        "kind": 42,
+        "name": "accepted-version",
+        "old_record_id": "edb53c97a6c29cf7c6a6b702e2daee27c8bdc3abccb649d4a75e0d15637561ca"
+      },
+      {
+        "bytes": 477,
+        "kind": 43,
+        "name": "branch-event",
+        "old_record_id": "7292358dee379aa3653ccbaabe32005909bd2381b712bbf10bd6dcfec4e6358c"
+      },
+      {
+        "bytes": 723,
+        "kind": 47,
+        "name": "resolution-revision",
+        "old_record_id": "a07fb4b8ace08d8a375156b638f80070d18fde19904429b444f0b314468fe1e6"
+      }
+    ],
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.15.0 (main, Oct  9 2026, 11:16:41) [Clang 21.0.0 (clang-2100.3.34.2)]"
+  },
+  "repository_final": {
+    "additional_new_file": "docs/v2/m0/m1a-reference/qualification-evidence.json",
+    "external_head_change": false,
+    "external_index_observation": "Staged addition of emitter appeared; agent ran no Git write command. Inference: external activity. Index left intact.",
+    "head": "fb8e1989fb6e11b3b8c7bd9c5d90e751df1d10e7",
+    "preservation": {
+      "changed_initial_files": [],
+      "ignored_build_caches_in_inventory": false,
+      "initial_files_checked": 522,
+      "initial_golden_files_checked": 74
+    },
+    "status_before_evidence_creation": "AM docs/v2/m0/m1a-reference/emit_content_reference.py\n?? docs/v2/m0/m1a-reference/M1A_CONTENT_ADMISSION.md\n?? docs/v2/m0/m1a-reference/M1A_NORMALIZATION_CONTRACT.md\n?? docs/v2/m0/m1a-reference/M1A_REFERENCE_CLOSURE.md\n?? docs/v2/m0/m1a-reference/M1A_VECTOR_MANIFEST.md\n?? docs/v2/m0/m1a-reference/content-vectors.json\n?? docs/v2/m0/m1a-reference/normalization-observations.json\n?? docs/v2/m0/m1a-reference/probe_ocaml_reference.py\n?? docs/v2/m0/m1a-reference/verify_content_reference.py\n"
+  },
+  "repository_initial": {
+    "files": 522,
+    "head": "fb8e1989fb6e11b3b8c7bd9c5d90e751df1d10e7",
+    "scratch": "/var/folders/55/fw1sdntj20v8650vsmkn7s8c0000gn/T/yeokcham-m1a-ref-x8o45316",
+    "status": "## main...origin/main\n",
+    "target_exists": false,
+    "utc": "2026-11-20T08:56:58.392958+00:00"
+  },
+  "scope": "reference qualification only; no production implementation",
+  "source_hashes": {
+    "docs/v2/D4_BLOCKER_RESOLUTION.md": "d087a235653548584b4e95078af99e72f6cc29a442591b360a16831b307c5f68",
+    "docs/v2/m0/M0_BASELINE.md": "97d74dbb2436d1c201d941e4992dd3c036fc0b13bd4a7a6e8a94e6f8175e92e4",
+    "docs/v2/m0/M0_SAFETY_AND_TRANCHE_GATES.md": "b8238453766fac6e29a013c19d76548672ac0f64c13c87a88ba87eec3368c6e8",
+    "docs/v2/m0/M0_SEMANTIC_REFERENCE.md": "490d098e063954bf89d769fb71711b2521bad0d62afeb20dba47f0d80331786a",
+    "docs/v2/m0/M0_VECTOR_INVENTORY.md": "0223a4e507cb971085690d2ec11c3e2ecd0002271bea599b1f8d204460a1592a",
+    "lib/yeokcham_envelope/yeokcham_envelope.ml": "ce4c28f79e098ee12f4550eaf894a9a68a07651289c5ee9909e964bea09f7374",
+    "lib/yeokcham_store/yeokcham_store.ml": "4fc750773cfede78c084a5dd38db6a7a76141921d38600c34f6fdc9e87c4e81d",
+    "test/test_composition.ml": "a0e82a6b098450982a56cd9a424ddc93957510e9803afa3a78fca0bc01f1c323",
+    "test/test_composition_graph.ml": "5ee104117f94309b0c2c009722e7f2a3c43a323aa6102da7805382e0598963c3",
+    "test/test_content_verification.ml": "cd3b53b649e8f60b71dd59a3dd07bc4a01fa590f2c112190efbf509ae025436f"
+  },
+  "utc": "2026-11-20T09:31:24.297314+00:00",
+  "verification": {
+    "git_diff_check": "unstaged and cached passed",
+    "links": "all local Markdown targets checked after evidence creation; see final handoff",
+    "new_expected_values": "A emission independently parsed/re-encoded/hashed by B; original OCaml pure source comparisons. No new signed hashes.",
+    "python_ast_files": 3
+  }
+}
