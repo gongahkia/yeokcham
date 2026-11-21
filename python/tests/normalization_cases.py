@@ -61,6 +61,7 @@ FACTS = [
     ("W", "accepted", ("S3", "AX1", "AY1"), {f: F(b"x=1\ny=1\nz=0\n")}, None, (), {}),
     ("DEL", "candidate", ("R0",), {}, None, (f,), {}),
 ]
+FACTS.append(("P", "candidate", ("S0",), T(2), None, (f,), {}))
 CASES = [
     ("S01", ("S0",), (), "Ready", T(0)),
     ("S02", ("S0",), (), "Ready", T(0)),
@@ -77,7 +78,7 @@ CASES = [
     ("S13", ("S0",), ("CQ",), "Ready", {**T(1, 1), c: F(b"composed\n")}),
     ("S14", ("SL", "SR"), (), "ChoiceRequired", None),
     ("S15", ("SA", "SB"), (), "Conflicted", None),
-    ("S16", ("S0",), ("A2",), "Ready", T(2)),
+    ("S16", ("S0",), ("P",), "Ready", T(2)),
     ("S17", ("S0",), ("A2",), "Ready", T(2)),
     ("S18", ("S0",), ("A2",), "Stale", None),
     ("S19", ("S0",), ("A3",), "Ready", T(0, 1)),

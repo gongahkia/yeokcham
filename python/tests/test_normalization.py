@@ -83,8 +83,34 @@ def test_m0_public_cases(case):
     kwargs = {}
     if label == "S18":
         kwargs = {"expected_heads": (rid("S0"),), "current_heads": (rid("SB"),)}
+    all_facts = pool()
+    known = {"G", "R0", "S0", "A1", "B1", "A2", "B2"}
+    if label == "S01":
+        known = {"G", "R0", "S0", "A1", "A2"}
+    elif label == "S02":
+        known = {"G", "R0", "S0", "A1", "B1"}
+    elif label == "S11":
+        known = {"G", "R0", "S0", "A1", "B1", "A2", "Bequal"}
+    elif label == "S21":
+        known = {"G"}
+    wanted = set(map(rid, known | set(targets) | set(selected)))
+    by_id = {v.identity: v for v in all_facts}
+    todo = list(wanted)
+    while todo:
+        fact = by_id[todo.pop()]
+        deps = (
+            fact.parents
+            + fact.selected
+            + ((fact.basis,) if fact.basis else ())
+            + ((fact.predecessor,) if fact.predecessor else ())
+        )
+        for dep in deps:
+            if dep not in wanted:
+                wanted.add(dep)
+                todo.append(dep)
+    scoped = [fact for fact in all_facts if fact.identity in wanted]
     result = n.normalize(
-        pool(),
+        scoped,
         tuple(map(rid, targets)),
         tuple(map(rid, selected)),
         reconcile=len(targets) > 1,
@@ -102,6 +128,23 @@ def test_m0_public_cases(case):
     else:
         assert result.tree is None
     assert result.selected == tuple(sorted(map(rid, selected), key=lambda v: v.raw))
+    pending = {
+        "S01": {"A2"},
+        "S02": {"A1", "B1"},
+        "S03": {"A2", "B2"},
+        "S04": {"B2"},
+        "S05": {"B2"},
+        "S06": {"B2"},
+        "S07": {"B2"},
+        "S08": {"A2", "B2"},
+        "S09": {"B2"},
+        "S10": {"A2", "B2"},
+        "S11": set(),
+        "S19": {"B2"},
+        "S20": {"A2", "B2"},
+    }
+    if label in pending:
+        assert set(result.pending) == set(map(rid, pending[label]))
 
 
 def test_pending_and_evolution():
@@ -920,4 +963,77 @@ def test_parent_replacement_with_existing_child_edit_lifts_conflict(
     assert resolved.status == "Ready" and plain(resolved.tree) == {
         **(a if chosen == "A" else b),
         (b"u",): F(b"new-u"),
+    }
+
+
+def test_four_path_request_exact_logical_charge_and_boundary():
+    n, _ = api()
+    paths = tuple((f"p{i}".encode(),) for i in range(4))
+    root = n.Fact(rid("four-root"), "genesis", tr({}))
+    facts = [root]
+    for i in range(127):
+        identity = rid("prefix" + str(i))
+        facts.append(
+            n.Fact(
+                identity,
+                "candidate",
+                n.tree({p: n.Node(n.Mode.REGULAR, str(i % 2).encode()) for p in paths}),
+                basis=facts[-1].identity,
+                scope=paths,
+                change=identity.raw[:16],
+            )
+        )
+    base = facts[-1].identity
+    tips = []
+    for i in range(6):
+        identity = rid("tip" + str(i))
+        tips.append(identity)
+        facts.append(
+            n.Fact(
+                identity,
+                "candidate",
+                n.tree({p: n.Node(n.Mode.REGULAR, b"2") for p in paths}),
+                basis=base,
+                scope=paths,
+                change=identity.raw[:16],
+            )
+        )
+    # 65,796 for all frontier subsets + four target-genesis singleton queries.
+    for cache in (False, True):
+        for limit, status in [
+            (65799, "ChoiceRequired"),
+            (65800, "Ready"),
+            (65801, "Ready"),
+        ]:
+            r = n.normalize(
+                facts,
+                (root.identity,),
+                tuple(tips),
+                cache=cache,
+                limits=n.Limits(ancestor_units=limit),
+            )
+            assert r.status == status
+            if status == "Ready":
+                assert r.charge.ancestor_units == 65800 and dict(r.tree) == {
+                    p: n.Node(n.Mode.REGULAR, b"2") for p in paths
+                }
+            else:
+                assert r.tree is None and r.budget.dimension == "ancestor_units"
+
+
+def test_conflicted_candidates_remain_pending_and_inputs_unchanged():
+    n, _ = api()
+    facts = [
+        v
+        for v in pool()
+        if v.identity in set(map(rid, ("G", "R0", "S0", "A1", "B1", "A2", "B2")))
+    ]
+    original = tuple(facts)
+    result = n.normalize(facts, (rid("S0"),), (rid("A2"), rid("B2")))
+    assert result.status == "Conflicted" and set(result.pending) == {
+        rid("A2"),
+        rid("B2"),
+    }
+    assert tuple(facts) == original and set(result.retained) == {
+        v.identity for v in facts
     }

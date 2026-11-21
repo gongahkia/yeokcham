@@ -127,7 +127,7 @@ class Result:
     conflicts: tuple[Context, ...] = ()
     selected: tuple[RecordId, ...] = ()
     dependencies: tuple[RecordId, ...] = ()
-    pending: tuple[RecordId, ...] = ()
+    pending: tuple[RecordId, ...] | None = None
     retained: tuple[RecordId, ...] = ()
     lineage: tuple[tuple[Path, OriginKey], ...] = ()
     origins: tuple[tuple[OriginKey, Origin], ...] = ()
@@ -186,6 +186,11 @@ class _Engine:
             _invalid(
                 type(fact) is Fact and type(fact.identity) is RecordId,
                 "invalid fact identity/type",
+            )
+            _invalid(
+                type(fact.kind) is str
+                and (fact.predecessor is None or type(fact.predecessor) is RecordId),
+                "invalid fact metadata",
             )
             prior = self.pool.get(fact.identity)
             if prior is not None and prior != fact:
@@ -783,6 +788,11 @@ def normalize(
             status,
             reason=str(error) if not isinstance(error, _Stop) else error.reason,
             conflicts=contexts,
+            pending=engine.pending(targets, ())
+            if engine is not None
+            and all(r in engine.views for r in targets)
+            and status in ("Conflicted", "ChoiceRequired")
+            else None,
             budget=budget,
             selected=selection,
             retained=tuple(sorted(engine.pool, key=lambda r: r.raw)) if engine else (),
