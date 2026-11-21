@@ -35,6 +35,7 @@ from .normalization_budget import (
 
 __all__ = [
     "BudgetRefusal",
+    "Compose",
     "Context",
     "Fact",
     "Limits",
@@ -81,6 +82,19 @@ class Resolution:
     context: Context
     choose: RecordId | None
     replacement: Tree | None = None
+    intent: str = "variant"
+    profile: tuple[str, str] = PROFILE
+
+
+@dataclass(frozen=True)
+class Compose:
+    """Inline public basis recipe, owned by its enclosing candidate, not a record."""
+
+    accepted: tuple[RecordId, ...]
+    selected: tuple[RecordId, ...]
+    claimed: Tree
+    resolutions: tuple[Resolution, ...] = ()
+    profile: tuple[str, str] = PROFILE
 
 
 @dataclass(frozen=True)
@@ -88,7 +102,7 @@ class Fact:
     identity: RecordId
     kind: str
     tree: Tree
-    basis: RecordId | None = None
+    basis: RecordId | Compose | None = None
     parents: tuple[RecordId, ...] = ()
     selected: tuple[RecordId, ...] = ()
     predecessor: RecordId | None = None
@@ -237,14 +251,35 @@ class _Engine:
             return ()
         if fact.kind == "candidate":
             _invalid(
-                type(fact.basis) is RecordId
+                type(fact.basis) in (RecordId, Compose)
                 and not fact.parents
                 and not fact.selected
                 and not fact.resolutions,
                 "candidate basis/role mismatch",
             )
             assert fact.basis is not None
-            deps = [fact.basis]
+            if isinstance(fact.basis, Compose):
+                expression = fact.basis
+                _invalid(
+                    type(expression.accepted) is tuple
+                    and type(expression.selected) is tuple
+                    and type(expression.resolutions) is tuple
+                    and type(expression.profile) is tuple,
+                    "Compose fields must be immutable",
+                )
+                if expression.profile != PROFILE:
+                    raise _Stop("ChoiceRequired", "unsupported-profile")
+                if len(expression.selected) > self.limits.selected:
+                    raise BudgetExceeded("selected")
+                if (
+                    len(expression.accepted) + len(expression.selected)
+                    > self.limits.fanout
+                ):
+                    raise BudgetExceeded("fanout")
+                _invalid(bool(expression.accepted), "Compose accepted target required")
+                deps = list(_ids(expression.accepted) + _ids(expression.selected))
+            else:
+                deps = [fact.basis]
             if fact.predecessor is not None:
                 _invalid(type(fact.predecessor) is RecordId, "invalid evolution ID")
                 deps.append(fact.predecessor)
@@ -292,11 +327,26 @@ class _Engine:
         paths: set[Path] = set()
         path_bytes = 0
         for rid in order:
-            heights[rid] = max((heights[r] + 1 for r in deps[rid]), default=0)
+            # An inline expression consumes a dependency level, without a new ID.
+            step = 2 if isinstance(self.pool[rid].basis, Compose) else 1
+            heights[rid] = max((heights[r] + step for r in deps[rid]), default=0)
             if heights[rid] > self.limits.depth:
                 raise BudgetExceeded("depth")
             fact = self.pool[rid]
             self.validate_tree(fact.tree)
+            if isinstance(fact.basis, Compose):
+                self.validate_tree(fact.basis.claimed)
+                _invalid(
+                    all(
+                        self.pool[p].kind in ("genesis", "accepted")
+                        for p in fact.basis.accepted
+                    ),
+                    "invalid Compose accepted input",
+                )
+                _invalid(
+                    all(self.pool[p].kind == "candidate" for p in fact.basis.selected),
+                    "invalid Compose candidate input",
+                )
             if fact.kind == "candidate":
                 _invalid(
                     type(fact.scope) is tuple
@@ -343,7 +393,19 @@ class _Engine:
                 }
             elif fact.kind == "candidate":
                 assert fact.basis is not None
-                base = self.views[fact.basis]
+                if isinstance(fact.basis, Compose):
+                    expression = fact.basis
+                    computed, base = self.compose(
+                        _ids(expression.accepted),
+                        _ids(expression.selected),
+                        expression.resolutions,
+                        rid,
+                        slot="basis",
+                    )
+                    if computed != expression.claimed:
+                        raise ContentError(Code.INTEGRITY, "false Compose result claim")
+                else:
+                    base = self.views[fact.basis]
                 view = {}
                 changed = [
                     p
@@ -584,6 +646,8 @@ class _Engine:
         selected: tuple[RecordId, ...],
         resolutions: tuple[Resolution, ...],
         owner: RecordId | None = None,
+        *,
+        slot: str = "result",
     ) -> tuple[Tree, dict[Path, OriginKey]]:
         _invalid(bool(accepted), "an accepted target is required")
         _invalid(
@@ -604,8 +668,41 @@ class _Engine:
             not any(_prefix(a, b) for a, b in pairwise(ordered_scopes)),
             "overlapping resolutions",
         )
-        if any(r.replacement is not None or r.choose is None for r in resolutions):
-            raise _Stop("ChoiceRequired", "unsupported-literal-resolution")
+        for declared in resolutions:
+            if declared.profile != PROFILE:
+                raise _Stop("ChoiceRequired", "unsupported-profile")
+            _invalid(
+                declared.intent in ("variant", "literal", "comparison"),
+                "unsupported resolution intent",
+            )
+            if declared.intent == "variant":
+                if declared.replacement is not None or declared.choose is None:
+                    raise _Stop("ChoiceRequired", "unsupported-literal-resolution")
+            else:
+                _invalid(
+                    declared.choose is None,
+                    "replacement cannot also select a variant",
+                )
+                if declared.intent == "comparison":
+                    _invalid(
+                        declared.replacement is None,
+                        "comparison choice has no literal",
+                    )
+                else:
+                    if declared.replacement is None:
+                        raise ContentError(
+                            Code.UNAVAILABLE, "missing complete replacement content"
+                        )
+                    self.validate_tree(declared.replacement)
+                    _invalid(
+                        all(
+                            _prefix(declared.context.path, p)
+                            for p, _ in declared.replacement
+                        ),
+                        "replacement outside subtree scope",
+                    )
+                    if any(p not in self.paths for p, _ in declared.replacement):
+                        raise _Stop("ChoiceRequired", "unsupported-new-path-resolution")
         inputs = accepted + selected
         states: dict[Path, State] = {}
         frontiers = {}
@@ -653,26 +750,55 @@ class _Engine:
             if resolution is not None:
                 if resolution.context != context:
                     raise ContentError(Code.INTEGRITY, "resolution context changed")
-                _invalid(
-                    type(resolution.choose) is RecordId and resolution.choose in inputs,
-                    "choice outside exact input context",
-                )
+                if resolution.intent == "variant":
+                    _invalid(
+                        type(resolution.choose) is RecordId
+                        and resolution.choose in inputs,
+                        "choice outside exact input context",
+                    )
         if any(root not in by_scope for root in roots):
             raise _Stop("Conflicted", "content-or-structure", contexts)
+        replacements = {
+            root: dict(resolution.replacement)
+            for root, resolution in by_scope.items()
+            if resolution.intent == "literal" and resolution.replacement is not None
+        }
+        comparisons = {
+            root: dict(resolution.context.comparisons)
+            for root, resolution in by_scope.items()
+        }
         view = {}
         for p in self.paths:
             resolution = next(
                 (r for root, r in by_scope.items() if _prefix(root, p)), None
             )
             if resolution is not None:
-                assert resolution.choose is not None
-                view[p] = self.views[resolution.choose][p]
+                if resolution.intent == "variant":
+                    assert resolution.choose is not None
+                    view[p] = self.views[resolution.choose][p]
+                else:
+                    comparison = comparisons[resolution.context.path][p]
+                    if resolution.intent == "comparison":
+                        view[p] = comparison
+                    else:
+                        assert resolution.replacement is not None
+                        value = replacements[resolution.context.path].get(p)
+                        self.counter.payload(p, 0 if value is None else len(value.data))
+                        view[p] = self.add(
+                            OriginKey(
+                                owner,
+                                "proposed-resolution" if owner is None else slot,
+                                p,
+                            ),
+                            value,
+                            (comparison,),
+                        )
                 states[p] = self.origins[view[p]].state
             elif len(frontiers[p]) == 1:
                 view[p] = frontiers[p][0]
             else:
                 view[p] = self.add(
-                    OriginKey(owner, "proposed" if owner is None else "result", p),
+                    OriginKey(owner, "proposed" if owner is None else slot, p),
                     states[p],
                     frontiers[p],
                 )
