@@ -38,8 +38,11 @@ working file is opened writable or followed through a symlink.
 
 Reject noncanonical root components, path escapes, nested mount and bind
 aliases, hardlinked regular files and repeated directory identities.
-Apply parent NAME_MAX and bounded depth, entry count, total raw path bytes,
-source bytes, detached object count and bytes. Refuse .yeokcham and
+Apply parent NAME_MAX and bounds of 64 levels, 8,192 listed entries,
+4 MiB aggregate raw path bytes, 64 MiB total source bytes, 16,384 distinct
+detached objects and 80 MiB detached object bytes per attempt. The caller
+can lower these limits. Both passes count directory names before retaining
+or sorting them. Files are read in chunks of at most 64 KiB per syscall. Refuse .yeokcham and
 .yeokcham-v2 namespace markers at the root, in ancestors and within the
 observed tree. Refuse known backing store directory identities and an
 experimental store's FORMAT and metadata.sqlite3 marker pair. Root .git
@@ -78,11 +81,15 @@ reachable pending objects or incomplete closure after a publication fault.
 No cleanup of arbitrary files, and no GC, is introduced.
 
 M2.1 uses an optimistic detached observation followed by the existing
-workspace cursor CAS. An observer holds no store lock or transaction
+workspace cursor CAS. For a manual Save the backend directory, objects
+and locks identities are excluded from the observation before store access.
+The store validates the workspace and expected cursor at append time. An observer holds no store lock or transaction
 while reading source files. Multiple concurrent reads can overlap in the
 same Space and stale writes still refuse. The M1b adapter takes its
 usual locks and performs the only metadata write. The original key,
-expected cursor/version and snapshot identity govern retry. A new key
+expected cursor/version and snapshot identity govern retry. The root path
+and observation timestamps are per-call evidence outside the existing
+durable request digest. A new key
 with the same current snapshot creates no new Save. A historical repeat
 can have a distinct CaptureId. An explicit resume reads the original
 request and resubmits its exact arguments. It may succeed without a new

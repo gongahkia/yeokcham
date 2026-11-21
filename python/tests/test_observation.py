@@ -3,6 +3,7 @@
 import errno
 import os
 import socket
+import stat
 import subprocess
 import sys
 from dataclasses import replace
@@ -15,7 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from yeokcham import content
 from yeokcham.errors import Code
-from yeokcham.identities import SnapshotId
+from yeokcham.identities import SnapshotId, StoredObjectId
 
 
 @pytest.fixture
@@ -59,12 +60,13 @@ def test_empty_repeat_and_closed_resolver(source):
         stamp = source.stat()
         evidence = result.evidence
         assert (evidence.root.device, evidence.root.inode) == (
-            stamp.st_dev, stamp.st_ino
+            stamp.st_dev,
+            stamp.st_ino,
         )
         assert evidence.started_ns <= evidence.finished_ns
         assert evidence.elapsed_ns > 0 and evidence.attempts == 1
     with pytest.raises(ValueError, match="closed"):
-        result.resolve(first)
+        result.resolve(StoredObjectId(first.raw))
     assert read(source)[0] == first
 
 
@@ -74,6 +76,8 @@ def test_reference_mixed_native_bytes(source, corpus):
     with open(raw, "wb") as stream:
         stream.write(b"\0\xff")
     (source / "empty").mkdir()
+    (source / "nested").mkdir()
+    (source / "nested" / "note").write_bytes(b"end\n")
     (source / "run").write_bytes(b"#!/bin/sh\nexit 0\n")
     (source / "run").chmod(0o755)
     (source / "link").symlink_to("missing/target")
@@ -97,7 +101,8 @@ def test_reference_mixed_native_bytes(source, corpus):
         assert observed[(b"link",)].data == b"missing/target"
         assert observed[(b"empty",)].kind == "directory"
         assert observed[(b"bad-\xff",)].data == b"\0\xff"
-        assert len(seen) == 7
+        assert observed[(b"nested", b"note")].data == b"end\n"
+        assert len(seen) == 9
 
 
 @pytest.mark.parametrize("size", [1, 65536, 65537, 150000])
@@ -110,9 +115,12 @@ def test_nested_streams_and_distinct_paths(source, size):
     before = a.stat()
     _, evidence, tree = read(source)
     after = a.stat()
-    assert (before.st_mode, before.st_atime_ns, before.st_mtime_ns, before.st_ctime_ns) == (
-        after.st_mode, after.st_atime_ns, after.st_mtime_ns, after.st_ctime_ns
-    )
+    assert (
+        before.st_mode,
+        before.st_atime_ns,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) == (after.st_mode, after.st_atime_ns, after.st_mtime_ns, after.st_ctime_ns)
     assert tree[(b"f",)].data == tree[(b"nested", b"g")].data == data
     assert tree[(b"f",)].content == tree[(b"nested", b"g")].content
     assert tree[(b"nested",)].kind == "directory"
@@ -160,7 +168,26 @@ def test_kernel_regular_only_guards_type_race(source):
             os.close(fd)
 
 
-@pytest.mark.parametrize("suffix", [b"/./item", b"/../item", b"//item", b"/bad\0x", b"/" + b"x" * 256])
+def test_regular_only_kernel_refuses_character_device():
+    from yeokcham import _observation_linux as native
+
+    fd = os.open(b"/dev", os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        pinned = native.open_at(fd, b"null", native.PIN)
+        try:
+            assert stat.S_ISCHR(os.fstat(pinned).st_mode)
+        finally:
+            os.close(pinned)
+        with pytest.raises(OSError) as error:
+            native.open_at(fd, b"null", native.REGULAR)
+        assert error.value.errno == errno.EFTYPE
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize(
+    "suffix", [b"/./item", b"/../item", b"//item", b"/bad\0x", b"/" + b"x" * 256]
+)
 def test_invalid_root_component(source, suffix):
     refused(os.fsencode(source) + suffix, "InvalidRoot")
 
@@ -191,11 +218,14 @@ def test_git_exclusion_and_inert_retained_ignore(source):
     (source / ".env").write_bytes(b"ordinary")
     tree = read(source)[2]
     assert {path: entry.data for path, entry in tree.items()} == {
-        (b".env",): b"ordinary", (b".yeokchamignore",): rules
+        (b".env",): b"ordinary",
+        (b".yeokchamignore",): rules,
     }
 
 
-@pytest.mark.parametrize("rule", [b"!\n", b"../escape\n", b"*.log\n", b"\0", b"#" * 65537])
+@pytest.mark.parametrize(
+    "rule", [b"!\n", b"../escape\n", b"*.log\n", b"\0", b"#" * 65537]
+)
 def test_ignore_malformed_effectful_and_oversized_refuse(source, rule):
     (source / ".yeokchamignore").write_bytes(rule)
     refused(source, "IgnoreUnsupported")
@@ -206,7 +236,10 @@ def test_ignore_symlink_refuses(source):
     refused(source, "IgnoreUnsupported")
 
 
-@pytest.mark.parametrize("bound", ["depth", "entries", "path_bytes", "source_bytes", "object_bytes", "objects"])
+@pytest.mark.parametrize(
+    "bound",
+    ["depth", "entries", "path_bytes", "source_bytes", "object_bytes", "objects"],
+)
 def test_limits_refuse(source, bound):
     deep = source / "deep"
     deep.mkdir()
@@ -255,18 +288,38 @@ for path in [root, alias]:
         assert result.code == 'UnsupportedNative', result
 """
     result = subprocess.run(
-        ["unshare", "-Ur", "-m", "--propagation", "private", "--",
-         sys.executable, "-B", "-c", code, str(source), str(real), str(alias)],
-        capture_output=True, text=True, timeout=15,
+        [
+            "unshare",
+            "-Ur",
+            "-m",
+            "--propagation",
+            "private",
+            "--",
+            sys.executable,
+            "-B",
+            "-c",
+            code,
+            str(source),
+            str(real),
+            str(alias),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("damage,code", [("missing", Code.UNAVAILABLE), ("corrupt", Code.INVALID_ENCODING)])
+@pytest.mark.parametrize(
+    "damage,code", [("missing", Code.UNAVAILABLE), ("corrupt", Code.INVALID_ENCODING)]
+)
 def test_detached_verification_refuses(source, monkeypatch, damage, code):
     api = observer()
     (source / "f").write_bytes(b"payload")
-    monkeypatch.setattr(api._Detached, "get", lambda *_: None if damage == "missing" else b"broken")
+    monkeypatch.setattr(
+        api._Detached, "get", lambda *_: None if damage == "missing" else b"broken"
+    )
     refused(source, code)
 
 
@@ -279,10 +332,13 @@ def race_reader(monkeypatch, item, mutation, *, repeating=False):
         info = os.fstat(fd)
         wanted = item.stat(follow_symlinks=False)
         data = real_read(fd, size)
-        if data and (info.st_dev, info.st_ino) == (wanted.st_dev, wanted.st_ino):
-            if repeating or not hits:
-                hits += 1
-                mutation()
+        if (
+            data
+            and (info.st_dev, info.st_ino) == (wanted.st_dev, wanted.st_ino)
+            and (repeating or not hits)
+        ):
+            hits += 1
+            mutation()
         return data
 
     monkeypatch.setattr(os, "read", read_then_change)
@@ -375,7 +431,9 @@ def test_unstable_after_three_attempts(source, monkeypatch):
     item.write_bytes(b"old")
     fd = os.open(item, os.O_WRONLY)
     try:
-        hits = race_reader(monkeypatch, item, lambda: os.pwrite(fd, b"n", 0), repeating=True)
+        hits = race_reader(
+            monkeypatch, item, lambda: os.pwrite(fd, b"n", 0), repeating=True
+        )
         outcome = refused(source, "Unstable")
         assert outcome.attempts == hits() == 3
         assert outcome.path == (b"f",)
@@ -384,7 +442,9 @@ def test_unstable_after_three_attempts(source, monkeypatch):
 
 
 name = st.binary(min_size=1, max_size=10).filter(
-    lambda n: b"/" not in n and b"\x00" not in n and n not in (b".", b"..")
+    lambda n: (
+        b"/" not in n and b"\x00" not in n and n not in (b".", b"..", b".yeokcham")
+    )
 )
 
 
@@ -405,3 +465,25 @@ def test_generated_tree_byte_order_and_exact_content(tmp_path_factory, leaves):
             assert {p[-1]: e.data for p, e in entries.items() if len(p) == 2} == leaves
             snapshots.append(identity)
     assert snapshots[0] == snapshots[1]
+
+
+def test_final_read_compares_bytes_even_when_stat_matches(source, monkeypatch):
+    item = source / "f"
+    item.write_bytes(b"exact")
+    expected = item.stat().st_ino
+    real = os.read
+    hits = 0
+
+    def mismatching_second_read(fd, size):
+        nonlocal hits
+        data = real(fd, size)
+        if data and os.fstat(fd).st_ino == expected:
+            hits += 1
+            if hits % 2 == 0:
+                return b"x" + data[1:]
+        return data
+
+    monkeypatch.setattr(os, "read", mismatching_second_read)
+    outcome = refused(source, "Unstable")
+    assert outcome.attempts == 3 and hits == 6
+    assert outcome.path == (b"f",)
