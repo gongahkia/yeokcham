@@ -330,6 +330,8 @@ def test_invalid_cas_identity_ancestry_and_exhaustion(store):
 @pytest.mark.parametrize(
     "event",
     [
+        "request-before-commit",
+        "request-committed",
         "temp-created",
         "temp-written",
         "file-synced",
@@ -348,11 +350,12 @@ def test_process_interruption_separate_inspector(store, event):
     assert proc.returncode == -signal.SIGKILL, proc.stderr
     rows, requests, roots, workspaces = inspect(store.path)
     completed = event == "capture-committed"
-    assert (
-        len(rows) == int(completed)
-        and requests == {("completed" if completed else "pending"): 1}
-        and roots == 1
+    has_claim = event != "request-before-commit"
+    assert len(rows) == int(completed)
+    assert requests == (
+        {("completed" if completed else "pending"): 1} if has_claim else {}
     )
+    assert roots == int(has_claim)
     assert workspaces[0][1] == (0 if completed else None)
     with api().PrivateStore.open(store.path, REPO) as reopened:
         result = append(reopened, expected=api().WorkspaceState(WS, 0, None, 0))
@@ -401,7 +404,10 @@ def test_three_workspaces_and_duplicate_key_processes(store):
     for proc in procs:
         stdout, stderr = proc.communicate(timeout=15)
         assert proc.returncode == 0, (stdout, stderr)
-    assert len(inspect(store.path)[0]) == 3
+    captures = inspect(store.path)[0]
+    assert len(captures) == 3 and len({r[0] for r in captures}) == 3
+    assert len({r[3] for r in captures}) == 1
+    assert len(list((store.path / "objects").iterdir())) == 3
     store.register_workspace(WS)
     procs = [spawn(store.path, "duplicate", "") for _ in range(2)]
     for proc in procs:
@@ -419,23 +425,27 @@ def test_stale_concurrent_writers_one_workspace(store):
 
 def test_busy_bound_and_no_sql_transaction_during_input(store):
     store.register_workspace(WS)
-    c = sqlite3.connect(store.path / "metadata.sqlite3", autocommit=True)
-    c.execute("BEGIN IMMEDIATE")
-    start = time.monotonic()
-    with pytest.raises(api().StoreError, match="Busy"):
-        append(store)
-    assert time.monotonic() - start < 4
-    c.execute("ROLLBACK")
-    c.close()
+    external = spawn(store.path, "external-sql", "")
+    try:
+        await_ready(external)
+        start = time.monotonic()
+        with pytest.raises(api().StoreError, match="Busy"):
+            append(store)
+        assert time.monotonic() - start < 4
+        external.stdin.write("go\n")
+        external.stdin.flush()
+        stdout, stderr = external.communicate(timeout=10)
+        assert external.returncode == 0, (stdout, stderr)
+    finally:
+        if external.poll() is None:
+            external.kill()
+            external.communicate(timeout=5)
     snapshot, objects = closure()
 
     def resolver(oid):
-        c = sqlite3.connect(
-            store.path / "metadata.sqlite3", autocommit=True, timeout=0.1
-        )
-        c.execute("BEGIN IMMEDIATE")
-        c.execute("ROLLBACK")
-        c.close()
+        with store._connection() as c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute("ROLLBACK")
         return objects.get(oid)
 
     store.append_capture(
@@ -726,7 +736,10 @@ def test_independent_positive_content_and_mixed_snapshot_vectors(store, corpus):
 
     for case in MANIFEST["files"]:
         content.Verifier(reference).content(
-            ContentId.from_hex(case["root"]), max_bytes=0
+            ContentId.from_hex(case["content_object"]), max_bytes=0
+        )
+        content.Verifier(reference).snapshot(
+            SnapshotId.from_hex(case["snapshot"]), max_file_bytes=0
         )
     for case in MANIFEST["trees"]:
         content.Verifier(reference).snapshot(
@@ -748,6 +761,116 @@ def test_independent_positive_content_and_mixed_snapshot_vectors(store, corpus):
     assert actual[(b"link",)].data == b"missing/target"
 
 
+@pytest.mark.parametrize("phase", ["initialize-root", "reopen-parent"])
+def test_directory_open_failure_releases_all_descriptors(
+    store_path, monkeypatch, phase
+):
+    if phase == "reopen-parent":
+        api().PrivateStore.initialize(store_path, REPO).close()
+    original = os.open
+    before = set(Path("/proc/self/fd").iterdir())
+    target = store_path if phase == "initialize-root" else store_path.parent
+
+    def failed(path, flags, *args, **kwargs):
+        if Path(path) == target and flags & os.O_DIRECTORY:
+            raise OSError(errno.EIO, "injected directory open")
+        return original(path, flags, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", failed)
+        with pytest.raises(api().StoreError):
+            if phase == "initialize-root":
+                api().PrivateStore.initialize(store_path, REPO)
+            else:
+                api().PrivateStore.open(store_path, REPO)
+    extra = set(Path("/proc/self/fd").iterdir()) - before
+    try:
+        assert not extra
+    finally:
+        for fd in extra:
+            try:
+                if os.readlink(fd) in (
+                    str(store_path.parent),
+                    str(store_path / "FORMAT"),
+                ):
+                    os.close(int(fd.name))
+            except FileNotFoundError:
+                pass
+
+
+@pytest.mark.parametrize("other", ["read", "reopen"])
+def test_same_process_header_checks_do_not_drop_other_connection_locks(store, other):
+    import threading
+
+    store.register_workspace(WS)
+    ready = threading.Event()
+    release = threading.Event()
+    errors = []
+
+    def pause(event):
+        if event == "capture-inserted":
+            ready.set()
+            assert release.wait(8)
+
+    store.fault = pause
+
+    def writer():
+        try:
+            append(store)
+        except BaseException as error:
+            errors.append(error)
+            raise
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    try:
+        assert ready.wait(5)
+        if other == "read":
+            assert store.workspace(WS).cursor is None
+        else:
+            with pytest.raises(api().StoreError, match="Busy"):
+                api().PrivateStore.open(store.path, REPO)
+        code = """import sqlite3,sys
+c=sqlite3.connect(sys.argv[1]+'?mode=rw&vfs=unix',uri=True,autocommit=True,timeout=.05)
+try:c.execute('BEGIN IMMEDIATE')
+except sqlite3.OperationalError as error:
+ if error.sqlite_errorcode==5:sys.exit(5)
+ raise
+c.execute('ROLLBACK');sys.exit(0)
+"""
+        r = subprocess.run(
+            [sys.executable, "-c", code, (store.path / "metadata.sqlite3").as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert r.returncode == 5, (r.returncode, r.stderr)
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        store.fault = None
+    assert not errors and not thread.is_alive()
+    assert len(store.history(WS)) == 1
+
+
+def test_file_connections_explicitly_name_qualified_vfs(store_path, monkeypatch):
+    original = sqlite3.connect
+    observed = []
+
+    def tracked(database, *args, **kwargs):
+        if str(database) != ":memory:":
+            observed.append((str(database), kwargs.get("uri")))
+        return original(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", tracked)
+    with api().PrivateStore.initialize(store_path, REPO):
+        pass
+    assert observed and all(
+        "vfs=unix" in name and uri is True for name, uri in observed
+    )
+
+
 if __name__ == "__main__":
     path, mode, arg = sys.argv[1:]
     with api().PrivateStore.open(Path(path), REPO) as s:
@@ -759,6 +882,17 @@ if __name__ == "__main__":
 
             s.fault = die
             append(s)
+        elif mode == "external-sql":
+            c = sqlite3.connect(
+                (s.path / "metadata.sqlite3").as_uri() + "?mode=rw&vfs=unix",
+                uri=True,
+                autocommit=True,
+            )
+            c.execute("BEGIN IMMEDIATE")
+            print("ready", flush=True)
+            sys.stdin.readline()
+            c.execute("ROLLBACK")
+            c.close()
         elif mode == "pause-input":
             snapshot, objects = closure()
             first = True
@@ -785,7 +919,7 @@ if __name__ == "__main__":
             append(s)
         elif mode == "append-workspace":
             ws = WorkspaceId(bytes([int(arg)]) * 16)
-            snap, objects = closure(arg.encode())
+            snap, objects = closure(b"shared")
             s.append_capture(
                 ws, snap, objects.get, expected=s.workspace(ws), key=b"concurrent"
             )

@@ -3,6 +3,7 @@
 import hashlib
 import os
 import sqlite3
+import stat
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -186,17 +187,22 @@ class PrivateStore:
         with _errors():
             os.mkdir(path, 0o700)
             parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            root = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                root = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            except BaseException:
+                os.close(parent)
+                raise
             try:
                 for name in ("objects", "locks"):
                     os.mkdir(name, 0o700, dir_fd=root)
-                lock = os.open(
-                    path / "locks" / "publication",
-                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
-                    0o600,
-                )
-                os.fsync(lock)
-                os.close(lock)
+                for name in ("publication", "metadata-access"):
+                    lock = os.open(
+                        path / "locks" / name, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600
+                    )
+                    try:
+                        os.fsync(lock)
+                    finally:
+                        os.close(lock)
                 for name in ("objects", "locks"):
                     fd = os.open(
                         name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root
@@ -205,7 +211,11 @@ class PrivateStore:
                         os.fsync(fd)
                     finally:
                         os.close(fd)
-                c = sqlite3.connect(path / "metadata.sqlite3", autocommit=True)
+                c = sqlite3.connect(
+                    (path / "metadata.sqlite3").as_uri() + "?mode=rwc&vfs=unix",
+                    uri=True,
+                    autocommit=True,
+                )
                 try:
                     os.chmod(path / "metadata.sqlite3", 0o600)
                     c.execute("PRAGMA journal_mode=DELETE")
@@ -269,34 +279,42 @@ class PrivateStore:
                     "IdentityMismatch" if marker.startswith(MARKER) else "InvalidStore",
                     "format/repository marker mismatch",
                 )
-            gate = os.open(
-                "publication", os.O_RDWR | os.O_NOFOLLOW, dir_fd=self.files.locks
-            )
-            try:
-                private_stat(gate, directory=False)
-            finally:
-                os.close(gate)
-            with self.files.locked("publication"), self._connection() as c:
-                if (
-                    c.execute("PRAGMA integrity_check").fetchone() != ("ok",)
-                    or c.execute("PRAGMA foreign_key_check").fetchone() is not None
-                ):
-                    raise StoreError(
-                        "InvalidStore", "metadata integrity/root ownership check failed"
-                    )
-                marker_fd = os.open(
-                    "FORMAT", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.files.root
-                )
-                parent_fd = os.open(
-                    self.path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-                )
+            for name in ("publication", "metadata-access"):
+                gate = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=self.files.locks)
                 try:
-                    os.fsync(marker_fd)
-                    os.fsync(self.files.root)
-                    os.fsync(parent_fd)
+                    private_stat(gate, directory=False)
                 finally:
-                    os.close(marker_fd)
-                    os.close(parent_fd)
+                    os.close(gate)
+            with (
+                self.files.locked("publication"),
+                self.files.locked("metadata-access", exclusive=True),
+            ):
+                self._admit_database()
+                with self._connected() as c:
+                    if (
+                        c.execute("PRAGMA integrity_check").fetchone() != ("ok",)
+                        or c.execute("PRAGMA foreign_key_check").fetchone() is not None
+                    ):
+                        raise StoreError(
+                            "InvalidStore",
+                            "metadata integrity/root ownership check failed",
+                        )
+                    marker_fd = os.open(
+                        "FORMAT", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.files.root
+                    )
+                    parent_fd = -1
+                    try:
+                        parent_fd = os.open(
+                            self.path.parent,
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        )
+                        os.fsync(marker_fd)
+                        os.fsync(self.files.root)
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(marker_fd)
+                        if parent_fd >= 0:
+                            os.close(parent_fd)
 
     def close(self) -> None:
         self.files.close()
@@ -314,6 +332,14 @@ class PrivateStore:
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
+        with (
+            self.files.locked("metadata-access"),
+            self._connected() as c,
+        ):
+            yield c
+
+    def _admit_database(self) -> None:
+        """Raw header access requires the exclusive metadata-admission lease."""
         self.files.check_binding()
         fd = os.open(
             "metadata.sqlite3", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.files.root
@@ -338,13 +364,32 @@ class PrivateStore:
             self.database_binding = binding
         finally:
             os.close(fd)
+
+    @contextmanager
+    def _connected(self) -> Iterator[sqlite3.Connection]:
+        self.files.check_binding()
+        info = os.stat(
+            "metadata.sqlite3", dir_fd=self.files.root, follow_symlinks=False
+        )
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or self.database_binding != (info.st_dev, info.st_ino)
+        ):
+            raise StoreError("InvalidStore", "database binding changed or not admitted")
         c = sqlite3.connect(
-            (self.path / "metadata.sqlite3").as_uri() + "?mode=rw",
+            (self.path / "metadata.sqlite3").as_uri() + "?mode=rw&vfs=unix",
             uri=True,
             autocommit=True,
             timeout=self.timeout,
         )
         try:
+            if c.execute("PRAGMA application_id").fetchone() != (
+                APPLICATION_ID,
+            ) or c.execute("PRAGMA user_version").fetchone() != (SCHEMA_VERSION,):
+                raise StoreError("InvalidStore", "database application/version changed")
             if schema_rows(c) != expected_schema():
                 raise StoreError("InvalidStore", "unknown exact schema")
             rows = c.execute(

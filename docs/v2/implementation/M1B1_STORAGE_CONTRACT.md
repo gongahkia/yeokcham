@@ -28,7 +28,7 @@ is claimed. SQLite3.54.1's32-bit overflow fix does not qualify or disqualify thi
 64-bit build; other patch differences remain a rollout risk. No dependency upgrade
 is authorized or performed.
 
-Use fresh process/thread-owned connections: autocommit=True; explicit SQL BEGIN
+Use the explicit `unix` SQLite VFS on file connections. Use fresh process/thread-owned connections: autocommit=True; explicit SQL BEGIN
 IMMEDIATE/COMMIT/ROLLBACK; connection.commit() is not used as a boundary. Check
 DELETE, synchronous=EXTRA(3), foreign_keys=ON, STRICT support, exact schema,
 application/version/repository. Unknown header refuses before SQLite opens RW.
@@ -97,8 +97,9 @@ File fsync precedes create-only hardlink publication; no rename-over or overwrit
 Existing IDs must have exact matching verified bytes, then file and directory sync
 are re-established (an existing orphan is not assumed durable). Sync the objects
 directory after publication and removal of the caller's own temp. Interrupted
-stages remain untouched on reopen; no generic cleanup. Missing files are Unavailable,
-corrupt IDs/bytes IntegrityFailure. Input/IO/storage failures return no capture.
+stages remain untouched on reopen; no generic cleanup. Missing files are Unavailable; wrong IDs/checksums are IntegrityFailure. Malformed
+framing/schema keeps the exact M1a InvalidEncoding/InvalidContent/noncanonical/
+unsupported classifications rather than claiming every corrupt byte has one code. Input/IO/storage failures return no capture.
 
 The single authoritative `root` table owns one snapshot intent per request.
 A pending request and root commit *before* object production. Captures reference
@@ -120,8 +121,26 @@ as authoritative captures from orphan object files.
 ## Locks, transactions and failures
 
 Exact order: workspace process flock(EX) -> repository publication gate flock(SH)
--> short SQLite writer. Object-only publishers/readers take gateSH first; future
-collector takes gateEX then SQL, never workspace locks. Lock files are never
+-> metadata-access lease -> SQLite connection/short writer. Ordinary metadata
+connections hold metadata-access SH and do not open/read/close the database file
+outside SQLite. Store admission holds metadata-access EX for the raw header check,
+SQLite identity/schema/recovery validation and connection close. It never upgrades
+SH while a SQLite connection is open. Thus raw descriptor closes cannot overlap
+managed SQLite connections, while ordinary SQLite-aware readers can still inspect
+old committed metadata during a writer's transaction. Same-process SQLite access
+must obey this API/lease; independent inspectors use separate processes.
+
+This amendment was independently qualified after a probe confirmed that a raw
+close admitted a second writer during an active transaction. The first EX-only
+prototype then over-serialized ordinary readers (one full-suite failure); the
+SH-access/EX-admission refinement restores that original reader expectation.
+It is coordination, not another authority. No full object stream, human or network
+wait holds the metadata lease. Admission integrity scans can briefly delay new
+metadata access and remain a scalability limitation.
+
+Object-only publishers/readers take gateSH first; future
+collector takes gateEX then SQL, never workspace locks. Both publication and metadata-access lock files must exist on reopen;
+old intermediate guardless fixtures refuse rather than migrate. Lock files are never
 unlinked/renamed; flock release follows descriptor close/process termination, not
 PID or timeout-based stealing. Independent workspaces may stream concurrently;
 short global SQLite commits may return bounded Busy. No SQL transaction exists
@@ -168,7 +187,7 @@ IOERR/FULL/BUSY/fault qualification and process tests are M1b.1 acceptance work;
 missing exercises must remain unqualified in the report, not be counted as passes.
 No power-loss or production deployment qualification follows from these probes.
 
-Primary references: [Python3.14 transaction control](https://docs.python.org/3.14/library/sqlite3.html#transaction-control-via-the-autocommit-attribute),
+Primary references: [SQLite descriptor-close locking hazard](https://sqlite.org/howtocorrupt.html#posix_advisory_locks_canceled_by_a_separate_thread_doing_close), [Python3.14 transaction control](https://docs.python.org/3.14/library/sqlite3.html#transaction-control-via-the-autocommit-attribute),
 [SQLite synchronous](https://sqlite.org/pragma.html#pragma_synchronous),
 [atomic commit assumptions](https://sqlite.org/atomiccommit.html),
 [3.54.0 identity](https://sqlite.org/releaselog/3_54_0.html),
