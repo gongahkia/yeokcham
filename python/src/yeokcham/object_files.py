@@ -46,6 +46,20 @@ def io_error(error: OSError) -> StoreError:
     )
 
 
+@contextmanager
+def cleanup_preserving_error(cleanup: Callable[[], None]) -> Iterator[None]:
+    try:
+        yield
+    except BaseException as primary:
+        try:
+            cleanup()
+        except (OSError, sqlite3.Error, ContentError, StoreError) as secondary:
+            primary.add_note(f"Cleanup failed: {secondary}")
+        raise
+    else:
+        cleanup()
+
+
 def check_runtime(path: Path) -> None:
     if (
         sys.version_info[:3] != (3, 14, 8)
@@ -283,10 +297,11 @@ class ObjectFiles:
         import fcntl
 
         self.check_binding()
-        fd = os.open(
-            name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=self.locks
-        )
-        try:
+        flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+        if name.startswith("workspace-"):
+            flags |= os.O_CREAT
+        fd = os.open(name, flags, 0o600, dir_fd=self.locks)
+        with cleanup_preserving_error(lambda: os.close(fd)):
             private_stat(fd, directory=False)
             os.fsync(fd)
             os.fsync(self.locks)
@@ -303,15 +318,15 @@ class ObjectFiles:
                         raise StoreError("Busy", "process lock deadline") from None
                     time.sleep(min(0.01, max(0, deadline - time.monotonic())))
             yield
-        finally:
-            os.close(fd)
 
-    def read(self, identity: StoredObjectId) -> bytes | None:
+    def _open_canonical(self, identity: StoredObjectId) -> int | None:
         if type(identity) is not StoredObjectId:
             raise TypeError("object access requires StoredObjectId")
         try:
-            fd = os.open(
-                identity.hex(), os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.objects
+            return os.open(
+                identity.hex(),
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=self.objects,
             )
         except FileNotFoundError:
             return None
@@ -319,24 +334,29 @@ class ObjectFiles:
             if error.errno == errno.ELOOP:
                 raise ContentError(Code.INTEGRITY, "object symlink") from error
             raise io_error(error) from error
-        try:
-            info = os.fstat(fd)
-            require(
-                stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid(),
-                Code.INTEGRITY,
-                "object type/owner",
-            )
-            require(
-                info.st_size <= codec.MAX_OBJECT,
-                Code.RESOURCE_LIMIT,
-                "object file size",
-            )
-            with os.fdopen(fd, "rb", closefd=False) as source:
-                raw = source.read(codec.MAX_OBJECT + 1)
-            validate_object(identity, raw)
-            return raw
-        finally:
-            os.close(fd)
+
+    def _read_verified(self, fd: int, identity: StoredObjectId) -> bytes:
+        info = os.fstat(fd)
+        require(
+            stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid(),
+            Code.INTEGRITY,
+            "object type/owner",
+        )
+        require(
+            info.st_size <= codec.MAX_OBJECT, Code.RESOURCE_LIMIT, "object file size"
+        )
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            raw = source.read(info.st_size + 1)
+        require(len(raw) == info.st_size, Code.INTEGRITY, "object size changed")
+        validate_object(identity, raw)
+        return raw
+
+    def read(self, identity: StoredObjectId) -> bytes | None:
+        fd = self._open_canonical(identity)
+        if fd is None:
+            return None
+        with cleanup_preserving_error(lambda: os.close(fd)):
+            return self._read_verified(fd, identity)
 
     def put(
         self, identity: StoredObjectId, length: int, feeds: Iterable[bytes]
@@ -355,60 +375,77 @@ class ObjectFiles:
             0o600,
             dir_fd=self.objects,
         )
-        opened = os.fstat(fd)
+        with cleanup_preserving_error(lambda: os.close(fd)):
+            opened = os.fstat(fd)
+            with cleanup_preserving_error(lambda: self._remove_stage(name, opened)):
+                self._publish_stage(fd, name, identity, length, feeds)
+
+    def _remove_stage(self, name: str, opened: os.stat_result) -> None:
+        current = os.stat(name, dir_fd=self.objects, follow_symlinks=False)
+        require(
+            (current.st_dev, current.st_ino) == (opened.st_dev, opened.st_ino),
+            Code.INTEGRITY,
+            "stage name no longer identifies our object",
+        )
+        os.unlink(name, dir_fd=self.objects)
+        os.fsync(self.objects)
+
+    def _publish_stage(
+        self,
+        fd: int,
+        name: str,
+        identity: StoredObjectId,
+        length: int,
+        feeds: Iterable[bytes],
+    ) -> None:
+        self.event("temp-created")
+        count = 0
+        for feed in feeds:
+            if type(feed) is not bytes:
+                raise TypeError("object stream requires bytes")
+            count += len(feed)
+            require(
+                count <= length,
+                Code.INVALID_ENCODING,
+                "declared object length exceeded",
+            )
+            view = memoryview(feed)
+            while view:
+                written = os.write(fd, view)
+                if not written:
+                    raise OSError(errno.EIO, "zero object write")
+                view = view[written:]
+        require(count == length, Code.INVALID_ENCODING, "truncated object stream")
+        self.event("temp-written")
+        os.lseek(fd, 0, os.SEEK_SET)
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            raw = source.read(length + 1)
+        validate_object(identity, raw)
+        os.fchmod(fd, 0o400)
+        os.fsync(fd)
+        self.event("file-synced")
         try:
-            self.event("temp-created")
-            count = 0
-            for feed in feeds:
-                if type(feed) is not bytes:
-                    raise TypeError("object stream requires bytes")
-                count += len(feed)
+            os.link(
+                name,
+                identity.hex(),
+                src_dir_fd=self.objects,
+                dst_dir_fd=self.objects,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            existing_fd = self._open_canonical(identity)
+            require(
+                existing_fd is not None, Code.UNAVAILABLE, "existing object disappeared"
+            )
+            assert existing_fd is not None
+            with cleanup_preserving_error(lambda: os.close(existing_fd)):
                 require(
-                    count <= length,
-                    Code.INVALID_ENCODING,
-                    "declared object length exceeded",
+                    self._read_verified(existing_fd, identity) == raw,
+                    Code.INTEGRITY,
+                    "existing immutable bytes differ",
                 )
-                view = memoryview(feed)
-                while view:
-                    written = os.write(fd, view)
-                    if not written:
-                        raise OSError(errno.EIO, "zero object write")
-                    view = view[written:]
-            require(count == length, Code.INVALID_ENCODING, "truncated object stream")
-            self.event("temp-written")
-            os.lseek(fd, 0, os.SEEK_SET)
-            with os.fdopen(fd, "rb", closefd=False) as source:
-                raw = source.read(length + 1)
-            validate_object(identity, raw)
-            os.fchmod(fd, 0o400)
-            os.fsync(fd)
-            self.event("file-synced")
-            try:
-                os.link(
-                    name,
-                    identity.hex(),
-                    src_dir_fd=self.objects,
-                    dst_dir_fd=self.objects,
-                    follow_symlinks=False,
-                )
-                self.event("object-linked")
-            except FileExistsError:
-                existing = self.read(identity)
-                require(
-                    existing == raw, Code.INTEGRITY, "existing immutable bytes differ"
-                )
-                existing_fd = os.open(
-                    identity.hex(), os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.objects
-                )
-                try:
-                    os.fsync(existing_fd)
-                finally:
-                    os.close(existing_fd)
-            os.fsync(self.objects)
-            self.event("object-dir-synced")
-        finally:
-            os.close(fd)
-            current = os.stat(name, dir_fd=self.objects, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) == (opened.st_dev, opened.st_ino):
-                os.unlink(name, dir_fd=self.objects)
-                os.fsync(self.objects)
+                os.fsync(existing_fd)
+        else:
+            self.event("object-linked")
+        os.fsync(self.objects)
+        self.event("object-dir-synced")

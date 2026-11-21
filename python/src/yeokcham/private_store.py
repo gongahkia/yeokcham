@@ -9,16 +9,18 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Self
+from typing import Literal, Self
 
 from . import codec, content
 from .errors import Code, ContentError, require
 from .identities import CaptureId, RepositoryId, SnapshotId, StoredObjectId, WorkspaceId
 from .object_files import (
     ObjectFiles,
+    StorageCode,
     StoreError,
     check_runtime,
     checked_path,
+    cleanup_preserving_error,
     io_error,
     private_stat,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "Capture",
     "CaptureResult",
     "PrivateStore",
+    "RecoveryInfo",
     "RequestInfo",
     "RootReport",
     "StoreError",
@@ -91,6 +94,24 @@ class RequestInfo:
 
 
 @dataclass(frozen=True)
+class RecoveryInfo:
+    request: RequestInfo
+    digest: bytes
+    expected: WorkspaceState
+    eligible: bool | None
+    closure: Literal["verified", "missing", "invalid", "unverified"]
+    error: Code | StorageCode | None
+
+
+@dataclass(frozen=True)
+class _Request:
+    info: RequestInfo
+    digest: bytes
+    expected: WorkspaceState
+    eligible: bool | None
+
+
+@dataclass(frozen=True)
 class RootReport:
     completed: int
     pending: int
@@ -124,14 +145,44 @@ def _arguments(
     ).digest()
 
 
-def _rollback_after_error(c: sqlite3.Connection) -> None:
+def _rollback_after_error(c: sqlite3.Connection, primary: BaseException) -> None:
     if c.in_transaction:
         try:
             c.execute("ROLLBACK")
-        except sqlite3.Error:
-            # Preserve the primary outcome, especially an uncertain COMMIT.
-            # The owning connection is closed before any retry opens the DB.
-            pass
+        except (sqlite3.Error, OSError) as secondary:
+            primary.add_note(f"ROLLBACK failed: {secondary}")
+
+
+def _check_history(c: sqlite3.Connection) -> None:
+    """Check semantic links that FKs cannot express in the frozen schema."""
+    bad = c.execute(
+        """
+        SELECT 1 FROM capture AS h
+        JOIN workspace AS w ON w.id=h.workspace
+        JOIN request AS p ON p.workspace=h.workspace AND p.key=h.request_key
+        WHERE h.sequence>=w.next_seq
+           OR h.parent IS NOT CASE WHEN h.sequence>0 THEN h.sequence-1 END
+           OR p.changed IS NOT 1 OR p.result_sequence IS NOT h.sequence
+        UNION ALL
+        SELECT 1 FROM request AS r
+        JOIN workspace AS w ON w.id=r.workspace
+        LEFT JOIN capture AS h
+          ON h.workspace=r.workspace AND h.sequence=r.result_sequence
+        WHERE r.expected_version>w.version
+           OR r.parent IS NOT CASE WHEN r.expected_version>0 THEN r.expected_version-1 END
+           OR (r.state='completed' AND (
+               r.snapshot IS NOT h.snapshot OR r.result_version IS NOT h.sequence+1
+               OR (r.changed=1 AND (
+                   h.request_key IS NOT r.key OR h.parent IS NOT r.parent
+                   OR h.sequence IS NOT r.expected_version
+               ))
+               OR (r.changed=0 AND h.sequence IS NOT r.parent)
+           ))
+        LIMIT 1
+        """
+    ).fetchone()
+    if bad is not None:
+        raise StoreError("InvalidStore", "invalid capture ancestry or request result")
 
 
 @contextmanager
@@ -227,9 +278,8 @@ class PrivateStore:
                     c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
                     c.execute("INSERT INTO repository VALUES(1,?,1)", (repository.raw,))
                     c.execute("COMMIT")
-                except BaseException:
-                    if c.in_transaction:
-                        c.execute("ROLLBACK")
+                except BaseException as error:
+                    _rollback_after_error(c, error)
                     raise
                 finally:
                     c.close()
@@ -269,16 +319,30 @@ class PrivateStore:
 
     def _verify_opened(self) -> None:
         with _errors():
-            fd = os.open("FORMAT", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.files.root)
             try:
-                marker = os.read(fd, 4096)
+                fd = os.open(
+                    "FORMAT",
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=self.files.root,
+                )
+            except FileNotFoundError as error:
+                raise StoreError("InvalidStore", "missing FORMAT marker") from error
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise StoreError("InvalidStore", "FORMAT marker must be regular")
+                marker = os.read(fd, len(MARKER) + 66)
             finally:
                 os.close(fd)
-            if marker != MARKER + self.repository.hex().encode() + b"\n":
-                raise StoreError(
-                    "IdentityMismatch" if marker.startswith(MARKER) else "InvalidStore",
-                    "format/repository marker mismatch",
-                )
+            raw_identity = marker[len(MARKER) : -1]
+            if (
+                not marker.startswith(MARKER)
+                or not marker.endswith(b"\n")
+                or len(raw_identity) != 64
+                or any(byte not in b"0123456789abcdef" for byte in raw_identity)
+            ):
+                raise StoreError("InvalidStore", "invalid FORMAT marker")
+            if raw_identity != self.repository.hex().encode():
+                raise StoreError("IdentityMismatch", "FORMAT repository mismatch")
             for name in ("publication", "metadata-access"):
                 gate = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=self.files.locks)
                 try:
@@ -299,6 +363,7 @@ class PrivateStore:
                             "InvalidStore",
                             "metadata integrity/root ownership check failed",
                         )
+                    _check_history(c)
                     marker_fd = os.open(
                         "FORMAT", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.files.root
                     )
@@ -385,7 +450,7 @@ class PrivateStore:
             autocommit=True,
             timeout=self.timeout,
         )
-        try:
+        with cleanup_preserving_error(c.close):
             if c.execute("PRAGMA application_id").fetchone() != (
                 APPLICATION_ID,
             ) or c.execute("PRAGMA user_version").fetchone() != (SCHEMA_VERSION,):
@@ -408,10 +473,13 @@ class PrivateStore:
                 or c.in_transaction
             ):
                 raise StoreError("UnsupportedRuntime", "transaction modes unavailable")
-            yield c
-        finally:
-            _rollback_after_error(c)
-            c.close()
+            try:
+                yield c
+            except BaseException as error:
+                _rollback_after_error(c, error)
+                raise
+            if c.in_transaction:
+                c.execute("ROLLBACK")
 
     @contextmanager
     def _transaction(self, c: sqlite3.Connection, event: str) -> Iterator[None]:
@@ -419,17 +487,18 @@ class PrivateStore:
         try:
             yield
             self._event(event + "-before-commit")
-        except BaseException:
-            _rollback_after_error(c)
+        except BaseException as error:
+            _rollback_after_error(c, error)
             raise
         try:
             c.execute("COMMIT")
             self._event(event + "-committed")
         except (sqlite3.Error, OSError) as error:
-            _rollback_after_error(c)
-            raise StoreError(
+            uncertain = StoreError(
                 "UncertainCommit", "reopen and resolve original request identity"
-            ) from error
+            )
+            _rollback_after_error(c, uncertain)
+            raise uncertain from error
 
     def _state(self, c: sqlite3.Connection, workspace: WorkspaceId) -> WorkspaceState:
         row = c.execute(
@@ -490,14 +559,38 @@ class PrivateStore:
         workspace: WorkspaceId,
         key: bytes,
         digest: bytes | None = None,
-    ) -> RequestInfo | None:
+    ) -> _Request | None:
         row = c.execute(
-            "SELECT arguments,snapshot,expected_version,parent,state,result_sequence,result_version,changed FROM request WHERE workspace=? AND key=?",
+            """
+            SELECT r.arguments,r.snapshot,r.expected_version,r.parent,r.state,
+                   r.result_sequence,r.result_version,r.changed,
+                   o.snapshot,w.version,w.cursor
+            FROM request AS r
+            LEFT JOIN root AS o ON o.workspace=r.workspace AND o.key=r.key
+            LEFT JOIN workspace AS w ON w.id=r.workspace
+            WHERE r.workspace=? AND r.key=?
+            """,
             (workspace.raw, key),
         ).fetchone()
         if row is None:
             return None
-        args, raw, version, parent, state, sequence, result_version, changed = row
+        (
+            args,
+            raw,
+            version,
+            parent,
+            state,
+            sequence,
+            result_version,
+            changed,
+            root,
+            current,
+            cursor,
+        ) = row
+        if root != raw or current is None:
+            raise StoreError(
+                "InvalidStore", "request lacks its exact root or workspace"
+            )
         snap = SnapshotId(raw)
         if args != _arguments(workspace, version, parent, snap):
             raise StoreError("InvalidStore", "request argument digest corrupt")
@@ -505,7 +598,7 @@ class PrivateStore:
             raise StoreError(
                 "RequestMismatch", "same key has different frozen arguments"
             )
-        return RequestInfo(
+        info = RequestInfo(
             state,
             snap,
             None
@@ -514,12 +607,67 @@ class PrivateStore:
                 CaptureId(workspace, sequence), snap, result_version, bool(changed)
             ),
         )
+        expected = WorkspaceState(
+            workspace,
+            version,
+            None if parent is None else CaptureId(workspace, parent),
+            version,
+        )
+        return _Request(
+            info,
+            args,
+            expected,
+            (version == current and parent == cursor) if state == "pending" else None,
+        )
 
     def lookup_request(self, workspace: WorkspaceId, key: bytes) -> RequestInfo | None:
         _workspace_id(workspace)
         _key(key)
         with _errors(), self.files.locked("publication"), self._connection() as c:
-            return self._lookup(c, workspace, key)
+            request = self._lookup(c, workspace, key)
+            return None if request is None else request.info
+
+    def inspect_request(
+        self, workspace: WorkspaceId, key: bytes
+    ) -> RecoveryInfo | None:
+        """Read recovered SQL authority and independently verify its exact closure."""
+        _workspace_id(workspace)
+        _key(key)
+        with _errors(), self.files.locked("publication"):
+            with self._connection() as c:
+                request = self._lookup(c, workspace, key)
+            if request is None:
+                return None
+            closure: Literal["verified", "missing", "invalid", "unverified"] = (
+                "verified"
+            )
+            failure: Code | StorageCode | None = None
+            try:
+                content.Verifier(self.files.read).snapshot(
+                    request.info.snapshot, max_file_bytes=0
+                )
+            except ContentError as error:
+                failure = error.code
+                if failure == Code.UNAVAILABLE:
+                    closure = "missing"
+                elif failure == Code.RESOURCE_LIMIT:
+                    closure = "unverified"
+                else:
+                    closure = "invalid"
+            except StoreError as error:
+                if error.code not in ("StorageIO", "StorageFull"):
+                    raise
+                closure, failure = "unverified", error.code
+            except OSError as error:
+                closure, failure = "unverified", io_error(error).code
+            return RecoveryInfo(
+                request.info,
+                request.digest,
+                request.expected,
+                request.eligible,
+                closure,
+                failure,
+            )
 
     def append_capture(
         self,
@@ -547,7 +695,7 @@ class PrivateStore:
         ):
             with self._connection() as c:
                 prior = self._lookup(c, workspace, key, digest)
-                if (prior is None or prior.result is None) and self._state(
+                if (prior is None or prior.info.result is None) and self._state(
                     c, workspace
                 ) != expected:
                     raise StoreError("Stale", "workspace CAS changed")
@@ -566,15 +714,26 @@ class PrivateStore:
                                 parent,
                             ),
                         )
+                        self._event("request-inserted")
                         c.execute(
                             "INSERT INTO root VALUES(?,?,?)",
                             (workspace.raw, key, snapshot.raw),
                         )
-            if prior is not None and prior.result is not None:
-                content.Verifier(self.files.read).snapshot(
-                    prior.snapshot, max_file_bytes=0
-                )
-                return prior.result
+                        self._event("root-inserted")
+            if prior is not None:
+                # SQLite may expose the row after journal unlink even if its
+                # directory sync failed. Seal that boundary before using it.
+                try:
+                    os.fsync(self.files.root)
+                except OSError as error:
+                    raise StoreError(
+                        "UncertainCommit", "could not sync recovered request directory"
+                    ) from error
+                if prior.info.result is not None:
+                    content.Verifier(self.files.read).snapshot(
+                        prior.info.snapshot, max_file_bytes=0
+                    )
+                    return prior.info.result
             published: set[StoredObjectId] = set()
 
             def incoming(oid: StoredObjectId) -> bytes | None:
@@ -598,7 +757,11 @@ class PrivateStore:
             self.files.check_binding()
             with self._connection() as c:
                 with self._transaction(c, "capture"):
-                    self._lookup(c, workspace, key, digest)
+                    pending = self._lookup(c, workspace, key, digest)
+                    if pending is None or pending.info.state != "pending":
+                        raise StoreError(
+                            "InvalidStore", "missing pending capture intent"
+                        )
                     current = self._state(c, workspace)
                     if current != expected:
                         raise StoreError("Stale", "workspace CAS changed")
@@ -638,10 +801,15 @@ class PrivateStore:
                     else:
                         assert parent is not None
                         sequence, version = parent, expected.version
-                    c.execute(
+                    updated = c.execute(
                         "UPDATE request SET state='completed',result_sequence=?,result_version=?,changed=? WHERE workspace=? AND key=? AND state='pending'",
                         (sequence, version, int(changed), workspace.raw, key),
                     )
+                    if updated.rowcount != 1:
+                        raise StoreError(
+                            "InvalidStore", "request completion lost its owner"
+                        )
+                    self._event("request-completed")
                 return CaptureResult(
                     CaptureId(workspace, sequence), snapshot, version, changed
                 )
